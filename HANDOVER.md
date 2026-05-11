@@ -96,6 +96,63 @@ Im n8n-UI den Node `Google Sheets - Lagercharge anlegen` oeffnen,
 Columns/Fields einmal refreshen und speichern – sonst kann `Column names were updated` auftreten
 (gleicher Effekt wie bei WF3 nach Phase A2, da das Schema-Feld neu ist).
 
+#### Phase A4: WF8 GuV Tagesposten Aggregator – gebaut, ungetestet
+
+WF8 (`qwpQMhZqDAIs8Wi9`) wurde komplett per n8n MCP SDK erstellt.
+
+**Funktion:**
+Taeglich um 02:00 Uhr aggregiert WF8 alle Verkaufstransaktionen aus
+`Verarbeitete_Transaktionen` pro `(date × machine_id × product_key)` und
+schreibt eine Zeile pro Aggregat in `GuV_Tagesposten`.
+
+**Nodes (8):**
+1. `Cron - Taeglich 02:00` (scheduleTrigger)
+2. `Read - Verarbeitete_Transaktionen` – alle Verkaeufe
+3. `Read - Lagerchargen` (executeOnce) – fuer EK-Lookup ueber batch_id
+4. `Read - Produkte` (executeOnce) – fuer Produktart-Fallback
+5. `Read - GuV_Konfiguration` (executeOnce) – Kleinunternehmer-Status, MwSt-Defaults
+6. `Read - GuV_Tagesposten (vorhanden)` (executeOnce, alwaysOutputData) – Idempotenz-Check
+7. `Code - GuV aggregieren` (runOnceForAllItems) – die Berechnung
+8. `Append - GuV_Tagesposten` (autoMapInputData) – schreibt das Ergebnis
+
+**Berechnung pro Transaktion:**
+- `qty` × `vk_preis_brutto` → `umsatz_brutto`
+- `batch_id_abgebucht[0]` → Lagercharge → `unit_cost` (= EK brutto pro Stueck)
+- `qty` × `unit_cost` → `wareneinsatz_brutto`
+- `mwst_satz` aus Lagercharge, Fallback Produktart → Defaults aus Konfig
+- `ek_preis_netto = ek_brutto / (1 + mwst/100)`
+- `guv = umsatz_brutto - wareneinsatz_brutto`
+
+**Idempotenz:**
+Vor der Aggregation werden alle bestehenden GuV-Schluessel
+`(date|machine_id|product_key)` geladen. Schluessel, die bereits existieren,
+werden uebersprungen → kein Doppel-Buchen bei mehrfachem Ausfuehren.
+
+**Aktueller Status:**
+Workflow ist inaktiv und ungestetestet. Erster manueller Test steht aus.
+Workflow wurde via Schedule Trigger gebaut – nach erfolgreichem manuellem
+Lauf einfach im n8n UI auf "active" setzen.
+
+**Bekannte Vereinfachungen (fuer V1 akzeptabel):**
+- Mehrfach-Batch-Abbuchungen (`batch_id_abgebucht` mit mehreren IDs) werden
+  aktuell nur ueber den ERSTEN Batch bewertet. Genaue Anteilsverteilung
+  waere praeziser, aber selten relevant.
+- `ek_preis_netto`/`ek_preis_brutto`/`mwst_satz_einkauf` sind pro Aggregat
+  als qty-gewichtete Mittelwerte gespeichert (mehrere Chargen mit
+  unterschiedlichen Preisen ergeben Durchschnitt).
+
+#### Phase A3c: unit_cost-Normalisierung – abgeschlossen
+
+Nach Phase A3b war `initial_qty` per-Stueck (16), `unit_cost` aber weiterhin
+per-Pack aus der Rechnung – inkonsistent.
+
+**Fix in WF2 `Code - Entscheidung auswerten`:**
+- `unitCostPerPiece = unitCostRaw / packSize` (wenn packSize > 1)
+- `unit_cost` in Lagercharge ist jetzt immer per Einzelstueck
+- form_info zeigt "Einzelkosten (Pack): X EUR → pro Stueck: Y EUR"
+
+WF8 kann jetzt rechnen: `wareneinsatz = qty × Lagercharge.unit_cost`.
+
 #### Phase A3b: pack_size + mwst_satz aus Rechnung – abgeschlossen
 
 WF1 (`dKNRRxkCPmVsArJ0`) und WF2 (`wGDkVMoPN2Ed88TO`) wurden so erweitert,
@@ -201,6 +258,8 @@ Alias-Pfad wird korrekt getriggert, Lagercharge wird mit mwst_satz geschrieben.
 - `WF4` – MDB Produktzuordnung bearbeiten (Slot-Historisierung)
 - `WF5` – MHD und niedrige Lagercharge ueberwachen
 - `WF7` – GuV Sheets Setup (ID: `d6JoXqhfTOuvRKVv`, einmalig ausgefuehrt)
+- `WF8` – GuV Tagesposten Aggregator (ID: `qwpQMhZqDAIs8Wi9`, Phase A4)
+  - Cron taeglich 02:00, inaktiv. Aggregiert Verkaufstransaktionen zu GuV-Tagesposten
 
 #### Dashboard (`dashboard/`)
 
@@ -227,15 +286,12 @@ Alias-Pfad wird korrekt getriggert, Lagercharge wird mit mwst_satz geschrieben.
   **TODO vor erstem Test**: In `Rechnungseingang_Pruefung` zwei Spalten anlegen:
   `detected_pack_size`, `detected_mwst_satz`.
 
-### Naechste konkrete Schritte (nach Phase A3)
+### Naechste konkrete Schritte (nach Phase A4)
 
-#### Phase A4: WF8 GuV-Aggregator bauen
-- Taeglich per Cron (z.B. 02:00 Uhr)
-- Fuer jeden Verkaufstag / jede Maschine: FIFO-Wareneinsatz berechnen
-  - `wareneinsatz_brutto = sum(qty * ek_preis_brutto)` aus abgebuchten Chargen
-  - `kleinunternehmer_aktiv` aus `GuV_Konfiguration` lesen
-  - `guv = umsatz_brutto - wareneinsatz_brutto`
-- Ergebnisse in `GuV_Tagesposten` schreiben
+#### Phase A4 Test (anstehend)
+- WF8 manuell triggern (oeffne im n8n UI, "Execute workflow")
+- Pruefen ob bestehende Verarbeitete_Transaktionen-Eintraege korrekt aggregiert werden
+- Bei Erfolg WF8 auf "active" setzen
 
 #### Phase A5: Dashboard `/api/guv` Endpoint
 - Liest `GuV_Tagesposten`, aggregiert nach Zeitraum und Maschine

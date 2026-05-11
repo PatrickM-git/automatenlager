@@ -45,6 +45,7 @@ mein-erstes-Projekt/
 |-- WF3 Nayax Lynx FIFO Lagerbestand - manueller Abruf - mit WF4 Integration.json
 |-- WF4 - MDB Produktzuordnung bearbeiten.json
 |-- WF5 - MHD und niedrige Lagercharge ueberwachen.json
+|-- WF8 - GuV Tagesposten Aggregator.json
 |-- nayax_lager_google_sheets_import_aktualisiert_v3_kitkat_2026-05-02.xlsx
 `-- dashboard/
     |-- package.json
@@ -105,15 +106,10 @@ N8N_API_KEY=...
 
 ## Current Next Step
 
-Phase A4: WF8 GuV-Aggregator bauen
+Phase A4 Test: WF8 (`qwpQMhZqDAIs8Wi9`) manuell ausfuehren
 
-- Taeglich per Cron (z.B. 02:00 Uhr)
-- Fuer jeden Verkaufstag / jede Maschine: FIFO-Wareneinsatz berechnen
-  - `wareneinsatz_brutto = sum(qty * ek_preis_brutto)` aus abgebuchten Chargen
-  - `kleinunternehmer_aktiv` aus `GuV_Konfiguration` lesen
-  - `guv = umsatz_brutto - wareneinsatz_brutto`
-- Ergebnisse in `GuV_Tagesposten` schreiben
+- Im n8n UI WF8 oeffnen, "Execute workflow"
+- Pruefen: kommen GuV-Eintraege in GuV_Tagesposten an?
+- Bei Erfolg WF8 auf "active" setzen (Cron taeglich 02:00)
 
-Phase A3 (WF2 mwst_satz) ist abgeschlossen.
-TODO vor erstem WF2-Lauf: `Google Sheets - Lagercharge anlegen` in n8n UI oeffnen,
-Columns refreshen, speichern (sonst Column-mismatch-Fehler).
+Danach Phase A5: Dashboard `/api/guv` Endpoint.
