@@ -1,9 +1,15 @@
 {
+  "updatedAt": "2026-05-11T20:12:06.882Z",
+  "createdAt": "2026-05-07T16:43:46.447Z",
+  "id": "dKNRRxkCPmVsArJ0",
   "name": "WF1 - Rechnungseingang automatisch mit Claude",
+  "description": null,
+  "active": true,
+  "isArchived": false,
   "nodes": [
     {
       "parameters": {},
-      "id": "daae8e08-a272-452b-aaa1-23d1471e4558",
+      "id": "d0f0b59d-335b-46d1-96cb-07a867e5facb",
       "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
@@ -44,7 +50,7 @@
         },
         "options": {}
       },
-      "id": "6e4fa883-19de-4b8e-bab3-a2e3c5e0e1d0",
+      "id": "addd930a-626d-4ff4-9b6b-58ba03745864",
       "name": "Config - WF2",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -78,7 +84,7 @@
         },
         "options": {}
       },
-      "id": "f507cdd1-6342-43db-93bf-c3edf1736588",
+      "id": "1dd5e181-2a45-4992-ade5-d2b95484227d",
       "name": "IF - Rechnung gefunden",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -99,7 +105,7 @@
           "binaryPropertyName": "data"
         }
       },
-      "id": "74c38860-e073-4d3e-b75d-eafefc24bdeb",
+      "id": "e16c3e3b-f1fa-4350-83ef-9cf2d0d8c159",
       "name": "Google Drive - Rechnung herunterladen",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
@@ -116,10 +122,9 @@
     },
     {
       "parameters": {
-        "jsCode": "const item = $input.first();\n\nconst buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\n\nif (!buffer) {\n  throw new Error('Keine Binärdaten im Feld data gefunden.');\n}\n\nconst file = item.binary.data;\n\nreturn [\n  {\n    json: {\n      file_base64: buffer.toString('base64'),\n      mime_type: file.mimeType || 'application/pdf',\n      file_name: file.fileName || 'rechnung.pdf',\n      drive_file_id: item.json.id,\n      drive_file_name: item.json.name\n    }\n  }\n];",
-        "mode": "runOnceForAllItems"
+        "jsCode": "const item = $input.first();\n\nconst buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\n\nif (!buffer) {\n  throw new Error('Keine Binärdaten im Feld data gefunden.');\n}\n\nconst file = item.binary.data;\n\nreturn [\n  {\n    json: {\n      file_base64: buffer.toString('base64'),\n      mime_type: file.mimeType || 'application/pdf',\n      file_name: file.fileName || 'rechnung.pdf',\n      drive_file_id: item.json.id,\n      drive_file_name: item.json.name\n    }\n  }\n];"
       },
-      "id": "e266a351-976c-4245-a1f8-10f953fa7644",
+      "id": "64529573-b048-4ca1-b5c8-3be006efce17",
       "name": "Code - Claude Input vorbereiten",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -149,10 +154,10 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 4000,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"document\",\n          \"source\": {\n            \"type\": \"base64\",\n            \"media_type\": \"application/pdf\",\n            \"data\": \"{{ $json.file_base64 }}\"\n          }\n        },\n        {\n          \"type\": \"text\",\n          \"text\": \"Du bist ein Rechnungsparser für ein Automatenlager. Extrahiere aus der Rechnung ausschließlich valides JSON. Keine Markdown-Codeblöcke, keine Erklärung.\\n\\nSchema:\\n{\\\"invoice_id\\\":\\\"\\\",\\\"supplier\\\":\\\"\\\",\\\"purchase_date\\\":\\\"YYYY-MM-DD\\\",\\\"invoice_lines\\\":[{\\\"source_item\\\":\\\"\\\",\\\"quantity\\\":0,\\\"mhd\\\":\\\"YYYY-MM-DD oder leer\\\",\\\"unit_cost\\\":0,\\\"nayax_product_name\\\":\\\"\\\",\\\"mdb_code\\\":\\\"\\\",\\\"sale_price_eur\\\":\\\"\\\"}]}\\n\\nRegeln:\\npurchase_date ist das Rechnungsdatum oder Lieferdatum, wenn kein Rechnungsdatum erkennbar ist.\\n\\nquantity ist die Anzahl der gekauften verkaufbaren Einheiten bzw. Verkaufspackungen, nicht die Anzahl einzelner Stücke innerhalb einer Packung.\\n\\nWenn eine Positionsbezeichnung mehrere Zahlen mit \\\"x\\\" enthält, dann ist die erste Zahl vor dem ersten \\\"x\\\" die quantity.\\n\\nBeispiele:\\n\\\"30x2x21,5g KINDER BU KLASSIK\\\" bedeutet quantity = 30, weil 30 Doppelpackungen gekauft wurden.\\n\\\"24x36g M&M CRISPY EINZELBEUTEL\\\" bedeutet quantity = 24.\\n\\\"12x0,5L GETRÄNK\\\" bedeutet quantity = 12.\\n\\nunit_cost ist der Netto- oder Brutto-Einzelpreis pro verkaufbarer Einheit, wenn eindeutig erkennbar, sonst leer.\\n\\nMHD nur übernehmen, wenn es auf der Rechnung steht.\\n\\nnayax_product_name zunächst aus source_item ableiten.\\n\\nmdb_code und sale_price_eur leer lassen, wenn nicht auf der Rechnung vorhanden.\\n\\nWenn eine Position unklar ist, trotzdem aufnehmen und fehlende Werte leer lassen.\"\n        }\n      ]\n    }\n  ]\n}",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 4000,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"document\",\n          \"source\": {\n            \"type\": \"base64\",\n            \"media_type\": \"application/pdf\",\n            \"data\": \"{{ $json.file_base64 }}\"\n          }\n        },\n        {\n          \"type\": \"text\",\n          \"text\": \"Du bist ein Rechnungsparser für ein Automatenlager. Extrahiere aus der Rechnung ausschließlich valides JSON. Keine Markdown-Codeblöcke, keine Erklärung.\\n\\nSchema:\\n{\\\"invoice_id\\\":\\\"\\\",\\\"supplier\\\":\\\"\\\",\\\"purchase_date\\\":\\\"YYYY-MM-DD\\\",\\\"invoice_lines\\\":[{\\\"source_item\\\":\\\"\\\",\\\"quantity\\\":0,\\\"pack_size\\\":1,\\\"mhd\\\":\\\"YYYY-MM-DD oder leer\\\",\\\"unit_cost\\\":0,\\\"mwst_satz\\\":0,\\\"nayax_product_name\\\":\\\"\\\",\\\"mdb_code\\\":\\\"\\\",\\\"sale_price_eur\\\":\\\"\\\"}]}\\n\\nRegeln:\\npurchase_date ist das Rechnungsdatum oder Lieferdatum, wenn kein Rechnungsdatum erkennbar ist.\\n\\nquantity ist die Anzahl der gekauften verkaufbaren Einheiten bzw. Verkaufspackungen, nicht die Anzahl einzelner Stücke innerhalb einer Packung.\\n\\nWenn eine Positionsbezeichnung mehrere Zahlen mit \\\"x\\\" enthält, dann ist die erste Zahl vor dem ersten \\\"x\\\" die quantity.\\n\\nBeispiele:\\n\\\"30x2x21,5g KINDER BU KLASSIK\\\" bedeutet quantity = 30, weil 30 Doppelpackungen gekauft wurden.\\n\\\"24x36g M&M CRISPY EINZELBEUTEL\\\" bedeutet quantity = 24.\\n\\\"12x0,5L GETRÄNK\\\" bedeutet quantity = 12.\\n\\npack_size ist die Anzahl einzelner Stuecke innerhalb einer Verkaufspackung. Default 1.\\n\\nBeispiele:\\n\\\\\"30x2x21,5g KINDER BU KLASSIK\\\\\" bedeutet quantity = 30 und pack_size = 2 (jede Doppelpackung enthaelt 2 Riegel).\\n\\\\\"4x4x40g SNICKERS\\\\\" bedeutet quantity = 4 und pack_size = 4 (4 Vierer-Packs, je 4 Riegel).\\n\\\\\"24x36g M&M CRISPY EINZELBEUTEL\\\\\" bedeutet quantity = 24 und pack_size = 1.\\n\\\\\"12x0,5L GETRAENK\\\\\" bedeutet quantity = 12 und pack_size = 1.\\n\\nunit_cost ist der Netto- oder Brutto-Einzelpreis pro Verkaufspackung (nicht pro Einzelstueck), wenn eindeutig erkennbar, sonst leer.\\n\\nmwst_satz ist der Mehrwertsteuersatz fuer diese Position in Prozent, 7 oder 19. Aus der Rechnung extrahieren wenn klar ersichtlich (z.B. Steuersatz-Spalte, \\\\\"7%\\\\\", \\\\\"MwSt 7%\\\\\"). Wenn nicht eindeutig erkennbar, 0 setzen.\\n\\nMHD nur übernehmen, wenn es auf der Rechnung steht.\\n\\nnayax_product_name zunächst aus source_item ableiten.\\n\\nmdb_code und sale_price_eur leer lassen, wenn nicht auf der Rechnung vorhanden.\\n\\nWenn eine Position unklar ist, trotzdem aufnehmen und fehlende Werte leer lassen.\"\n        }\n      ]\n    }\n  ]\n}",
         "options": {}
       },
-      "id": "9de0623f-2a95-436b-862e-b344562aa1b3",
+      "id": "5f82a3e3-b35f-4850-9634-d06715cecc60",
       "name": "Claude - Rechnung auslesen",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -169,10 +174,9 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $json.content?.[0]?.text;\n\nif (!raw) {\n  throw new Error('Claude Antwort enthält keinen Text.');\n}\n\nlet parsed;\n\ntry {\n  parsed = JSON.parse(raw);\n} catch (error) {\n  throw new Error('Claude hat kein valides JSON geliefert: ' + raw.slice(0, 300));\n}\n\nreturn [\n  {\n    json: {\n      ...parsed,\n      drive_file_id: $('Code - Claude Input vorbereiten').first().json.drive_file_id,\n      drive_file_name: $('Code - Claude Input vorbereiten').first().json.drive_file_name\n    }\n  }\n];",
-        "mode": "runOnceForAllItems"
+        "jsCode": "const raw = $json.content?.[0]?.text;\n\nif (!raw) {\n  throw new Error('Claude Antwort enthält keinen Text.');\n}\n\nlet parsed;\n\ntry {\n  parsed = JSON.parse(raw);\n} catch (error) {\n  throw new Error('Claude hat kein valides JSON geliefert: ' + raw.slice(0, 300));\n}\n\nreturn [\n  {\n    json: {\n      ...parsed,\n      drive_file_id: $('Code - Claude Input vorbereiten').first().json.drive_file_id,\n      drive_file_name: $('Code - Claude Input vorbereiten').first().json.drive_file_name\n    }\n  }\n];"
       },
-      "id": "ab5bb923-d5aa-4cea-a9ab-383de55f4a9d",
+      "id": "b70b555f-76d9-4957-874d-4b5d24554fa0",
       "name": "Code - Claude JSON parsen",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -195,7 +199,7 @@
         },
         "options": {}
       },
-      "id": "15f9c6a3-34b9-4ceb-ba15-11f5100791c4",
+      "id": "30eede2c-f9e6-467a-ab5b-d59f63648ad5",
       "name": "Google Sheets - Produkte lesen",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
@@ -224,7 +228,7 @@
         },
         "options": {}
       },
-      "id": "1292518d-cfb1-4d2d-a3f1-55073edc60cb",
+      "id": "e3422c63-c3fe-4bbc-84fd-9d4ed75263c7",
       "name": "Google Sheets - Lagerchargen lesen",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
@@ -253,7 +257,7 @@
         },
         "options": {}
       },
-      "id": "9597d3ad-280b-4ff8-8888-723c7d38d7d0",
+      "id": "1a9d2461-a41f-4da3-a63c-623402cb453e",
       "name": "Google Sheets - Produkt_Aliase lesen",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
@@ -270,10 +274,9 @@
     },
     {
       "parameters": {
-        "jsCode": "const invoice = $items('Code - Claude JSON parsen')[0].json;\nconst products = $items('Google Sheets - Produkte lesen').map(i => i.json);\nconst batches = $items('Google Sheets - Lagerchargen lesen').map(i => i.json);\nconst aliases = $items('Google Sheets - Produkt_Aliase lesen').map(i => i.json);\n\nconst now = new Date().toISOString();\n\nfunction clean(v) {\n  return String(v ?? '').replace(/\\n/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction normalize(v) {\n  return clean(v)\n    .toLowerCase()\n    .replace(/&/g, 'und')\n    .replace(/\\+/g, 'plus')\n    .replace(/ä/g, 'ae')\n    .replace(/ö/g, 'oe')\n    .replace(/ü/g, 'ue')\n    .replace(/ß/g, 'ss')\n    .replace(/[^a-z0-9]/g, '');\n}\n\nfunction keyFromName(name) {\n  const base = clean(name)\n    .toUpperCase()\n    .replace(/Ä/g, 'AE')\n    .replace(/Ö/g, 'OE')\n    .replace(/Ü/g, 'UE')\n    .replace(/ẞ/g, 'SS')\n    .replace(/ß/g, 'SS')\n    .replace(/&/g, 'UND')\n    .replace(/\\+/g, 'PLUS')\n    .replace(/[^A-Z0-9]+/g, '_')\n    .replace(/^_+|_+$/g, '');\n  return `SKU_${base || 'UNBEKANNT'}`;\n}\n\nfunction batchId(productKey, purchaseDate, existingCount) {\n  const ymd = clean(purchaseDate).replace(/-/g, '') || new Date().toISOString().slice(0,10).replace(/-/g, '');\n  return `B_${String(productKey).replace(/^SKU_/, '')}_${ymd}_${existingCount + 1}`;\n}\n\nfunction nameMatches(a, b) {\n  const aa = normalize(a);\n  const bb = normalize(b);\n  if (!aa || !bb) return false;\n  if (aa === bb) return true;\n  if (aa.length >= 8 && bb.includes(aa)) return true;\n  if (bb.length >= 8 && aa.includes(bb)) return true;\n  return false;\n}\n\nfunction findProduct(line) {\n  const source = line.source_item;\n  const nayax = line.nayax_product_name;\n\n  const alias = aliases.find(a =>\n    nameMatches(a.alias_name, source) ||\n    nameMatches(a.alias_name, nayax) ||\n    nameMatches(a.source_item, source)\n  );\n\n  if (alias && clean(alias.product_key)) {\n    const product = products.find(p => clean(p.product_key) === clean(alias.product_key));\n    if (product) return { product, confidence: 'hoch', reason: 'Alias gefunden' };\n  }\n\n  const byName = products.find(p =>\n    nameMatches(p.nayax_product_name || p.internal_product_name, nayax) ||\n    nameMatches(p.internal_product_name || p.nayax_product_name, source)\n  );\n\n  if (byName) {\n    return { product: byName, confidence: 'mittel', reason: 'Namensähnlichkeit gefunden' };\n  }\n\n  return { product: null, confidence: 'prüfen', reason: 'Kein Produkt gefunden' };\n}\n\nconst suggestions = [];\nconst lines = invoice.invoice_lines || [];\n\nfor (const [index, line] of lines.entries()) {\n  const match = findProduct(line);\n  const isKnown = !!match.product;\n  const productKey = isKnown ? clean(match.product.product_key) : keyFromName(line.nayax_product_name || line.source_item);\n  const existingBatchCount = batches.filter(b => clean(b.product_key) === productKey).length;\n\n  const missing = [];\n  if (!clean(invoice.invoice_id)) missing.push('invoice_id');\n  if (!clean(invoice.supplier)) missing.push('supplier');\n  if (!clean(invoice.purchase_date)) missing.push('purchase_date');\n  if (!clean(line.source_item)) missing.push('source_item');\n  if (!Number.isFinite(Number(line.quantity)) || Number(line.quantity) <= 0) missing.push('quantity');\n  if (!clean(line.nayax_product_name)) missing.push('nayax_product_name');\n\n  const changeType = isKnown ? 'EXISTING_PRODUCT_NEW_BATCH' : 'NEW_PRODUCT_AND_BATCH';\n\n  suggestions.push({\n    created_at: now,\n    source_file_id: invoice.drive_file_id,\n    source_file_name: invoice.drive_file_name,\n    invoice_id: clean(invoice.invoice_id),\n    supplier: clean(invoice.supplier),\n    purchase_date: clean(invoice.purchase_date),\n    line_number: index + 1,\n    source_item: clean(line.source_item),\n    detected_quantity: Number(line.quantity ?? 0),\n    detected_mhd: clean(line.mhd),\n    detected_unit_cost: line.unit_cost ?? '',\n    mdb_code: clean(line.mdb_code),\n    approval_id: `APP_${invoice.drive_file_id}_${index + 1}`,\n    nayax_product_name: clean(line.nayax_product_name || line.source_item),\n    existing_product_key: isKnown ? productKey : '',\n    existing_product_name: isKnown ? (match.product.internal_product_name || match.product.nayax_product_name || '') : '',\n    suggested_product_key: productKey,\n    suggested_batch_id: batchId(productKey, invoice.purchase_date, existingBatchCount),\n    suggested_storage_location: $('Config - WF2').first().json.default_storage_location || 'Lager',\n    suggested_action: changeType,\n    confidence: missing.length ? 'unvollständig' : match.confidence,\n    needs_user_input: missing.length ? 'TRUE' : 'FALSE',\n    missing_fields: missing.join(', '),\n    approved: 'FALSE',\n    processed: 'FALSE',\n    notes: match.reason\n  });\n}\n\nif (!suggestions.length) {\n  throw new Error('Keine Rechnungspositionen erkannt. Datei wird nicht verschoben.');\n}\n\nreturn suggestions.map(s => ({ json: s }));",
-        "mode": "runOnceForAllItems"
+        "jsCode": "const invoice = $items('Code - Claude JSON parsen')[0].json;\nconst products = $items('Google Sheets - Produkte lesen').map(i => i.json);\nconst batches = $items('Google Sheets - Lagerchargen lesen').map(i => i.json);\nconst aliases = $items('Google Sheets - Produkt_Aliase lesen').map(i => i.json);\n\nconst now = new Date().toISOString();\n\nfunction clean(v) {\n  return String(v ?? '').replace(/\\n/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction normalize(v) {\n  return clean(v)\n    .toLowerCase()\n    .replace(/&/g, 'und')\n    .replace(/\\+/g, 'plus')\n    .replace(/ä/g, 'ae')\n    .replace(/ö/g, 'oe')\n    .replace(/ü/g, 'ue')\n    .replace(/ß/g, 'ss')\n    .replace(/[^a-z0-9]/g, '');\n}\n\nfunction keyFromName(name) {\n  const base = clean(name)\n    .toUpperCase()\n    .replace(/Ä/g, 'AE')\n    .replace(/Ö/g, 'OE')\n    .replace(/Ü/g, 'UE')\n    .replace(/ẞ/g, 'SS')\n    .replace(/ß/g, 'SS')\n    .replace(/&/g, 'UND')\n    .replace(/\\+/g, 'PLUS')\n    .replace(/[^A-Z0-9]+/g, '_')\n    .replace(/^_+|_+$/g, '');\n  return `SKU_${base || 'UNBEKANNT'}`;\n}\n\nfunction batchId(productKey, purchaseDate, existingCount) {\n  const ymd = clean(purchaseDate).replace(/-/g, '') || new Date().toISOString().slice(0,10).replace(/-/g, '');\n  return `B_${String(productKey).replace(/^SKU_/, '')}_${ymd}_${existingCount + 1}`;\n}\n\nfunction nameMatches(a, b) {\n  const aa = normalize(a);\n  const bb = normalize(b);\n  if (!aa || !bb) return false;\n  if (aa === bb) return true;\n  if (aa.length >= 8 && bb.includes(aa)) return true;\n  if (bb.length >= 8 && aa.includes(bb)) return true;\n  return false;\n}\n\nfunction findProduct(line) {\n  const source = line.source_item;\n  const nayax = line.nayax_product_name;\n\n  const alias = aliases.find(a =>\n    nameMatches(a.alias_name, source) ||\n    nameMatches(a.alias_name, nayax) ||\n    nameMatches(a.source_item, source)\n  );\n\n  if (alias && clean(alias.product_key)) {\n    const product = products.find(p => clean(p.product_key) === clean(alias.product_key));\n    if (product) return { product, confidence: 'hoch', reason: 'Alias gefunden' };\n  }\n\n  const byName = products.find(p =>\n    nameMatches(p.nayax_product_name || p.internal_product_name, nayax) ||\n    nameMatches(p.internal_product_name || p.nayax_product_name, source)\n  );\n\n  if (byName) {\n    return { product: byName, confidence: 'mittel', reason: 'Namensähnlichkeit gefunden' };\n  }\n\n  return { product: null, confidence: 'prüfen', reason: 'Kein Produkt gefunden' };\n}\n\nconst suggestions = [];\nconst lines = invoice.invoice_lines || [];\n\nfor (const [index, line] of lines.entries()) {\n  const match = findProduct(line);\n  const isKnown = !!match.product;\n  const productKey = isKnown ? clean(match.product.product_key) : keyFromName(line.nayax_product_name || line.source_item);\n  const existingBatchCount = batches.filter(b => clean(b.product_key) === productKey).length;\n\n  const missing = [];\n  if (!clean(invoice.invoice_id)) missing.push('invoice_id');\n  if (!clean(invoice.supplier)) missing.push('supplier');\n  if (!clean(invoice.purchase_date)) missing.push('purchase_date');\n  if (!clean(line.source_item)) missing.push('source_item');\n  if (!Number.isFinite(Number(line.quantity)) || Number(line.quantity) <= 0) missing.push('quantity');\n  if (!clean(line.nayax_product_name)) missing.push('nayax_product_name');\n\n  const changeType = isKnown ? 'EXISTING_PRODUCT_NEW_BATCH' : 'NEW_PRODUCT_AND_BATCH';\n\n  suggestions.push({\n    created_at: now,\n    source_file_id: invoice.drive_file_id,\n    source_file_name: invoice.drive_file_name,\n    invoice_id: clean(invoice.invoice_id),\n    supplier: clean(invoice.supplier),\n    purchase_date: clean(invoice.purchase_date),\n    line_number: index + 1,\n    source_item: clean(line.source_item),\n    detected_quantity: Number(line.quantity ?? 0),\n    detected_pack_size: Number(line.pack_size ?? 1) || 1,\n    detected_mwst_satz: Number(line.mwst_satz ?? 0) || 0,\n    detected_mhd: clean(line.mhd),\n    detected_unit_cost: line.unit_cost ?? '',\n    mdb_code: clean(line.mdb_code),\n    approval_id: `APP_${invoice.drive_file_id}_${index + 1}`,\n    nayax_product_name: clean(line.nayax_product_name || line.source_item),\n    existing_product_key: isKnown ? productKey : '',\n    existing_product_name: isKnown ? (match.product.internal_product_name || match.product.nayax_product_name || '') : '',\n    suggested_product_key: productKey,\n    suggested_batch_id: batchId(productKey, invoice.purchase_date, existingBatchCount),\n    suggested_storage_location: $('Config - WF2').first().json.default_storage_location || 'Lager',\n    suggested_action: changeType,\n    confidence: missing.length ? 'unvollständig' : match.confidence,\n    needs_user_input: missing.length ? 'TRUE' : 'FALSE',\n    missing_fields: missing.join(', '),\n    approved: 'FALSE',\n    processed: 'FALSE',\n    notes: match.reason\n  });\n}\n\nif (!suggestions.length) {\n  throw new Error('Keine Rechnungspositionen erkannt. Datei wird nicht verschoben.');\n}\n\nreturn suggestions.map(s => ({ json: s }));"
       },
-      "id": "3857452d-d23d-46c3-8e76-bc586e8d7b77",
+      "id": "2dde6cac-8601-4bb4-b1e4-27c8c6ffc6ae",
       "name": "Code - Rechnung gegen Stammdaten prüfen",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -686,7 +689,7 @@
         },
         "options": {}
       },
-      "id": "805c550b-31df-4d0b-b51f-e1b04618af3c",
+      "id": "81ed34df-cb2d-4614-8270-0308ece9d157",
       "name": "Google Sheets - Prüfung anhängen",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
@@ -720,7 +723,7 @@
           "mode": "id"
         }
       },
-      "id": "23f022ca-ca5e-4c31-b33e-45a39e509377",
+      "id": "b98a4e17-6530-46df-8036-6b5d92ea394a",
       "name": "Google Drive - Rechnung verschieben",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
@@ -742,7 +745,7 @@
         "width": 460,
         "color": 4
       },
-      "id": "950fbc4e-b0ae-425b-b6c7-1e9620498bc0",
+      "id": "f3fe66f4-be39-489b-a9ae-aa1892939a9a",
       "name": "Hinweis - Bedienung",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -777,7 +780,7 @@
         208,
         464
       ],
-      "id": "cc898500-788e-415a-bc2f-65f4952f7b7d",
+      "id": "0b39347d-4480-45fb-9dc0-41235e57742d",
       "name": "Google Drive - Rechnungen suchen1",
       "credentials": {
         "googleDriveOAuth2Api": {
@@ -788,8 +791,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const files = $json.files || [];\n\nif (!files.length) {\n  throw new Error('Keine PDF-Rechnung im Rechnungseingang gefunden.');\n}\n\n// Nimm die erste Datei\nreturn [\n  {\n    json: files[0]\n  }\n];",
-        "mode": "runOnceForAllItems"
+        "jsCode": "const files = $json.files || [];\n\nif (!files.length) {\n  throw new Error('Keine PDF-Rechnung im Rechnungseingang gefunden.');\n}\n\n// Nimm die erste Datei\nreturn [\n  {\n    json: files[0]\n  }\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -797,7 +799,7 @@
         416,
         464
       ],
-      "id": "000a8284-e636-4e5b-8e3e-5bc5129ce7a3",
+      "id": "b5d622b6-7d1c-4180-be1a-b0f9007eea79",
       "name": "Code - erste Rechnung auswählen"
     },
     {
@@ -808,7 +810,7 @@
         1584,
         256
       ],
-      "id": "b413aaed-1297-436a-bf8b-2ab32a0ac1f0",
+      "id": "191e2e66-cdc6-4248-a4d4-c03423654187",
       "name": "Merge"
     },
     {
@@ -819,7 +821,7 @@
         1648,
         400
       ],
-      "id": "3c045fbb-129b-4881-8a21-868f08b8f8cf",
+      "id": "2b7fa535-eeca-4807-8cf4-df02aaf76c2d",
       "name": "Merge1"
     },
     {
@@ -830,15 +832,14 @@
         1856,
         416
       ],
-      "id": "14954a4f-6695-444c-9f81-094d80646a8b",
+      "id": "0e3d6939-5d02-4af2-9a0f-521cd6a1572c",
       "name": "Merge2"
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
         "jsCode": "const rows = $input.all().map(i => i.json);\nconst approvalIds = rows.map(r => String(r.approval_id || '').trim()).filter(Boolean);\nif (!approvalIds.length) return [];\nreturn [{ json: {\n  source: 'WF1_Rechnungseingang',\n  detected_reason: 'INVOICE_PROPOSALS_CREATED',\n  approval_ids: [...new Set(approvalIds)].join(','),\n  proposals_created: approvalIds.length,\n  first_approval_id: approvalIds[0]\n} }];"
       },
-      "id": "0bea0a84-d5bd-4069-ac3e-f61231423ce5",
+      "id": "1c5d039f-05d8-446e-9005-c2dcc5a266c7",
       "name": "Code - WF2 Start vorbereiten",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -849,14 +850,11 @@
     },
     {
       "parameters": {
-        "options": {
-          "waitForSubWorkflow": false
-        },
         "workflowId": {
           "__rl": true,
+          "value": "wGDkVMoPN2Ed88TO",
           "mode": "id",
-          "value": "pFdvZVMsM0V6PweI",
-          "cachedResultName": "WF2 - Smart Product Selection - Rechnungsvorschlaege freigeben"
+          "cachedResultUrl": "/workflow/wGDkVMoPN2Ed88TO"
         },
         "workflowInputs": {
           "mappingMode": "defineBelow",
@@ -872,9 +870,12 @@
           "attemptToConvertTypes": false,
           "convertFieldsToString": true
         },
-        "mode": "each"
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
       },
-      "id": "7ac732ca-26c9-4040-a092-511b8416490e",
+      "id": "ce81f2ca-da38-4ed4-9da4-07a08e397e9c",
       "name": "Execute Workflow - WF2 Rechnungsvorschlag",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
@@ -882,9 +883,23 @@
         2816,
         240
       ]
+    },
+    {
+      "parameters": {
+        "path": "6a576918-caf4-4a87-84d0-3e1f4352b666",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -128,
+        640
+      ],
+      "id": "3d4db129-a9e8-4c29-989d-5eee9e6a8ac4",
+      "name": "Webhook",
+      "webhookId": "6a576918-caf4-4a87-84d0-3e1f4352b666"
     }
   ],
-  "pinData": {},
   "connections": {
     "Manual Trigger": {
       "main": [
@@ -1108,18 +1123,1207 @@
           }
         ]
       ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Config - WF2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "active": false,
   "settings": {
     "executionOrder": "v1",
-    "binaryMode": "separate"
+    "binaryMode": "separate",
+    "availableInMCP": true
   },
-  "versionId": "820a8e8e-9f0c-4e0e-8720-09f72f93d873",
-  "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "436e48b4989df60636199a0b3597a57e91e68cd7883152d5895761ecc592158a"
-  },
-  "id": "RjcWnMCUmrhSpQXl",
-  "tags": []
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "9353fddf-ef3f-46d8-923f-c65a58d92cdf",
+  "activeVersionId": "9353fddf-ef3f-46d8-923f-c65a58d92cdf",
+  "versionCounter": 20,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-05-07T16:43:46.450Z",
+      "createdAt": "2026-05-07T16:43:46.450Z",
+      "role": "workflow:owner",
+      "workflowId": "dKNRRxkCPmVsArJ0",
+      "projectId": "zeRVaMsDAPaDSWHo",
+      "project": {
+        "updatedAt": "2026-04-30T17:19:50.968Z",
+        "createdAt": "2026-04-30T17:15:04.288Z",
+        "id": "zeRVaMsDAPaDSWHo",
+        "name": "Patrick Matthes <patrickzinke@gmx.net>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-05-11T20:12:06.883Z",
+    "createdAt": "2026-05-11T20:12:06.883Z",
+    "versionId": "9353fddf-ef3f-46d8-923f-c65a58d92cdf",
+    "workflowId": "dKNRRxkCPmVsArJ0",
+    "nodes": [
+      {
+        "parameters": {},
+        "id": "d0f0b59d-335b-46d1-96cb-07a867e5facb",
+        "name": "Manual Trigger",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          -128,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "sheet-id",
+                "name": "google_sheet_id",
+                "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                "type": "string"
+              },
+              {
+                "id": "input-folder",
+                "name": "drive_input_folder_id",
+                "value": "15_5fYaCgnR2pUFpXs6hXJRjvu1jsnS3H",
+                "type": "string"
+              },
+              {
+                "id": "done-folder",
+                "name": "drive_done_folder_id",
+                "value": "1pzIBzjefir5MvOXTRxVBEFBm-UZwtNAo",
+                "type": "string"
+              },
+              {
+                "id": "storage",
+                "name": "default_storage_location",
+                "value": "Lager",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "addd930a-626d-4ff4-9b6b-58ba03745864",
+        "name": "Config - WF2",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          32,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "id": "has-file-id",
+                "leftValue": "={{ $json.id }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "1dd5e181-2a45-4992-ade5-d2b95484227d",
+        "name": "IF - Rechnung gefunden",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          688,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "download",
+          "fileId": {
+            "__rl": true,
+            "value": "={{ $json.id }}",
+            "mode": "id"
+          },
+          "options": {
+            "binaryPropertyName": "data"
+          }
+        },
+        "id": "e16c3e3b-f1fa-4350-83ef-9cf2d0d8c159",
+        "name": "Google Drive - Rechnung herunterladen",
+        "type": "n8n-nodes-base.googleDrive",
+        "typeVersion": 3,
+        "position": [
+          912,
+          384
+        ],
+        "credentials": {
+          "googleDriveOAuth2Api": {
+            "id": "UcOBo2UdCzAv1SBG",
+            "name": "Google Drive - Automatenlager"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.first();\n\nconst buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\n\nif (!buffer) {\n  throw new Error('Keine Binärdaten im Feld data gefunden.');\n}\n\nconst file = item.binary.data;\n\nreturn [\n  {\n    json: {\n      file_base64: buffer.toString('base64'),\n      mime_type: file.mimeType || 'application/pdf',\n      file_name: file.fileName || 'rechnung.pdf',\n      drive_file_id: item.json.id,\n      drive_file_name: item.json.name\n    }\n  }\n];"
+        },
+        "id": "64529573-b048-4ca1-b5c8-3be006efce17",
+        "name": "Code - Claude Input vorbereiten",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1120,
+          384
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              },
+              {
+                "name": "content-type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 4000,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"document\",\n          \"source\": {\n            \"type\": \"base64\",\n            \"media_type\": \"application/pdf\",\n            \"data\": \"{{ $json.file_base64 }}\"\n          }\n        },\n        {\n          \"type\": \"text\",\n          \"text\": \"Du bist ein Rechnungsparser für ein Automatenlager. Extrahiere aus der Rechnung ausschließlich valides JSON. Keine Markdown-Codeblöcke, keine Erklärung.\\n\\nSchema:\\n{\\\"invoice_id\\\":\\\"\\\",\\\"supplier\\\":\\\"\\\",\\\"purchase_date\\\":\\\"YYYY-MM-DD\\\",\\\"invoice_lines\\\":[{\\\"source_item\\\":\\\"\\\",\\\"quantity\\\":0,\\\"pack_size\\\":1,\\\"mhd\\\":\\\"YYYY-MM-DD oder leer\\\",\\\"unit_cost\\\":0,\\\"mwst_satz\\\":0,\\\"nayax_product_name\\\":\\\"\\\",\\\"mdb_code\\\":\\\"\\\",\\\"sale_price_eur\\\":\\\"\\\"}]}\\n\\nRegeln:\\npurchase_date ist das Rechnungsdatum oder Lieferdatum, wenn kein Rechnungsdatum erkennbar ist.\\n\\nquantity ist die Anzahl der gekauften verkaufbaren Einheiten bzw. Verkaufspackungen, nicht die Anzahl einzelner Stücke innerhalb einer Packung.\\n\\nWenn eine Positionsbezeichnung mehrere Zahlen mit \\\"x\\\" enthält, dann ist die erste Zahl vor dem ersten \\\"x\\\" die quantity.\\n\\nBeispiele:\\n\\\"30x2x21,5g KINDER BU KLASSIK\\\" bedeutet quantity = 30, weil 30 Doppelpackungen gekauft wurden.\\n\\\"24x36g M&M CRISPY EINZELBEUTEL\\\" bedeutet quantity = 24.\\n\\\"12x0,5L GETRÄNK\\\" bedeutet quantity = 12.\\n\\npack_size ist die Anzahl einzelner Stuecke innerhalb einer Verkaufspackung. Default 1.\\n\\nBeispiele:\\n\\\\\"30x2x21,5g KINDER BU KLASSIK\\\\\" bedeutet quantity = 30 und pack_size = 2 (jede Doppelpackung enthaelt 2 Riegel).\\n\\\\\"4x4x40g SNICKERS\\\\\" bedeutet quantity = 4 und pack_size = 4 (4 Vierer-Packs, je 4 Riegel).\\n\\\\\"24x36g M&M CRISPY EINZELBEUTEL\\\\\" bedeutet quantity = 24 und pack_size = 1.\\n\\\\\"12x0,5L GETRAENK\\\\\" bedeutet quantity = 12 und pack_size = 1.\\n\\nunit_cost ist der Netto- oder Brutto-Einzelpreis pro Verkaufspackung (nicht pro Einzelstueck), wenn eindeutig erkennbar, sonst leer.\\n\\nmwst_satz ist der Mehrwertsteuersatz fuer diese Position in Prozent, 7 oder 19. Aus der Rechnung extrahieren wenn klar ersichtlich (z.B. Steuersatz-Spalte, \\\\\"7%\\\\\", \\\\\"MwSt 7%\\\\\"). Wenn nicht eindeutig erkennbar, 0 setzen.\\n\\nMHD nur übernehmen, wenn es auf der Rechnung steht.\\n\\nnayax_product_name zunächst aus source_item ableiten.\\n\\nmdb_code und sale_price_eur leer lassen, wenn nicht auf der Rechnung vorhanden.\\n\\nWenn eine Position unklar ist, trotzdem aufnehmen und fehlende Werte leer lassen.\"\n        }\n      ]\n    }\n  ]\n}",
+          "options": {}
+        },
+        "id": "5f82a3e3-b35f-4850-9634-d06715cecc60",
+        "name": "Claude - Rechnung auslesen",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1296,
+          384
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "MYA5fchuUNDDWJ4Z",
+            "name": "Claude API Key"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const raw = $json.content?.[0]?.text;\n\nif (!raw) {\n  throw new Error('Claude Antwort enthält keinen Text.');\n}\n\nlet parsed;\n\ntry {\n  parsed = JSON.parse(raw);\n} catch (error) {\n  throw new Error('Claude hat kein valides JSON geliefert: ' + raw.slice(0, 300));\n}\n\nreturn [\n  {\n    json: {\n      ...parsed,\n      drive_file_id: $('Code - Claude Input vorbereiten').first().json.drive_file_id,\n      drive_file_name: $('Code - Claude Input vorbereiten').first().json.drive_file_name\n    }\n  }\n];"
+        },
+        "id": "b70b555f-76d9-4957-874d-4b5d24554fa0",
+        "name": "Code - Claude JSON parsen",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1456,
+          384
+        ]
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "={{ $('Config - WF2').first().json.google_sheet_id }}",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Produkte",
+            "mode": "name"
+          },
+          "options": {}
+        },
+        "id": "30eede2c-f9e6-467a-ab5b-d59f63648ad5",
+        "name": "Google Sheets - Produkte lesen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.5,
+        "position": [
+          928,
+          224
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "5XfHt3SzjHCj8B5H",
+            "name": "Sheets Automatenlager"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "={{ $('Config - WF2').first().json.google_sheet_id }}",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Lagerchargen",
+            "mode": "name"
+          },
+          "options": {}
+        },
+        "id": "e3422c63-c3fe-4bbc-84fd-9d4ed75263c7",
+        "name": "Google Sheets - Lagerchargen lesen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.5,
+        "position": [
+          912,
+          560
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "5XfHt3SzjHCj8B5H",
+            "name": "Sheets Automatenlager"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "={{ $('Config - WF2').first().json.google_sheet_id }}",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Produkt_Aliase",
+            "mode": "name"
+          },
+          "options": {}
+        },
+        "id": "1a9d2461-a41f-4da3-a63c-623402cb453e",
+        "name": "Google Sheets - Produkt_Aliase lesen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.5,
+        "position": [
+          912,
+          736
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "5XfHt3SzjHCj8B5H",
+            "name": "Sheets Automatenlager"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const invoice = $items('Code - Claude JSON parsen')[0].json;\nconst products = $items('Google Sheets - Produkte lesen').map(i => i.json);\nconst batches = $items('Google Sheets - Lagerchargen lesen').map(i => i.json);\nconst aliases = $items('Google Sheets - Produkt_Aliase lesen').map(i => i.json);\n\nconst now = new Date().toISOString();\n\nfunction clean(v) {\n  return String(v ?? '').replace(/\\n/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction normalize(v) {\n  return clean(v)\n    .toLowerCase()\n    .replace(/&/g, 'und')\n    .replace(/\\+/g, 'plus')\n    .replace(/ä/g, 'ae')\n    .replace(/ö/g, 'oe')\n    .replace(/ü/g, 'ue')\n    .replace(/ß/g, 'ss')\n    .replace(/[^a-z0-9]/g, '');\n}\n\nfunction keyFromName(name) {\n  const base = clean(name)\n    .toUpperCase()\n    .replace(/Ä/g, 'AE')\n    .replace(/Ö/g, 'OE')\n    .replace(/Ü/g, 'UE')\n    .replace(/ẞ/g, 'SS')\n    .replace(/ß/g, 'SS')\n    .replace(/&/g, 'UND')\n    .replace(/\\+/g, 'PLUS')\n    .replace(/[^A-Z0-9]+/g, '_')\n    .replace(/^_+|_+$/g, '');\n  return `SKU_${base || 'UNBEKANNT'}`;\n}\n\nfunction batchId(productKey, purchaseDate, existingCount) {\n  const ymd = clean(purchaseDate).replace(/-/g, '') || new Date().toISOString().slice(0,10).replace(/-/g, '');\n  return `B_${String(productKey).replace(/^SKU_/, '')}_${ymd}_${existingCount + 1}`;\n}\n\nfunction nameMatches(a, b) {\n  const aa = normalize(a);\n  const bb = normalize(b);\n  if (!aa || !bb) return false;\n  if (aa === bb) return true;\n  if (aa.length >= 8 && bb.includes(aa)) return true;\n  if (bb.length >= 8 && aa.includes(bb)) return true;\n  return false;\n}\n\nfunction findProduct(line) {\n  const source = line.source_item;\n  const nayax = line.nayax_product_name;\n\n  const alias = aliases.find(a =>\n    nameMatches(a.alias_name, source) ||\n    nameMatches(a.alias_name, nayax) ||\n    nameMatches(a.source_item, source)\n  );\n\n  if (alias && clean(alias.product_key)) {\n    const product = products.find(p => clean(p.product_key) === clean(alias.product_key));\n    if (product) return { product, confidence: 'hoch', reason: 'Alias gefunden' };\n  }\n\n  const byName = products.find(p =>\n    nameMatches(p.nayax_product_name || p.internal_product_name, nayax) ||\n    nameMatches(p.internal_product_name || p.nayax_product_name, source)\n  );\n\n  if (byName) {\n    return { product: byName, confidence: 'mittel', reason: 'Namensähnlichkeit gefunden' };\n  }\n\n  return { product: null, confidence: 'prüfen', reason: 'Kein Produkt gefunden' };\n}\n\nconst suggestions = [];\nconst lines = invoice.invoice_lines || [];\n\nfor (const [index, line] of lines.entries()) {\n  const match = findProduct(line);\n  const isKnown = !!match.product;\n  const productKey = isKnown ? clean(match.product.product_key) : keyFromName(line.nayax_product_name || line.source_item);\n  const existingBatchCount = batches.filter(b => clean(b.product_key) === productKey).length;\n\n  const missing = [];\n  if (!clean(invoice.invoice_id)) missing.push('invoice_id');\n  if (!clean(invoice.supplier)) missing.push('supplier');\n  if (!clean(invoice.purchase_date)) missing.push('purchase_date');\n  if (!clean(line.source_item)) missing.push('source_item');\n  if (!Number.isFinite(Number(line.quantity)) || Number(line.quantity) <= 0) missing.push('quantity');\n  if (!clean(line.nayax_product_name)) missing.push('nayax_product_name');\n\n  const changeType = isKnown ? 'EXISTING_PRODUCT_NEW_BATCH' : 'NEW_PRODUCT_AND_BATCH';\n\n  suggestions.push({\n    created_at: now,\n    source_file_id: invoice.drive_file_id,\n    source_file_name: invoice.drive_file_name,\n    invoice_id: clean(invoice.invoice_id),\n    supplier: clean(invoice.supplier),\n    purchase_date: clean(invoice.purchase_date),\n    line_number: index + 1,\n    source_item: clean(line.source_item),\n    detected_quantity: Number(line.quantity ?? 0),\n    detected_pack_size: Number(line.pack_size ?? 1) || 1,\n    detected_mwst_satz: Number(line.mwst_satz ?? 0) || 0,\n    detected_mhd: clean(line.mhd),\n    detected_unit_cost: line.unit_cost ?? '',\n    mdb_code: clean(line.mdb_code),\n    approval_id: `APP_${invoice.drive_file_id}_${index + 1}`,\n    nayax_product_name: clean(line.nayax_product_name || line.source_item),\n    existing_product_key: isKnown ? productKey : '',\n    existing_product_name: isKnown ? (match.product.internal_product_name || match.product.nayax_product_name || '') : '',\n    suggested_product_key: productKey,\n    suggested_batch_id: batchId(productKey, invoice.purchase_date, existingBatchCount),\n    suggested_storage_location: $('Config - WF2').first().json.default_storage_location || 'Lager',\n    suggested_action: changeType,\n    confidence: missing.length ? 'unvollständig' : match.confidence,\n    needs_user_input: missing.length ? 'TRUE' : 'FALSE',\n    missing_fields: missing.join(', '),\n    approved: 'FALSE',\n    processed: 'FALSE',\n    notes: match.reason\n  });\n}\n\nif (!suggestions.length) {\n  throw new Error('Keine Rechnungspositionen erkannt. Datei wird nicht verschoben.');\n}\n\nreturn suggestions.map(s => ({ json: s }));"
+        },
+        "id": "2dde6cac-8601-4bb4-b1e4-27c8c6ffc6ae",
+        "name": "Code - Rechnung gegen Stammdaten prüfen",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2080,
+          432
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "append",
+          "documentId": {
+            "__rl": true,
+            "value": "=12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Rechnungseingang_Pruefung",
+            "mode": "name"
+          },
+          "columns": {
+            "mappingMode": "autoMapInputData",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "created_at",
+                "displayName": "created_at",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "source_file",
+                "displayName": "source_file",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "invoice_number",
+                "displayName": "invoice_number",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "invoice_date",
+                "displayName": "invoice_date",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "supplier",
+                "displayName": "supplier",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "raw_item_name",
+                "displayName": "raw_item_name",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "recognized_product_name",
+                "displayName": "recognized_product_name",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "suggested_product_key",
+                "displayName": "suggested_product_key",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "matched_product_key",
+                "displayName": "matched_product_key",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "quantity",
+                "displayName": "quantity",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "unit_cost",
+                "displayName": "unit_cost",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "mhd_invoice",
+                "displayName": "mhd_invoice",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "mhd_final",
+                "displayName": "mhd_final",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "confidence",
+                "displayName": "confidence",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "status",
+                "displayName": "status",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "invoice_key",
+                "displayName": "invoice_key",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "approved",
+                "displayName": "approved",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "processed_at",
+                "displayName": "processed_at",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "processed",
+                "displayName": "processed",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "notes",
+                "displayName": "notes",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "source_file_id",
+                "displayName": "source_file_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "source_file_name",
+                "displayName": "source_file_name",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "invoice_id",
+                "displayName": "invoice_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "purchase_date",
+                "displayName": "purchase_date",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "line_number",
+                "displayName": "line_number",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "source_item",
+                "displayName": "source_item",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "detected_quantity",
+                "displayName": "detected_quantity",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "detected_mhd",
+                "displayName": "detected_mhd",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "detected_unit_cost",
+                "displayName": "detected_unit_cost",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "mdb_code",
+                "displayName": "mdb_code",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "nayax_product_name",
+                "displayName": "nayax_product_name",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "existing_product_key",
+                "displayName": "existing_product_key",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "existing_product_name",
+                "displayName": "existing_product_name",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "suggested_batch_id",
+                "displayName": "suggested_batch_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "suggested_storage_location",
+                "displayName": "suggested_storage_location",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "suggested_action",
+                "displayName": "suggested_action",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "needs_user_input",
+                "displayName": "needs_user_input",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "missing_fields",
+                "displayName": "missing_fields",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "options": {}
+        },
+        "id": "81ed34df-cb2d-4614-8270-0308ece9d157",
+        "name": "Google Sheets - Prüfung anhängen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.5,
+        "position": [
+          2320,
+          432
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "5XfHt3SzjHCj8B5H",
+            "name": "Sheets Automatenlager"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "move",
+          "fileId": {
+            "__rl": true,
+            "value": "={{ $('Code - Claude JSON parsen').first().json.drive_file_id }}",
+            "mode": "id"
+          },
+          "driveId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "My Drive"
+          },
+          "folderId": {
+            "__rl": true,
+            "value": "={{ $('Config - WF2').first().json.drive_done_folder_id }}",
+            "mode": "id"
+          }
+        },
+        "id": "b98a4e17-6530-46df-8036-6b5d92ea394a",
+        "name": "Google Drive - Rechnung verschieben",
+        "type": "n8n-nodes-base.googleDrive",
+        "typeVersion": 3,
+        "position": [
+          2576,
+          432
+        ],
+        "credentials": {
+          "googleDriveOAuth2Api": {
+            "id": "UcOBo2UdCzAv1SBG",
+            "name": "Google Drive - Automatenlager"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "WF2 - Rechnungseingang automatisch mit Claude\\n\\nAblauf:\\n1. PDFs aus Rechnungseingang suchen\\n2. PDF herunterladen\\n3. Claude extrahiert Rechnungsdaten\\n4. Stammdaten in Google Sheets lesen\\n5. Vorschläge in Rechnungseingang_Pruefung schreiben\\n6. Rechnung nach Rechnung bearbeitet verschieben\\n\\nWichtig:\\nVor Produktivbetrieb nur mit Testrechnung ausführen. Credentials nach Import neu auswählen. API-Key nie direkt in Nodes eintragen.",
+          "height": 360,
+          "width": 460,
+          "color": 4
+        },
+        "id": "f3fe66f4-be39-489b-a9ae-aa1892939a9a",
+        "name": "Hinweis - Bedienung",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "url": "https://www.googleapis.com/drive/v3/files",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "googleDriveOAuth2Api",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "q",
+                "value": "=mimeType='application/pdf' and '{{ $('Config - WF2').first().json.drive_input_folder_id }}' in parents and trashed=false"
+              },
+              {
+                "name": "fields",
+                "value": "files(id,name,mimeType)"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          208,
+          464
+        ],
+        "id": "0b39347d-4480-45fb-9dc0-41235e57742d",
+        "name": "Google Drive - Rechnungen suchen1",
+        "credentials": {
+          "googleDriveOAuth2Api": {
+            "id": "UcOBo2UdCzAv1SBG",
+            "name": "Google Drive - Automatenlager"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const files = $json.files || [];\n\nif (!files.length) {\n  throw new Error('Keine PDF-Rechnung im Rechnungseingang gefunden.');\n}\n\n// Nimm die erste Datei\nreturn [\n  {\n    json: files[0]\n  }\n];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          416,
+          464
+        ],
+        "id": "b5d622b6-7d1c-4180-be1a-b0f9007eea79",
+        "name": "Code - erste Rechnung auswählen"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          1584,
+          256
+        ],
+        "id": "191e2e66-cdc6-4248-a4d4-c03423654187",
+        "name": "Merge"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          1648,
+          400
+        ],
+        "id": "2b7fa535-eeca-4807-8cf4-df02aaf76c2d",
+        "name": "Merge1"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          1856,
+          416
+        ],
+        "id": "0e3d6939-5d02-4af2-9a0f-521cd6a1572c",
+        "name": "Merge2"
+      },
+      {
+        "parameters": {
+          "jsCode": "const rows = $input.all().map(i => i.json);\nconst approvalIds = rows.map(r => String(r.approval_id || '').trim()).filter(Boolean);\nif (!approvalIds.length) return [];\nreturn [{ json: {\n  source: 'WF1_Rechnungseingang',\n  detected_reason: 'INVOICE_PROPOSALS_CREATED',\n  approval_ids: [...new Set(approvalIds)].join(','),\n  proposals_created: approvalIds.length,\n  first_approval_id: approvalIds[0]\n} }];"
+        },
+        "id": "1c5d039f-05d8-446e-9005-c2dcc5a266c7",
+        "name": "Code - WF2 Start vorbereiten",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2576,
+          240
+        ]
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "wGDkVMoPN2Ed88TO",
+            "mode": "id",
+            "cachedResultUrl": "/workflow/wGDkVMoPN2Ed88TO"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "source": "={{ $json.source }}",
+              "detected_reason": "={{ $json.detected_reason }}",
+              "approval_ids": "={{ $json.approval_ids }}",
+              "proposals_created": "={{ $json.proposals_created }}",
+              "first_approval_id": "={{ $json.first_approval_id }}"
+            },
+            "schema": [],
+            "matchingColumns": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "mode": "each",
+          "options": {
+            "waitForSubWorkflow": false
+          }
+        },
+        "id": "ce81f2ca-da38-4ed4-9da4-07a08e397e9c",
+        "name": "Execute Workflow - WF2 Rechnungsvorschlag",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          2816,
+          240
+        ]
+      },
+      {
+        "parameters": {
+          "path": "6a576918-caf4-4a87-84d0-3e1f4352b666",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -128,
+          640
+        ],
+        "id": "3d4db129-a9e8-4c29-989d-5eee9e6a8ac4",
+        "name": "Webhook",
+        "webhookId": "6a576918-caf4-4a87-84d0-3e1f4352b666"
+      }
+    ],
+    "connections": {
+      "Manual Trigger": {
+        "main": [
+          [
+            {
+              "node": "Config - WF2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Config - WF2": {
+        "main": [
+          [
+            {
+              "node": "Google Drive - Rechnungen suchen1",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "IF - Rechnung gefunden",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF - Rechnung gefunden": {
+        "main": [
+          [
+            {
+              "node": "Google Drive - Rechnung herunterladen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Drive - Rechnung herunterladen": {
+        "main": [
+          [
+            {
+              "node": "Code - Claude Input vorbereiten",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - Claude Input vorbereiten": {
+        "main": [
+          [
+            {
+              "node": "Claude - Rechnung auslesen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Claude - Rechnung auslesen": {
+        "main": [
+          [
+            {
+              "node": "Code - Claude JSON parsen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - Claude JSON parsen": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Google Sheets - Produkte lesen": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Sheets - Lagerchargen lesen": {
+        "main": [
+          [
+            {
+              "node": "Merge1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Sheets - Produkt_Aliase lesen": {
+        "main": [
+          [
+            {
+              "node": "Merge2",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Code - Rechnung gegen Stammdaten prüfen": {
+        "main": [
+          [
+            {
+              "node": "Google Sheets - Prüfung anhängen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Sheets - Prüfung anhängen": {
+        "main": [
+          [
+            {
+              "node": "Google Drive - Rechnung verschieben",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Code - WF2 Start vorbereiten",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Drive - Rechnungen suchen1": {
+        "main": [
+          [
+            {
+              "node": "Code - erste Rechnung auswählen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - erste Rechnung auswählen": {
+        "main": [
+          [
+            {
+              "node": "IF - Rechnung gefunden",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Google Sheets - Produkte lesen",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Google Sheets - Lagerchargen lesen",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Google Sheets - Produkt_Aliase lesen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge": {
+        "main": [
+          [
+            {
+              "node": "Merge1",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Merge1": {
+        "main": [
+          [
+            {
+              "node": "Merge2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge2": {
+        "main": [
+          [
+            {
+              "node": "Code - Rechnung gegen Stammdaten prüfen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - WF2 Start vorbereiten": {
+        "main": [
+          [
+            {
+              "node": "Execute Workflow - WF2 Rechnungsvorschlag",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Config - WF2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Patrick Matthes",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-05-11T20:12:06.975Z",
+        "id": 29,
+        "workflowId": "dKNRRxkCPmVsArJ0",
+        "versionId": "9353fddf-ef3f-46d8-923f-c65a58d92cdf",
+        "event": "activated",
+        "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+      },
+      {
+        "createdAt": "2026-05-11T20:12:06.948Z",
+        "id": 28,
+        "workflowId": "dKNRRxkCPmVsArJ0",
+        "versionId": "9353fddf-ef3f-46d8-923f-c65a58d92cdf",
+        "event": "deactivated",
+        "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+      }
+    ]
+  }
 }
