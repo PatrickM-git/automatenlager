@@ -96,6 +96,61 @@ Im n8n-UI den Node `Google Sheets - Lagercharge anlegen` oeffnen,
 Columns/Fields einmal refreshen und speichern – sonst kann `Column names were updated` auftreten
 (gleicher Effekt wie bei WF3 nach Phase A2, da das Schema-Feld neu ist).
 
+#### Phase A3b: pack_size + mwst_satz aus Rechnung – abgeschlossen
+
+WF1 (`dKNRRxkCPmVsArJ0`) und WF2 (`wGDkVMoPN2Ed88TO`) wurden so erweitert,
+dass MwSt-Satz und Stueckzahl pro Packung direkt aus der Rechnung gelesen werden.
+
+**Aenderungen WF1:**
+- Claude-Prompt extrahiert jetzt zusaetzlich:
+  - `pack_size`: Stueck pro Verkaufspackung (Default 1). Beispiele:
+    `30x2x21,5g` → quantity=30, pack_size=2; `4x4x40g` → quantity=4, pack_size=4.
+  - `mwst_satz`: aus Steuersatz-Spalte der Rechnung, 7 oder 19. 0 wenn unklar.
+- Merge-Node (`Code - Rechnung gegen Stammdaten pruefen`) schreibt jetzt
+  `detected_pack_size` und `detected_mwst_satz` in `Rechnungseingang_Pruefung`.
+
+**Aenderungen WF2:**
+- `Code - Produktvorschlaege vorbereiten`:
+  - Berechnet `totalQty = quantityPacks * packSize`
+  - `default_quantity` ist jetzt Einzeleinheiten (nicht mehr Packungen)
+  - `default_mwst_satz` Reihenfolge: Rechnung > Produktart > 19
+  - `form_info` zeigt Aufschluesselung "4 Packungen x 4 Stueck = 16 Einzeleinheiten"
+    und "MwSt laut Rechnung: 7%"
+- `Code - Entscheidung auswerten`:
+  - `mwstFallback` priorisiert `invoiceMwst > 0 ? invoiceMwst : produktart-fallback`
+
+**Manuelle Aktion noetig (User):**
+- In `Rechnungseingang_Pruefung` zwei Spalten am Ende anlegen:
+  - `detected_pack_size`
+  - `detected_mwst_satz`
+- Sonst verwirft autoMapInputData die neuen Felder.
+
+#### WF2 Bugfixes 2026-05-11 (Phase A3 Nachfolge) – abgeschlossen
+
+Beim ersten WF2-Testlauf nach Phase A3 traten 3 Probleme auf:
+
+1. **`Alias existiert noch nicht?` wurde nie ausgefuehrt:**
+   - `Produktalias` (Google Sheets) gab 0 Items zurueck → n8n fuehrt
+     IF-Nodes mit 0 Items nicht aus.
+   - Fix: `alwaysOutputData: true` auf `Produktalias` Node + IF-Bedingung
+     von `$input.all().length === 0` auf `!$input.first()?.json.product_key` umgestellt.
+
+2. **`Google Sheets - Lagercharge anlegen` mit leerem sheetName:**
+   - Live WF2 hatte irgendwann `sheetName.value = ""` → PUT mit
+     Phase-A3-Aenderungen ging trotzdem durch, n8n hat aber spaeter
+     bei der Validierung blockiert.
+   - Fix: `sheetName.value = "=Lagerchargen"` wiederhergestellt.
+
+3. **`columns`-Objekt im Lagercharge-Node komplett geloescht:**
+   - n8n hat das gesamte columns-Mapping (inkl. mwst_satz Eintrag aus
+     Phase A3) silently gestrippt, vermutlich ausgeloest durch (2).
+   - Folge: WF2-Lauf bricht mit `Could not get parameter: columns.schema`.
+   - Fix: columns aus git commit 233b4dd (Phase A3) restauriert; nach
+     erneutem PUT bleibt das Objekt persistent (14 Felder inkl. mwst_satz).
+
+**Erfolgreicher End-to-End-Test danach:** WF2 laeuft komplett durch,
+Alias-Pfad wird korrekt getriggert, Lagercharge wird mit mwst_satz geschrieben.
+
 #### Codex-Nachtrag 2026-05-11 Abend – WF3 Credential + Sheets-Schema – abgeschlossen
 
 **Nayax-Token aus WF3 entfernt / n8n-Credential eingerichtet:**
@@ -132,9 +187,14 @@ Columns/Fields einmal refreshen und speichern – sonst kann `Column names were 
 
 - `WF0` – product_slot_id Backfill (einmalig, abgeschlossen)
 - `WF1` – Rechnungseingang automatisch mit Claude
-- `WF2` – Smart Product Selection / Rechnungsvorschlaege **(Phase A3 erweitert)**
-  - Jetzt: `mwst_satz` wird in neue Lagerchargen geschrieben (7 % Snack / 19 % Getraenk)
-  - Form `Produktentscheidung` hat neues `mwst_satz`-Feld mit Auto-Default aus Produktart
+- `WF1` – Rechnungseingang automatisch mit Claude **(Phase A3b erweitert)**
+  - Claude extrahiert zusaetzlich `pack_size` und `mwst_satz` pro Rechnungsposition
+  - Pruefung-Sheet erhaelt `detected_pack_size` + `detected_mwst_satz`
+- `WF2` – Smart Product Selection / Rechnungsvorschlaege **(Phase A3 + A3b erweitert)**
+  - Phase A3: `mwst_satz` wird in neue Lagerchargen geschrieben
+  - Phase A3b: `initial_qty = quantity × pack_size` (Einzeleinheiten statt Packungen);
+    MwSt-Default priorisiert Rechnung > Produktart > 19
+  - Form `Produktentscheidung` zeigt Aufschluesselung "X Packungen × Y Stueck = Z Einzeleinheiten"
 - `WF3` – Nayax Lynx FIFO Lagerbestand **(Phase A2 erweitert)**
   - Jetzt: `vk_preis_brutto`, `umsatz_brutto`, `mdb_code_extracted`, `batch_id_abgebucht`
   - Nayax-Credential: erledigt, live WF3 nutzt n8n HTTP-Header-Auth-Credential `Nayax Bearer`
@@ -159,10 +219,13 @@ Columns/Fields einmal refreshen und speichern – sonst kann `Column names were 
   WF3 nutzt diese Credential statt eines statischen Klartext-Headers.
 - `Google Sheets - Transaktionen anhaengen` hat aktualisierte Spalten-Mappings und appends
   wieder erfolgreich in `Verarbeitete_Transaktionen`.
-- Phase A3: WF2 live in n8n aktualisiert. `mwst_satz`-Feld im Formular + Abbuchung in
-  `Lagerchargen`. Noch nicht live getestet (erster echter WF2-Lauf aussteht).
-  **TODO vor erstem Lauf**: `Google Sheets - Lagercharge anlegen` in n8n UI oeffnen,
-  Columns refreshen, speichern.
+- Phase A3: WF2 live getestet, laeuft komplett. `mwst_satz` wird in Lagerchargen
+  geschrieben. Drei initiale Bugs (Alias-IF, sheetName, columns-Strip) wurden
+  identifiziert und gefixt.
+- Phase A3b: WF1 + WF2 Code-Patches angewendet (pack_size + mwst_satz aus Rechnung).
+  Noch nicht live getestet – User braucht eine neue Rechnung dafuer.
+  **TODO vor erstem Test**: In `Rechnungseingang_Pruefung` zwei Spalten anlegen:
+  `detected_pack_size`, `detected_mwst_satz`.
 
 ### Naechste konkrete Schritte (nach Phase A3)
 
