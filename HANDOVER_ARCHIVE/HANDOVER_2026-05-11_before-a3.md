@@ -2,13 +2,13 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-05-11 (Session 4 – GuV-System Phase A3)
+## Stand: 2026-05-11 (Session 3 – GuV-System)
 
 ### Kurzfassung
 
 Das Projekt ist ein n8n-basiertes Automatenlager-System mit Google Sheets als Arbeits- und Logschicht.
 Es verarbeitet Rechnungen, Produktvorschlaege, Nayax-Verkaeufe, FIFO-Lagerchargen, MDB-/Slot-Historisierung
-und MHD-/Bestandswarnungen. In Session 3+4 wurde das GuV-System aufgebaut (Phasen A1–A3 abgeschlossen).
+und MHD-/Bestandswarnungen. In dieser Session wurde das GuV-System (Gewinn und Verlust) begonnen.
 
 ### Was in dieser Session passiert ist
 
@@ -61,41 +61,6 @@ Lokale JSON-Datei aktualisiert + Nayax-Token-Platzhalter gesetzt.
 **Erledigt im Codex-Nachtrag:** Der echte Nayax-Bearer-Token wurde im live WF3 von einem
 statischen Header-Parameter auf eine n8n HTTP-Header-Auth-Credential umgestellt.
 
-#### Phase A3: WF2 erweitern – MwSt-Satz in Lagerchargen – abgeschlossen
-
-WF2 (`wGDkVMoPN2Ed88TO`) wurde per n8n REST API gepatcht (Skript: `guv_check_tmp/patch_wf2_a3.js`).
-
-**Aenderungen (4 Nodes):**
-
-1. **`Code - Produktvorschlaege vorbereiten`**:
-   - `produktart` wird jetzt in `candidates` und `allProducts` mitgefuehrt.
-   - `default_mwst_satz` wird aus `produktart` des besten Kandidaten berechnet:
-     Snack/Riegel → 7 %, Getraenk/Drink → 19 %, unbekannt → 19 %.
-   - `default_mwst_satz` ist im return-Objekt verfuegbar (fuer Form-Default).
-
-2. **`Form - Produktentscheidung`**:
-   - Neues Zahlenfeld `mwst_satz` nach `unit_cost_override` eingefuegt.
-   - Default-Wert: `={{ $json.default_mwst_satz }}` (aus dem Prep-Node).
-   - Placeholder: `7 (Snack) oder 19 (Getränk)`.
-   - Benutzer kann den Wert vor der Freigabe korrigieren.
-
-3. **`Code - Entscheidung auswerten`**:
-   - Liest `formDecision.mwst_satz` (Komma-tolerant, numeric).
-   - Fallback-Kette: Formulareingabe → produktart des gewahlten Produkts → `default_mwst_satz` → 19.
-   - `mwst_satz` im return-Objekt vor `status: 'aktiv'` eingefuegt.
-
-4. **`Google Sheets - Lagercharge anlegen`**:
-   - Spaltenmapping `mwst_satz` hinzugefuegt:
-     `={{ $('Code - Entscheidung auswerten').item.json.mwst_satz }}`
-   - Schema-Eintrag (type: number) ergaenzt.
-
-Lokale WF2-JSON-Datei nach dem Patch aktualisiert.
-
-**Hinweis fuer naechsten WF2-Lauf:**
-Im n8n-UI den Node `Google Sheets - Lagercharge anlegen` oeffnen,
-Columns/Fields einmal refreshen und speichern – sonst kann `Column names were updated` auftreten
-(gleicher Effekt wie bei WF3 nach Phase A2, da das Schema-Feld neu ist).
-
 #### Codex-Nachtrag 2026-05-11 Abend – WF3 Credential + Sheets-Schema – abgeschlossen
 
 **Nayax-Token aus WF3 entfernt / n8n-Credential eingerichtet:**
@@ -132,9 +97,7 @@ Columns/Fields einmal refreshen und speichern – sonst kann `Column names were 
 
 - `WF0` – product_slot_id Backfill (einmalig, abgeschlossen)
 - `WF1` – Rechnungseingang automatisch mit Claude
-- `WF2` – Smart Product Selection / Rechnungsvorschlaege **(Phase A3 erweitert)**
-  - Jetzt: `mwst_satz` wird in neue Lagerchargen geschrieben (7 % Snack / 19 % Getraenk)
-  - Form `Produktentscheidung` hat neues `mwst_satz`-Feld mit Auto-Default aus Produktart
+- `WF2` – Smart Product Selection / Rechnungsvorschlaege
 - `WF3` – Nayax Lynx FIFO Lagerbestand **(Phase A2 erweitert)**
   - Jetzt: `vk_preis_brutto`, `umsatz_brutto`, `mdb_code_extracted`, `batch_id_abgebucht`
   - Nayax-Credential: erledigt, live WF3 nutzt n8n HTTP-Header-Auth-Credential `Nayax Bearer`
@@ -159,12 +122,13 @@ Columns/Fields einmal refreshen und speichern – sonst kann `Column names were 
   WF3 nutzt diese Credential statt eines statischen Klartext-Headers.
 - `Google Sheets - Transaktionen anhaengen` hat aktualisierte Spalten-Mappings und appends
   wieder erfolgreich in `Verarbeitete_Transaktionen`.
-- Phase A3: WF2 live in n8n aktualisiert. `mwst_satz`-Feld im Formular + Abbuchung in
-  `Lagerchargen`. Noch nicht live getestet (erster echter WF2-Lauf aussteht).
-  **TODO vor erstem Lauf**: `Google Sheets - Lagercharge anlegen` in n8n UI oeffnen,
-  Columns refreshen, speichern.
 
-### Naechste konkrete Schritte (nach Phase A3)
+### Naechste konkrete Schritte (nach Phase A2)
+
+#### Phase A3: WF1/WF2 erweitern – MwSt und Netto-EK aus Rechnung
+- In WF2 beim Anlegen/Aktualisieren von Lagerchargen: `mwst_satz` schreiben
+  (7 % fuer Snacks, 19 % fuer Getraenke – aus Rechnungsposition oder aus Produkt-Stammdaten)
+- In WF2: Netto-EK (`ek_preis_netto`) aus Rechnungsbetrag / (1 + MwSt) berechnen
 
 #### Phase A4: WF8 GuV-Aggregator bauen
 - Taeglich per Cron (z.B. 02:00 Uhr)
@@ -194,13 +158,11 @@ Columns/Fields einmal refreshen und speichern – sonst kann `Column names were 
 
 - **Erledigt 2026-05-11:** Nayax-Token im live WF3 wurde von statischem Header auf n8n
   HTTP-Header-Auth-Credential `Nayax Bearer` umgestellt.
-- **TODO vor erstem WF2-Lauf nach Phase A3:** Node `Google Sheets - Lagercharge anlegen`
-  in n8n UI oeffnen, Columns/Fields refreshen, speichern. Sonst kommt
-  `Column names were updated after the node's setup` (gleicher Effekt wie WF3 nach A2).
 - Bei zukuenftigen Google-Sheets-Spaltenerweiterungen in n8n immer den betroffenen
-  Google-Sheets-Node oeffnen, Fields/Columns refreshen und neu speichern.
+  Google-Sheets-Node oeffnen, Fields/Columns refreshen und neu speichern. Sonst kann n8n mit
+  `Column names were updated after the node's setup` abbrechen.
 - WF5 lokal korrigiert (Bestandslogik), aber noch nicht in n8n live getestet/importiert.
-- Phase A4–A8 noch offen.
+- Phase A3–A8 noch offen.
 - Langfristig: Trennung von Produktstamm und Slot-Historie waere sauberer.
 
 ### Google Sheets – Tabs im Ueberblick

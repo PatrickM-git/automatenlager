@@ -105,14 +105,15 @@ N8N_API_KEY=...
 
 ## Current Next Step
 
-Phase A3: WF1/WF2 erweitern – `mwst_satz` und `ek_preis_netto` aus Rechnungen
+Phase A4: WF8 GuV-Aggregator bauen
 
-- In WF2 beim Anlegen/Aktualisieren von Lagerchargen das Feld `mwst_satz` schreiben
-  (7 % Snack, 19 % Getraenk – aus Rechnungsposition oder Produkt-Stammdaten)
-- In WF2 den Netto-EK (`ek_preis_netto`) aus dem Brutto-Rechnungsbetrag berechnen
+- Taeglich per Cron (z.B. 02:00 Uhr)
+- Fuer jeden Verkaufstag / jede Maschine: FIFO-Wareneinsatz berechnen
+  - `wareneinsatz_brutto = sum(qty * ek_preis_brutto)` aus abgebuchten Chargen
+  - `kleinunternehmer_aktiv` aus `GuV_Konfiguration` lesen
+  - `guv = umsatz_brutto - wareneinsatz_brutto`
+- Ergebnisse in `GuV_Tagesposten` schreiben
 
-Danach Phase A4: WF8 GuV-Aggregator bauen (taeglich, schreibt in `GuV_Tagesposten`).
-
-Offene Sicherheitsschuld: Nayax-Bearer-Token im live WF3 (`Nayax - Last Sales`-Node)
-ist noch als statischer Header-Parameter hinterlegt. Auf n8n HTTP-Header-Auth-Credential
-umstellen (n8n → Credentials → HTTP Header Auth → `Nayax Bearer`).
+Phase A3 (WF2 mwst_satz) ist abgeschlossen.
+TODO vor erstem WF2-Lauf: `Google Sheets - Lagercharge anlegen` in n8n UI oeffnen,
+Columns refreshen, speichern (sonst Column-mismatch-Fehler).
