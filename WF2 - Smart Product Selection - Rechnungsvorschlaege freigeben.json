@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-05-11T19:55:22.599Z",
+  "updatedAt": "2026-05-11T20:02:19.212Z",
   "createdAt": "2026-05-07T16:43:58.809Z",
   "id": "wGDkVMoPN2Ed88TO",
   "name": "WF2 - Smart Product Selection - Rechnungsvorschlaege freigeben",
@@ -684,6 +684,167 @@
           "__rl": true,
           "value": "=Lagerchargen",
           "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "batch_id": "={{ $('Code - Entscheidung auswerten').item.json.batch_id }}",
+            "product_key": "={{ $('Code - Entscheidung auswerten').item.json.product_key }}",
+            "purchase_date": "={{ $('Code - Entscheidung auswerten').item.json.purchase_date }}",
+            "mhd": "={{ $('Code - Entscheidung auswerten').item.json.mhd }}",
+            "initial_qty": "={{ $('Code - Entscheidung auswerten').item.json.initial_qty }}",
+            "remaining_qty": "={{ $('Code - Entscheidung auswerten').item.json.remaining_qty }}",
+            "unit_cost": "={{ $('Code - Entscheidung auswerten').item.json.unit_cost }}",
+            "supplier": "={{ $('Code - Entscheidung auswerten').item.json.supplier }}",
+            "storage_location": "={{ $('Code - Entscheidung auswerten').item.json.storage_location }}",
+            "status": "={{ $('Code - Entscheidung auswerten').item.json.status }}",
+            "source_invoice": "={{ $('Code - Entscheidung auswerten').item.json.source_invoice }}",
+            "source_item": "={{ $('Code - Entscheidung auswerten').item.json.source_item }}",
+            "confidence": "={{ $('Code - Entscheidung auswerten').item.json.confidence }}",
+            "mwst_satz": "={{ $('Code - Entscheidung auswerten').item.json.mwst_satz }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "batch_id",
+              "displayName": "batch_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "product_key",
+              "displayName": "product_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "purchase_date",
+              "displayName": "purchase_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "mhd",
+              "displayName": "mhd",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "initial_qty",
+              "displayName": "initial_qty",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "remaining_qty",
+              "displayName": "remaining_qty",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "unit_cost",
+              "displayName": "unit_cost",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "supplier",
+              "displayName": "supplier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "storage_location",
+              "displayName": "storage_location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "source_invoice",
+              "displayName": "source_invoice",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_item",
+              "displayName": "source_item",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "mwst_satz",
+              "displayName": "mwst_satz",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
         }
       },
       "id": "de74ef88-1697-452e-b665-9f0b3ad025af",
@@ -2084,7 +2245,7 @@
           "conditions": [
             {
               "id": "b238c8bb-8554-4497-8ff6-1e26d36eba5c",
-              "leftValue": "={{ !.first()?.json.product_key }}",
+              "leftValue": "={{ !$input.first()?.json.product_key }}",
               "rightValue": "",
               "operator": {
                 "type": "boolean",
@@ -2578,9 +2739,9 @@
   "staticData": null,
   "meta": null,
   "pinData": {},
-  "versionId": "d89481c0-f73f-4913-8ce3-6f265d0ac815",
-  "activeVersionId": "d89481c0-f73f-4913-8ce3-6f265d0ac815",
-  "versionCounter": 31,
+  "versionId": "d4695bfd-fb41-4750-869b-abdfc9fd426b",
+  "activeVersionId": "d4695bfd-fb41-4750-869b-abdfc9fd426b",
+  "versionCounter": 37,
   "triggerCount": 1,
   "shared": [
     {
@@ -2603,9 +2764,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-05-11T19:55:22.600Z",
-    "createdAt": "2026-05-11T19:55:22.600Z",
-    "versionId": "d89481c0-f73f-4913-8ce3-6f265d0ac815",
+    "updatedAt": "2026-05-11T20:02:19.215Z",
+    "createdAt": "2026-05-11T20:02:19.215Z",
+    "versionId": "d4695bfd-fb41-4750-869b-abdfc9fd426b",
     "workflowId": "wGDkVMoPN2Ed88TO",
     "nodes": [
       {
@@ -3285,6 +3446,167 @@
             "__rl": true,
             "value": "=Lagerchargen",
             "mode": "name"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "batch_id": "={{ $('Code - Entscheidung auswerten').item.json.batch_id }}",
+              "product_key": "={{ $('Code - Entscheidung auswerten').item.json.product_key }}",
+              "purchase_date": "={{ $('Code - Entscheidung auswerten').item.json.purchase_date }}",
+              "mhd": "={{ $('Code - Entscheidung auswerten').item.json.mhd }}",
+              "initial_qty": "={{ $('Code - Entscheidung auswerten').item.json.initial_qty }}",
+              "remaining_qty": "={{ $('Code - Entscheidung auswerten').item.json.remaining_qty }}",
+              "unit_cost": "={{ $('Code - Entscheidung auswerten').item.json.unit_cost }}",
+              "supplier": "={{ $('Code - Entscheidung auswerten').item.json.supplier }}",
+              "storage_location": "={{ $('Code - Entscheidung auswerten').item.json.storage_location }}",
+              "status": "={{ $('Code - Entscheidung auswerten').item.json.status }}",
+              "source_invoice": "={{ $('Code - Entscheidung auswerten').item.json.source_invoice }}",
+              "source_item": "={{ $('Code - Entscheidung auswerten').item.json.source_item }}",
+              "confidence": "={{ $('Code - Entscheidung auswerten').item.json.confidence }}",
+              "mwst_satz": "={{ $('Code - Entscheidung auswerten').item.json.mwst_satz }}"
+            },
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "batch_id",
+                "displayName": "batch_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "product_key",
+                "displayName": "product_key",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "purchase_date",
+                "displayName": "purchase_date",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "mhd",
+                "displayName": "mhd",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "initial_qty",
+                "displayName": "initial_qty",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "remaining_qty",
+                "displayName": "remaining_qty",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "unit_cost",
+                "displayName": "unit_cost",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "supplier",
+                "displayName": "supplier",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "storage_location",
+                "displayName": "storage_location",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "status",
+                "displayName": "status",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "notes",
+                "displayName": "notes",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": true
+              },
+              {
+                "id": "source_invoice",
+                "displayName": "source_invoice",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "source_item",
+                "displayName": "source_item",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "confidence",
+                "displayName": "confidence",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "mwst_satz",
+                "displayName": "mwst_satz",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": false,
+                "removed": false
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
           }
         },
         "id": "de74ef88-1697-452e-b665-9f0b3ad025af",
@@ -4685,7 +5007,7 @@
             "conditions": [
               {
                 "id": "b238c8bb-8554-4497-8ff6-1e26d36eba5c",
-                "leftValue": "={{ !.first()?.json.product_key }}",
+                "leftValue": "={{ !$input.first()?.json.product_key }}",
                 "rightValue": "",
                 "operator": {
                   "type": "boolean",
@@ -5177,18 +5499,18 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-05-11T19:55:22.707Z",
-        "id": 23,
+        "createdAt": "2026-05-11T20:02:19.326Z",
+        "id": 27,
         "workflowId": "wGDkVMoPN2Ed88TO",
-        "versionId": "d89481c0-f73f-4913-8ce3-6f265d0ac815",
+        "versionId": "d4695bfd-fb41-4750-869b-abdfc9fd426b",
         "event": "activated",
         "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
       },
       {
-        "createdAt": "2026-05-11T19:55:22.673Z",
-        "id": 22,
+        "createdAt": "2026-05-11T20:02:19.292Z",
+        "id": 26,
         "workflowId": "wGDkVMoPN2Ed88TO",
-        "versionId": "d89481c0-f73f-4913-8ce3-6f265d0ac815",
+        "versionId": "d4695bfd-fb41-4750-869b-abdfc9fd426b",
         "event": "deactivated",
         "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
       }
