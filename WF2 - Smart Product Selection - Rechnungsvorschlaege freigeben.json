@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-05-11T19:42:50.791Z",
+  "updatedAt": "2026-05-11T19:55:22.599Z",
   "createdAt": "2026-05-07T16:43:58.809Z",
   "id": "wGDkVMoPN2Ed88TO",
   "name": "WF2 - Smart Product Selection - Rechnungsvorschlaege freigeben",
@@ -181,8 +181,8 @@
             {
               "fieldLabel": "mwst_satz",
               "fieldType": "number",
-              "defaultValue": "={{ $json.default_mwst_satz }}",
-              "placeholder": "7 (Snack) oder 19 (Getränk)"
+              "placeholder": "7 (Snack) oder 19 (Getränk)",
+              "defaultValue": "={{ $json.default_mwst_satz }}"
             },
             {
               "fieldLabel": "mhd_override",
@@ -684,169 +684,7 @@
           "__rl": true,
           "value": "=Lagerchargen",
           "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "batch_id": "={{ $('Code - Entscheidung auswerten').item.json.batch_id }}",
-            "product_key": "={{ $('Code - Entscheidung auswerten').item.json.product_key }}",
-            "purchase_date": "={{ $('Code - Entscheidung auswerten').item.json.purchase_date }}",
-            "mhd": "={{ $('Code - Entscheidung auswerten').item.json.mhd }}",
-            "initial_qty": "={{ $('Code - Entscheidung auswerten').item.json.initial_qty }}",
-            "remaining_qty": "={{ $('Code - Entscheidung auswerten').item.json.remaining_qty }}",
-            "unit_cost": "={{ $('Code - Entscheidung auswerten').item.json.unit_cost }}",
-            "supplier": "={{ $('Code - Entscheidung auswerten').item.json.supplier }}",
-            "storage_location": "={{ $('Code - Entscheidung auswerten').item.json.storage_location }}",
-            "status": "={{ $('Code - Entscheidung auswerten').item.json.status }}",
-            "source_invoice": "={{ $('Code - Entscheidung auswerten').item.json.source_invoice }}",
-            "source_item": "={{ $('Code - Entscheidung auswerten').item.json.source_item }}",
-            "confidence": "={{ $('Code - Entscheidung auswerten').item.json.confidence }}",
-            "mwst_satz": "={{ $('Code - Entscheidung auswerten').item.json.mwst_satz }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "batch_id",
-              "displayName": "batch_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "product_key",
-              "displayName": "product_key",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "purchase_date",
-              "displayName": "purchase_date",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "mhd",
-              "displayName": "mhd",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "initial_qty",
-              "displayName": "initial_qty",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "remaining_qty",
-              "displayName": "remaining_qty",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "unit_cost",
-              "displayName": "unit_cost",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "supplier",
-              "displayName": "supplier",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "storage_location",
-              "displayName": "storage_location",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "status",
-              "displayName": "status",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "notes",
-              "displayName": "notes",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": true
-            },
-            {
-              "id": "source_invoice",
-              "displayName": "source_invoice",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "source_item",
-              "displayName": "source_item",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "confidence",
-              "displayName": "confidence",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "mwst_satz",
-              "displayName": "mwst_satz",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "number",
-              "canBeUsedToMatch": false,
-              "removed": false
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        },
-        "options": {}
+        }
       },
       "id": "de74ef88-1697-452e-b665-9f0b3ad025af",
       "name": "Google Sheets - Lagercharge anlegen",
@@ -2231,7 +2069,8 @@
           "id": "5XfHt3SzjHCj8B5H",
           "name": "Sheets Automatenlager"
         }
-      }
+      },
+      "alwaysOutputData": true
     },
     {
       "parameters": {
@@ -2245,8 +2084,8 @@
           "conditions": [
             {
               "id": "b238c8bb-8554-4497-8ff6-1e26d36eba5c",
-              "leftValue": "={{ $input.all().length === 0 }}",
-              "rightValue": "0",
+              "leftValue": "={{ !.first()?.json.product_key }}",
+              "rightValue": "",
               "operator": {
                 "type": "boolean",
                 "operation": "true",
@@ -2351,8 +2190,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1184,
-        864
+        4400,
+        912
       ]
     },
     {
@@ -2398,8 +2237,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        1456,
-        864
+        4672,
+        912
       ]
     },
     {
@@ -2739,9 +2578,9 @@
   "staticData": null,
   "meta": null,
   "pinData": {},
-  "versionId": "dc8d01a5-d9dc-431a-b0a7-6a91beda8585",
-  "activeVersionId": "dc8d01a5-d9dc-431a-b0a7-6a91beda8585",
-  "versionCounter": 19,
+  "versionId": "d89481c0-f73f-4913-8ce3-6f265d0ac815",
+  "activeVersionId": "d89481c0-f73f-4913-8ce3-6f265d0ac815",
+  "versionCounter": 31,
   "triggerCount": 1,
   "shared": [
     {
@@ -2764,9 +2603,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-05-11T19:42:50.793Z",
-    "createdAt": "2026-05-11T19:42:50.793Z",
-    "versionId": "dc8d01a5-d9dc-431a-b0a7-6a91beda8585",
+    "updatedAt": "2026-05-11T19:55:22.600Z",
+    "createdAt": "2026-05-11T19:55:22.600Z",
+    "versionId": "d89481c0-f73f-4913-8ce3-6f265d0ac815",
     "workflowId": "wGDkVMoPN2Ed88TO",
     "nodes": [
       {
@@ -2943,8 +2782,8 @@
               {
                 "fieldLabel": "mwst_satz",
                 "fieldType": "number",
-                "defaultValue": "={{ $json.default_mwst_satz }}",
-                "placeholder": "7 (Snack) oder 19 (Getränk)"
+                "placeholder": "7 (Snack) oder 19 (Getränk)",
+                "defaultValue": "={{ $json.default_mwst_satz }}"
               },
               {
                 "fieldLabel": "mhd_override",
@@ -3446,169 +3285,7 @@
             "__rl": true,
             "value": "=Lagerchargen",
             "mode": "name"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "batch_id": "={{ $('Code - Entscheidung auswerten').item.json.batch_id }}",
-              "product_key": "={{ $('Code - Entscheidung auswerten').item.json.product_key }}",
-              "purchase_date": "={{ $('Code - Entscheidung auswerten').item.json.purchase_date }}",
-              "mhd": "={{ $('Code - Entscheidung auswerten').item.json.mhd }}",
-              "initial_qty": "={{ $('Code - Entscheidung auswerten').item.json.initial_qty }}",
-              "remaining_qty": "={{ $('Code - Entscheidung auswerten').item.json.remaining_qty }}",
-              "unit_cost": "={{ $('Code - Entscheidung auswerten').item.json.unit_cost }}",
-              "supplier": "={{ $('Code - Entscheidung auswerten').item.json.supplier }}",
-              "storage_location": "={{ $('Code - Entscheidung auswerten').item.json.storage_location }}",
-              "status": "={{ $('Code - Entscheidung auswerten').item.json.status }}",
-              "source_invoice": "={{ $('Code - Entscheidung auswerten').item.json.source_invoice }}",
-              "source_item": "={{ $('Code - Entscheidung auswerten').item.json.source_item }}",
-              "confidence": "={{ $('Code - Entscheidung auswerten').item.json.confidence }}",
-              "mwst_satz": "={{ $('Code - Entscheidung auswerten').item.json.mwst_satz }}"
-            },
-            "matchingColumns": [],
-            "schema": [
-              {
-                "id": "batch_id",
-                "displayName": "batch_id",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "product_key",
-                "displayName": "product_key",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "purchase_date",
-                "displayName": "purchase_date",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "mhd",
-                "displayName": "mhd",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "initial_qty",
-                "displayName": "initial_qty",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "remaining_qty",
-                "displayName": "remaining_qty",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "unit_cost",
-                "displayName": "unit_cost",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "supplier",
-                "displayName": "supplier",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "storage_location",
-                "displayName": "storage_location",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "status",
-                "displayName": "status",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "notes",
-                "displayName": "notes",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": true
-              },
-              {
-                "id": "source_invoice",
-                "displayName": "source_invoice",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "source_item",
-                "displayName": "source_item",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "confidence",
-                "displayName": "confidence",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "mwst_satz",
-                "displayName": "mwst_satz",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "number",
-                "canBeUsedToMatch": false,
-                "removed": false
-              }
-            ],
-            "attemptToConvertTypes": false,
-            "convertFieldsToString": false
-          },
-          "options": {}
+          }
         },
         "id": "de74ef88-1697-452e-b665-9f0b3ad025af",
         "name": "Google Sheets - Lagercharge anlegen",
@@ -4993,7 +4670,8 @@
             "id": "5XfHt3SzjHCj8B5H",
             "name": "Sheets Automatenlager"
           }
-        }
+        },
+        "alwaysOutputData": true
       },
       {
         "parameters": {
@@ -5007,8 +4685,8 @@
             "conditions": [
               {
                 "id": "b238c8bb-8554-4497-8ff6-1e26d36eba5c",
-                "leftValue": "={{ $input.all().length === 0 }}",
-                "rightValue": "0",
+                "leftValue": "={{ !.first()?.json.product_key }}",
+                "rightValue": "",
                 "operator": {
                   "type": "boolean",
                   "operation": "true",
@@ -5113,8 +4791,8 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1184,
-          864
+          4400,
+          912
         ]
       },
       {
@@ -5160,8 +4838,8 @@
         "type": "n8n-nodes-base.executeWorkflow",
         "typeVersion": 1.2,
         "position": [
-          1456,
-          864
+          4672,
+          912
         ]
       },
       {
@@ -5499,18 +5177,18 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-05-11T19:42:50.958Z",
-        "id": 21,
+        "createdAt": "2026-05-11T19:55:22.707Z",
+        "id": 23,
         "workflowId": "wGDkVMoPN2Ed88TO",
-        "versionId": "dc8d01a5-d9dc-431a-b0a7-6a91beda8585",
+        "versionId": "d89481c0-f73f-4913-8ce3-6f265d0ac815",
         "event": "activated",
         "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
       },
       {
-        "createdAt": "2026-05-11T19:42:50.907Z",
-        "id": 20,
+        "createdAt": "2026-05-11T19:55:22.673Z",
+        "id": 22,
         "workflowId": "wGDkVMoPN2Ed88TO",
-        "versionId": "dc8d01a5-d9dc-431a-b0a7-6a91beda8585",
+        "versionId": "d89481c0-f73f-4913-8ce3-6f265d0ac815",
         "event": "deactivated",
         "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
       }
