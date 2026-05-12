@@ -86,12 +86,40 @@ Daher muss `unit_cost` der Pfand-pflichtigen Getraenke das Pfand enthalten.
 - Lichtenauer Medium/Still: 0,8782
 Trinkpaeckchen (Capri-Sonne) bleiben unveraendert (kein Pfand).
 
-**Naechste Phase (noch offen):**
-1. 3 historische Metro-Rechnungen lesen: 2025-09-24, 2025-09-30, 2026-01-24
-2. Historische Lagerchargen anlegen fuer 5 Rechnungen ohne Charge
-3. Nayax-Transaktionsexport parsen (`DynamicTransactionsMonitorMega_2026-05-12T155903.xlsx`)
-4. Historische Verkaeufe in `Verarbeitete_Transaktionen` einspielen (mit FIFO-Abbuchung)
-5. WF8 erneut laufen lassen → komplette GuV ab Oktober 2025
+**Phase 2 Stand 2026-05-12 spaet (Context-Pause):**
+
+Metro 24.09.2025 PDF gelesen + geparst (39 Positionen) → `_rechnungen.json`:
+- 23 Positionen matchen existierende SKUs (Snickers, Bueno, Cola, Red Bull, Lichtenauer ...)
+- 16 Positionen sind **historische SKUs nicht mehr im Sortiment**:
+  KNOPPERS, HARIBO_COLOR_RADO, DUPLO_WHITE, FF_UNGARISCH, BALISTO_YOBERRY, LION,
+  PRINGLES_SOUR_CREAM, PRINGLES_SWEET, DINKELCHEN, TOBLERONE, KITKAT_CH_PEANUT_BU,
+  CRUNCHIPS, LIPTON_PEACH, BIFI_CARAZZA, BIFI_ROLL, BIFI_ORIGINAL
+
+**Wichtige Erkenntnisse aus 24.09.2025:**
+- Mengenrabatte bei Cola/Sprite/Fanta: 0,52 netto (rabattiert) statt 0,83 netto
+- KitKat CH PEANUT BU = historische SKU – User bestaetigte: "aktuell nicht mehr im Automat"
+- Cola 0,52 netto → 0,6188 brutto + 0,2975 Pfand = **0,9163 inkl Pfand** (deutlich
+  niedriger als die 1,2852 aus Preisliste!)
+
+**Strategie-Frage offen an User:**
+Wie sollen historische Verkaeufe in Verarbeitete_Transaktionen bewertet werden?
+- Opt A: Alle ~80 historischen Lagerchargen aus 5 Rechnungen anlegen + Verkaeufe
+  rueckwirkend FIFO-mae0ssig zuordnen (sauber, aufwendig)
+- Opt B: WF8-Fallback: fuer Verkaeufe ohne batch_id, juengsten EK aus Lagerchargen
+  fuer den product_key nehmen (pragmatisch, ungenau bei Preisaenderungen)
+- Opt C: Pro product_key einen historischen Durchschnitts-EK aus allen Rechnungen
+  zwischen Verkaufsdatum und vorheriger Lieferung (saubere Mittelung)
+
+**Pending PDFs:**
+- 30.09.2025 Metro
+- 24.01.2026 Metro
+- Nayax-Verkaufsexport (DynamicTransactionsMonitorMega_2026-05-12T155903.xlsx)
+
+**Naechste Schritte nach User-Antwort:**
+1. Restliche 2 historische PDFs lesen
+2. Strategie umsetzen (je nach Wahl)
+3. Nayax-Export parsen + in Verarbeitete_Transaktionen schreiben
+4. WF8 erneut laufen → vollstaendige historische GuV
 
 **Verteilung der bestehenden Lagerchargen (purchase_date → Chargen):**
 - 2026-03-07: 5 (passt zu Lebensmittel-Sonderposten-PDF)
