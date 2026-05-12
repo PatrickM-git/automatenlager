@@ -2,6 +2,102 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
+## Stand: 2026-05-12 (Session 5 – Historische Daten + GuV-Rekonstruktion gestartet)
+
+### Aktuelles Vorhaben (laufend)
+
+User moechte alle historischen Daten ab Oktober 2025 rekonstruieren, damit die GuV
+rueckwirkend berechnet werden kann. Dafuer hat er folgende Quellen bereitgestellt:
+
+**Hochgeladene Dateien (User):**
+- 7 Metro-Rechnungen (PDF):
+  `2025-09-24`, `2025-09-30`, `2026-01-24`, `2026-02-28`, `2026-04-22`, `2026-05-04`, `2026-05-11`
+  Pfad: `C:/Users/patri/Proton Drive/.../03 Füllmaterial/02 Rechnungen/01 Metro/`
+- 1 Lebensmittel-Sonderposten-Rechnung (PDF): `2026-03-07`
+- Metro-Preisliste mit Netto+Brutto: `01 Bestellungen/Preisliste_Metro_KALKU_2026-1.xlsx`
+  → 51 Produkte mit `preis_netto_stk`, `preis_brutto_stk`, `mwst`, `inhalt_karton`, `ean`, `mhd`, `vk_preis`
+- Nayax-Transaktionsexport (alle historischen Verkaeufe):
+  `DynamicTransactionsMonitorMega_2026-05-12T155903.xlsx`
+
+**Aufgabenliste:**
+1. ⏳ Lagerchargen-`unit_cost` ergaenzen (32 von 46 Chargen ohne Cost)
+   - Quelle: 8 PDFs + Preisliste
+   - Bei Abweichungen den User fragen
+   - unit_cost in Lagerchargen ist **per Einzelstueck Brutto** (nicht per Pack)
+2. ⏳ Fehlende historische Lagerchargen anlegen (fuer 5 Rechnungen ohne Lagercharge):
+   - 2025-09-24, 2025-09-30, 2026-01-24, 2026-02-28, 2026-04-22
+3. ⏳ Historische Verkaeufe aus Nayax-Export in `Verarbeitete_Transaktionen` schreiben
+   - Pro Verkauf: nayax_product_name, product_key (matching), settlement_datetime_gmt,
+     quantity, vk_preis_brutto, umsatz_brutto, mdb_code_extracted, batch_id_abgebucht (FIFO)
+4. ⏳ WF8 erneut laufen lassen → komplette GuV ab Oktober 2025
+
+**Helper-Daten (zwischengespeichert in guv_check_tmp/):**
+- `_preisliste.json` – 51 Metro-Preislisten-Eintraege
+- `_lagerchargen.json` – aktueller Zustand 46 Chargen
+- `_produkte.json` – aktueller Zustand 48 Produkte
+- `_rechnungen.json` – geparste Rechnungen: Metro 04.05., Metro 11.05., Sonderposten 03.07.
+- `_proposal.json` – komplette Korrektur-/Befuellungs-Vorschlag-Tabelle + offene Fragen an User
+- `xlsx` npm-Paket installiert in guv_check_tmp/node_modules
+
+**Stand 2026-05-12 (nach User-Antwort) – Lagerchargen + Produkte komplett gepflegt:**
+
+Phase 1 abgeschlossen:
+- 5 von 8 PDFs gelesen (Metro 04.05., 11.05., 22.04., 28.02. + Sonderposten 03.07.)
+- WF_TEMP (`m6hTE6lCQfdefP15`) per SDK gebaut und ausgefuehrt:
+  - Alle 46 Lagerchargen mit korrektem `unit_cost` (Brutto pro Verkaufseinheit) +
+    `mwst_satz` (7 fuer Snacks, 19 fuer Getraenke) gepflegt
+  - Alle 48 Produkte mit `produktart` (snack/getraenk) gepflegt
+- Konsistenz-Check: 0 Fehler (alle Chargen haben unit_cost > 0 und mwst_satz, alle
+  Produkte haben produktart, produktart vs Lagercharge-mwst konsistent)
+
+**Konvention final:**
+- `Lagerchargen.unit_cost` = BRUTTO pro Verkaufseinheit (Stueck im Automaten)
+- `Lagerchargen.mwst_satz` = 7 oder 19 je nach Produktart
+- `Produkte.produktart` = 'snack' oder 'getraenk' (Getraenke: Cola, Cola Zero, Fanta,
+  Sprite, Red Bull, Red Bull Spring, Lichtenauer Medium/Still, Capri Sun Safari/Kirsch)
+
+**Sonderfaelle aus User-Antworten:**
+- KINDER BUENO KLASSIK: Doppelpack = Verkaufseinheit → 0,8453 brutto
+- KITKAT CHUNKY = KITKAT CH FUNKY (Metro 28.02., 0,49 netto + 7%)
+- KITKAT NORMAL = KITKAT CH CLASSIC (Metro 22.04., 0,49 netto + 7%)
+- SNICKERS + TWIX SING: rabattiert auf 0,45 netto (Metro 28.02.)
+- DUPLO ORIGINAL: 10er Pack 2,99 netto = 0,299 / Stueck (Metro 28.02.)
+- SNICKERS CREAMY: 24x36,5g 0,52 netto + 7% (Metro 22.04.)
+- RED BULL SPRING: 1,23 netto + 19% (Metro 28.02.) – ohne Pfand
+- MANNER MINIS: 60x15g = 16,49 netto, 0,2748 netto / Stueck (Metro 28.02.)
+- LEIBNIZ KEKN CREAM: User-Korrektur initial_qty 77→18, remaining 15
+- DUPLO WHITE: aus Sortiment entfernt (kein SKU im System)
+
+**Helper-Daten (zwischengespeichert in guv_check_tmp/):**
+- `_preisliste.json` – 51 Metro-Preislisten-Eintraege
+- `_lagerchargen.json` – aktueller Zustand 46 Chargen (alle gepflegt)
+- `_produkte.json` – aktueller Zustand 48 Produkte (alle gepflegt)
+- `_rechnungen.json` – geparste Rechnungen
+- `_proposal.json` – Korrektur-/Befuellungs-Vorschlag-Tabelle
+- `wf_update_data.js` – SDK-Code des WF_TEMP fuer Audit-Trail
+- WF_TEMP `m6hTE6lCQfdefP15` als inaktiver Workflow in n8n stehen geblieben
+
+**Naechste Phase (noch offen):**
+1. 3 historische Metro-Rechnungen lesen: 2025-09-24, 2025-09-30, 2026-01-24
+2. Historische Lagerchargen anlegen fuer 5 Rechnungen ohne Charge
+3. Nayax-Transaktionsexport parsen (`DynamicTransactionsMonitorMega_2026-05-12T155903.xlsx`)
+4. Historische Verkaeufe in `Verarbeitete_Transaktionen` einspielen (mit FIFO-Abbuchung)
+5. WF8 erneut laufen lassen → komplette GuV ab Oktober 2025
+
+**Verteilung der bestehenden Lagerchargen (purchase_date → Chargen):**
+- 2026-03-07: 5 (passt zu Lebensmittel-Sonderposten-PDF)
+- 2026-05-02: 35 (vermutlich Inventur-Bulk-Anlage, kein passendes PDF)
+- 2026-05-04: 2 (passt zu Metro-PDF 04.05.)
+- 2026-05-11: 1 (passt zu Metro-PDF 11.05.)
+- + 3 weitere verstreut
+
+**WICHTIG bei Datenrekonstruktion:**
+- MHD-Ablauf ist KEIN sicheres Indiz fuer Aussortierung – User hat in Vergangenheit
+  auch ueber MHD hinaus verkauft. Erst ab jetzt wird sofort aussortiert.
+- Bei Preisabweichungen User fragen, nicht raten.
+
+---
+
 ## Stand: 2026-05-11 (Session 4 – GuV-System Phase A3)
 
 ### Kurzfassung
