@@ -86,40 +86,97 @@ Daher muss `unit_cost` der Pfand-pflichtigen Getraenke das Pfand enthalten.
 - Lichtenauer Medium/Still: 0,8782
 Trinkpaeckchen (Capri-Sonne) bleiben unveraendert (kein Pfand).
 
-**Phase 2 Stand 2026-05-12 spaet (Context-Pause):**
+**Phase 2 Datenerfassung abgeschlossen 2026-05-12 (sehr spaet):**
 
-Metro 24.09.2025 PDF gelesen + geparst (39 Positionen) → `_rechnungen.json`:
-- 23 Positionen matchen existierende SKUs (Snickers, Bueno, Cola, Red Bull, Lichtenauer ...)
-- 16 Positionen sind **historische SKUs nicht mehr im Sortiment**:
-  KNOPPERS, HARIBO_COLOR_RADO, DUPLO_WHITE, FF_UNGARISCH, BALISTO_YOBERRY, LION,
-  PRINGLES_SOUR_CREAM, PRINGLES_SWEET, DINKELCHEN, TOBLERONE, KITKAT_CH_PEANUT_BU,
-  CRUNCHIPS, LIPTON_PEACH, BIFI_CARAZZA, BIFI_ROLL, BIFI_ORIGINAL
+User wählte **Option A** (saubere Vollrekonstruktion). Pfand-Wert bestätigt: 0,2975 brutto.
 
-**Wichtige Erkenntnisse aus 24.09.2025:**
-- Mengenrabatte bei Cola/Sprite/Fanta: 0,52 netto (rabattiert) statt 0,83 netto
-- KitKat CH PEANUT BU = historische SKU – User bestaetigte: "aktuell nicht mehr im Automat"
-- Cola 0,52 netto → 0,6188 brutto + 0,2975 Pfand = **0,9163 inkl Pfand** (deutlich
-  niedriger als die 1,2852 aus Preisliste!)
+**Alle Daten gesammelt:**
 
-**Strategie-Frage offen an User:**
-Wie sollen historische Verkaeufe in Verarbeitete_Transaktionen bewertet werden?
-- Opt A: Alle ~80 historischen Lagerchargen aus 5 Rechnungen anlegen + Verkaeufe
-  rueckwirkend FIFO-mae0ssig zuordnen (sauber, aufwendig)
-- Opt B: WF8-Fallback: fuer Verkaeufe ohne batch_id, juengsten EK aus Lagerchargen
-  fuer den product_key nehmen (pragmatisch, ungenau bei Preisaenderungen)
-- Opt C: Pro product_key einen historischen Durchschnitts-EK aus allen Rechnungen
-  zwischen Verkaufsdatum und vorheriger Lieferung (saubere Mittelung)
+`guv_check_tmp/_rechnungen.json` – alle 8 Rechnungen geparst (71 Positionen):
+- metro_2025_09_24: 39 Pos (grosse Initial-Bestellung)
+- metro_2025_09_30: 3 Pos (Hanuta, Mr.Toms, Capri Safari)
+- metro_2026_01_24: 3 Pos (Kinder Country, Cola, Cola Zero)
+- metro_2026_02_28: 9 Pos
+- metro_2026_04_22: 5 Pos
+- metro_2026_05_04: 3 Pos
+- metro_2026_05_11: 1 Pos
+- sonderposten_2026_03_07: 8 Pos
 
-**Pending PDFs:**
-- 30.09.2025 Metro
-- 24.01.2026 Metro
-- Nayax-Verkaufsexport (DynamicTransactionsMonitorMega_2026-05-12T155903.xlsx)
+`guv_check_tmp/_nayax_sales.json` – 518 historische Verkaufstransaktionen geparst:
+- Datumsbereich: 22.09.2025 - 12.05.2026
+- Maschinenname: "CR-FCRvMMfAiraF" (Nayax-Display, intern: machine_id=457107528)
+- 62 unique (Produkt, MDB-Code) Kombinationen
+- Format: `produkt_info` enthält "Name(MDB  Preis)"
 
-**Naechste Schritte nach User-Antwort:**
-1. Restliche 2 historische PDFs lesen
-2. Strategie umsetzen (je nach Wahl)
-3. Nayax-Export parsen + in Verarbeitete_Transaktionen schreiben
-4. WF8 erneut laufen → vollstaendige historische GuV
+**16 neue SKUs zum Anlegen in Produkte:**
+Aus Metro 24.09.2025 + Nayax-Verkaufsliste identifiziert:
+KNOPPERS, HARIBO_COLOR_RADO, DUPLO_WHITE (historisch), FF_UNGARISCH (ChipsFrisch ungarisch),
+BALISTO_YOBERRY, LION, PRINGLES_SOUR_CREAM, PRINGLES_SWEET, DINKELCHEN, TOBLERONE,
+KITKAT_PEANUT (historisch), CRUNCHIPS, LIPTON_PEACH, BIFI_CARAZZA (Carazza), BIFI_ROLL, BIFI_ORIGINAL
+
+Aus Nayax-Verkäufen kommen weitere historische Namen:
+- Buenos white(45  2.00) → SKU_BUENO_WHITE
+- Snickers Cream Peanut Butter(12  1.00) → SKU_SNICKERS_CREAMY
+- Falcone XXL-Cookies Cranberry(22  und 26) – 2 verschiedene MDBs?
+- Crunchips Original(22  1.80) → SKU_CRUNCHIPS
+
+**60 historische Lagerchargen zum Anlegen:**
+- 24.09.2025: 39 Chargen
+- 30.09.2025: 3
+- 24.01.2026: 3 (Kinder Country + 2 Cola rabattiert)
+- 28.02.2026: 9
+- 22.04.2026: 5
+- Bestehende Lagerchargen vom 04.05./11.05. + Sonderposten 03.07. bleiben unverändert
+- Bestehende Inventur-Chargen vom 02.05. bleiben unverändert (sind Bestandsaufnahme,
+  ergaenzen historische Lieferungen)
+
+**Wichtige Erkenntnisse:**
+- Bei Cola: Preise schwanken stark wegen Mengenrabatten:
+  - 24.09.2025: 0,52 netto → 0,9163 inkl Pfand
+  - 24.01.2026: 0,58 netto → 0,9877 inkl Pfand
+- Snickers/Twix kommen mit und ohne Rabatt
+- Croissants 4er-Pack: 1,75 netto/Pack im Februar, 1,89 ab April
+- KitKat CH PEANUT BU (24.09.) ≠ KitKat CH FUNKY (28.02.) ≠ KitKat CH CLASSIC (22.04.)
+  → 3 verschiedene KitKats über Zeit
+
+**Implementation-Plan (in 4 Schritten, NEUE SESSION empfohlen wegen Context):**
+
+Schritt 1 – `WF_TEMP2 - Anlage 16 SKUs + 60 historische Chargen`:
+  - Code-Node mit Hardcoded 16 SKU-Items (product_key, internal_name, produktart, active=FALSE)
+  - Google Sheets append zu Produkte
+  - Code-Node mit Hardcoded 60 Lagercharge-Items (batch_id, product_key, purchase_date,
+    unit_cost, mwst_satz, initial_qty, remaining_qty=0, supplier, source_invoice)
+  - Google Sheets append zu Lagerchargen
+
+Schritt 2 – FIFO-Algorithmus in JS:
+  - Lade alle Lagerchargen (historisch + Inventur)
+  - Lade alle Nayax-Verkäufe sortiert nach Datum
+  - Für jeden Verkauf: finde älteste Charge mit `purchase_date <= sale_date AND remaining_qty > 0`
+  - Setze `batch_id_abgebucht`, reduziere remaining_qty
+  - Output: 518 Sales mit batch_id-Zuordnung
+  - Output: log von remaining_qty Ende (Discrepanz vs. Inventur)
+
+Schritt 3 – `WF_TEMP3 - Append 518 historische Verkaeufe`:
+  - Code-Node mit 518 sale-items (aus FIFO-Algorithmus)
+  - Google Sheets append zu Verarbeitete_Transaktionen
+  - Achtung: bestehende ~150 Zeilen NICHT überschreiben
+
+Schritt 4 – WF8 Re-Run:
+  - Manuell triggern
+  - Verify GuV_Tagesposten zeigt alle Tage seit Oktober 2025
+
+**Nayax-Verkauf → SKU-Matching:**
+Hierfür braucht's ein Mapping `nayax_product_name` → `product_key`. Vorschlag: in den
+neuen SKUs setzen wir `nayax_product_name` aus der Verkaufsstatistik
+(z.B. "Snickers" → SKU_SNICKERS, "Bueno" → SKU_BUENO, "Buenos white" → SKU_BUENO_WHITE).
+
+**Helper-Daten:**
+- `_preisliste.json` – 51 Metro-Preisliste-Einträge
+- `_rechnungen.json` – alle 8 Rechnungen (71 Positionen)
+- `_nayax_sales.json` – 518 historische Verkäufe
+- `_lagerchargen.json` – aktuelle 46 Chargen (alle gepflegt)
+- `_produkte.json` – aktuelle 48 Produkte (alle mit produktart)
+- `_proposal.json` – Korrekturvorschlag-Tabelle (Phase 1)
 
 **Verteilung der bestehenden Lagerchargen (purchase_date → Chargen):**
 - 2026-03-07: 5 (passt zu Lebensmittel-Sonderposten-PDF)
