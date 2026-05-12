@@ -77,6 +77,15 @@ Phase 1 abgeschlossen:
 - `wf_update_data.js` – SDK-Code des WF_TEMP fuer Audit-Trail
 - WF_TEMP `m6hTE6lCQfdefP15` als inaktiver Workflow in n8n stehen geblieben
 
+**Pfand-Korrektur 2026-05-12 (User-Feedback):**
+VK-Preise am Automaten enthalten Pfand, der nicht zurueck zu Faltrix fliesst.
+Daher muss `unit_cost` der Pfand-pflichtigen Getraenke das Pfand enthalten.
+8 Lagerchargen aktualisiert (+0,2975 brutto = 0,25 netto + 19% MwSt laut METRO):
+- Coca-Cola: 1,2852 | Coca-Cola Zero: 1,1900 | Fanta Exotic: 1,2852 | Sprite: 1,2852
+- Red Bull: 1,2852 | Red Bull Spring: 1,7612
+- Lichtenauer Medium/Still: 0,8782
+Trinkpaeckchen (Capri-Sonne) bleiben unveraendert (kein Pfand).
+
 **Naechste Phase (noch offen):**
 1. 3 historische Metro-Rechnungen lesen: 2025-09-24, 2025-09-30, 2026-01-24
 2. Historische Lagerchargen anlegen fuer 5 Rechnungen ohne Charge
