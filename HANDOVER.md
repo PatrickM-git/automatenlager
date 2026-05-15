@@ -77,18 +77,19 @@ In `GuV_Tagesposten` enthält die `guv`-Spalte für Snickers einen Datumswert (G
 
 ## Nächste Schritte
 
-**Priorität 1 (Sofort-Aktionen, nur manuell möglich):**
-- Google Drive Credential in n8n re-authentifizieren (`UcOBo2UdCzAv1SBG`)
-- Test-Pickliste manuell aus Google Drive Ordner „pickliste unbearbeitet" entfernen
-- GuV_Tagesposten Spalte `guv` in Google Sheets auf Format „Zahl" stellen
-
-**Priorität 2 (nach Auffüllen, Montag 2026-05-18):**
+**Priorität 1 (Montag 2026-05-18, nach echtem Auffüllen):**
 - WF9 manuell testen: `GET http://127.0.0.1:5678/webhook/pickliste-verarbeiten?file_id=<PDF_FILE_ID>`
-- WF9 aktivieren (Drive Trigger läuft dann automatisch)
+  - File-ID aus Google Drive: Rechtsklick auf Pickliste → Teilen → Link → Teil nach `/file/d/`
+  - Prüfen: `current_machine_qty` korrekt gesetzt? Warnungen resolved? Audit-Eintrag vorhanden?
+- WF9 aktivieren (Drive Trigger pollt dann alle 60s automatisch)
 
-**Priorität 3 (technisch):**
-- T08g Snickers Drift: `current_machine_qty` im Sheet manuell auf 3 setzen → test_suite 25/25
-- WF8 in n8n aktivieren (Cron täglich 02:00) sobald GuV-Sheet-Format korrigiert
+**Erledigte Sofort-Aktionen (2026-05-15):**
+- ✅ Google Drive Credential `UcOBo2UdCzAv1SBG` re-authentifiziert
+- ✅ Test-Pickliste aus Google Drive entfernt
+- ✅ GuV_Tagesposten Sheet geleert + WF8 neu ausgeführt (Zahlen korrekt)
+- ✅ WF4, WF5, WF8 aktiviert
+- ✅ Snickers `current_machine_qty` = 3 → Test-Suite 25/25
+- ✅ WF4-backup und WF5-backup deaktiviert
 
 ---
 
