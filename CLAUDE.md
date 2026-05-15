@@ -8,7 +8,7 @@ This repository contains an n8n-based vending-machine inventory system for Nayax
 
 The project is not a generic Node.js skeleton anymore. It now contains:
 
-- n8n workflow exports `WF0` to `WF5`
+- n8n workflow exports `WF0` to `WF5`, `WF7` (Nachfüllung)
 - a local Node.js dashboard in `dashboard/`
 - Google Sheets/XLSX working data
 - handover and architecture documentation
@@ -106,10 +106,20 @@ N8N_API_KEY=...
 
 ## Current Next Step
 
-Phase A4 Test: WF8 (`qwpQMhZqDAIs8Wi9`) manuell ausfuehren
+**Phase A5 + A6 abgeschlossen (2026-05-15):**
+- `/api/guv` Endpoint in `dashboard/server.js` implementiert
+- GuV-Frontend-Section (Zeitraum-Tabs, Maschinen-Dropdown, KPI-Tiles, Produkttabelle) in Dashboard eingebaut
+- WF7, WF8, WF9 in Workflow-Landschaft aufgenommen
 
-- Im n8n UI WF8 oeffnen, "Execute workflow"
-- Pruefen: kommen GuV-Eintraege in GuV_Tagesposten an?
-- Bei Erfolg WF8 auf "active" setzen (Cron taeglich 02:00)
+**Naechste Schritte (manuell):**
+1. Google Drive Credential `UcOBo2UdCzAv1SBG` in n8n re-authentifizieren → WF9 freischalten
+2. Pickliste-Testdatei aus Google Drive Ordner entfernen
+3. GuV_Tagesposten Spalte `guv` im Google Sheet auf Format "Zahl" stellen
+4. WF8 auf "active" setzen (Cron taeglich 02:00)
+5. T08g Snickers: `current_machine_qty` auf 3 setzen → 25/25 Tests
 
-Danach Phase A5: Dashboard `/api/guv` Endpoint.
+## WF7 Nachfuellung Webhook
+
+URL: `http://127.0.0.1:5678/webhook/nachfuellung`
+Params: `product_key` (Pflicht), `qty` (Optional), `notes` (Optional)
+Aktionen: Slot-Update + Warning-Resolve + Audit-Eintrag

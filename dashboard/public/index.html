@@ -24,6 +24,7 @@
           <a href="#n8n-live" class="nav-link">n8n Live</a>
           <a href="#lager" class="nav-link">Lagerprüfung</a>
           <a href="#datenqualitaet" class="nav-link">Datenqualität</a>
+          <a href="#guv" class="nav-link">GuV &amp; Umsatz</a>
           <a href="#einstellungen" class="nav-link">⚙ Einstellungen</a>
         </nav>
 
@@ -124,6 +125,38 @@
             <div id="dataQuality" class="table-surface"></div>
           </div>
         </section>
+        <section id="guv" class="section">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">WF8 · GuV_Tagesposten</p>
+              <h2>GuV &amp; Umsatz</h2>
+            </div>
+            <span id="guvHealth" class="status-pill">Lädt</span>
+          </div>
+
+          <div class="guv-controls">
+            <div class="guv-tabs" role="group" aria-label="Zeitraum wählen">
+              <button class="guv-tab active" data-zeitraum="monat" type="button">Monat</button>
+              <button class="guv-tab" data-zeitraum="quartal" type="button">Quartal</button>
+              <button class="guv-tab" data-zeitraum="woche" type="button">Woche</button>
+              <button class="guv-tab" data-zeitraum="custom" type="button">Eigener Zeitraum</button>
+            </div>
+            <div id="guvCustomRange" class="guv-custom-range" hidden>
+              <input type="date" id="guvVon" class="form-input guv-date-input" />
+              <span class="muted">bis</span>
+              <input type="date" id="guvBis" class="form-input guv-date-input" />
+              <button id="guvApply" class="button small" type="button">Anwenden</button>
+            </div>
+            <select id="guvMaschine" class="form-input guv-machine-select">
+              <option value="">Alle Maschinen</option>
+            </select>
+          </div>
+
+          <div id="guvKpis" class="guv-kpis"></div>
+          <div id="guvProdukte" class="table-surface guv-table"></div>
+          <div id="guvStatus" class="muted guv-status"></div>
+        </section>
+
         <section id="einstellungen" class="section">
           <div class="section-header">
             <div>

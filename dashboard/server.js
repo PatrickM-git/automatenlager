@@ -20,6 +20,9 @@ const workflowFiles = [
   'WF3 Nayax Lynx FIFO Lagerbestand - manueller Abruf - mit WF4 Integration.json',
   'WF4 - MDB Produktzuordnung bearbeiten.json',
   'WF5 - MHD und niedrige Lagercharge ueberwachen.json',
+  'WF7 - Nachfuellung melden.json',
+  'WF8 - GuV Tagesposten Aggregator.json',
+  'WF9 - Pickliste verarbeiten.json',
 ];
 
 const workbookFilePattern = /^nayax_lager.*\.xlsx$/i;
@@ -232,6 +235,30 @@ function daysUntil(date) {
   return Math.ceil((b - a) / 86400000);
 }
 
+function guvDateRange(zeitraum, von, bis) {
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  if (zeitraum === 'woche') {
+    const start = new Date(today);
+    start.setDate(start.getDate() - 6);
+    return { von: start.toISOString().slice(0, 10), bis: todayStr };
+  }
+  if (zeitraum === 'monat') {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { von: start.toISOString().slice(0, 10), bis: todayStr };
+  }
+  if (zeitraum === 'quartal') {
+    const start = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3, 1);
+    return { von: start.toISOString().slice(0, 10), bis: todayStr };
+  }
+  const defaultVon = (() => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - 29);
+    return d.toISOString().slice(0, 10);
+  })();
+  return { von: von || defaultVon, bis: bis || todayStr };
+}
+
 function readJson(fileName) {
   const fullPath = path.join(ROOT, fileName);
   return JSON.parse(fs.readFileSync(fullPath, 'utf8').replace(/^\uFEFF/, ''));
@@ -312,6 +339,21 @@ function summarizeWorkflow(fileName) {
     addCheck('MHD und Bestand gekoppelt', js.includes('MHD_WITHIN_30_DAYS_LOW_BATCH_STOCK'), 'MHD <= 30 Tage und Restbestand < 5');
   }
 
+  if (title.startsWith('WF7')) {
+    addCheck('Webhook-Trigger', nodes.some((node) => node.type === 'n8n-nodes-base.webhook'), 'Manueller Nachfüllung-Aufruf per GET');
+    addCheck('Produkte-Update', googleNodes.length > 0, 'current_machine_qty und Slot-Bestand aktualisieren');
+  }
+
+  if (title.startsWith('WF8')) {
+    addCheck('Schedule-Trigger', nodes.some((node) => node.type === 'n8n-nodes-base.scheduleTrigger'), 'Tägl. 02:00 Aggregation');
+    addCheck('GuV-Append', googleNodes.some((node) => clean(node.name).toLowerCase().includes('guv')), 'GuV_Tagesposten befüllen');
+  }
+
+  if (title.startsWith('WF9')) {
+    addCheck('Drive-Trigger', nodes.some((node) => node.type === 'n8n-nodes-base.googleDriveTrigger'), 'Auto-Trigger bei neuer Pickliste');
+    addCheck('Idempotenz-Schutz', js.includes('PICKLISTE_VERARBEITET'), 'Verhindert Doppelverarbeitung');
+  }
+
   if (aggregateCodeNodes.length) {
     addCheck('Aggregierende Code-Nodes', codeModesOk, `${aggregateCodeNodes.length} Node(s) mit .first() oder $items(...)`);
   }
@@ -370,7 +412,8 @@ function summarizeN8nWorkflow(workflow) {
     webhooks: webhookNodes.map((node) => ({
       name: clean(node.name),
       path: clean(node.parameters?.path || node.webhookId),
-      method: clean(node.parameters?.httpMethod || 'POST').toUpperCase(),
+      // n8n Webhook default httpMethod ist GET (typeVersion 2+)
+      method: clean(node.parameters?.httpMethod || 'GET').toUpperCase(),
     })),
     tags: (workflow.tags || []).map((tag) => clean(tag.name || tag)).filter(Boolean),
   };
@@ -429,6 +472,12 @@ function firstProductionWebhookUrl(baseUrl, workflow) {
   return `${baseUrl}/webhook/${encodeURIComponent(webhook.path)}`;
 }
 
+function firstProductionWebhook(workflow) {
+  // Liefert den ersten aktiven Webhook-Node inkl. method, damit der Trigger korrekt aufgerufen wird.
+  if (!workflow?.active) return null;
+  return (workflow.webhooks || []).find((node) => node.path) || null;
+}
+
 function firstFormUrl(baseUrl, workflow) {
   const form = (workflow.formTriggers || []).find((node) => node.formPath);
   if (!form || !workflow.active) return '';
@@ -451,6 +500,8 @@ function buildWorkflowActions(n8n) {
     const workflow = pickWorkflowForAction(n8n.workflows || [], action.workflowName);
     const editorUrl = workflowEditorUrl(baseUrl, workflow?.id);
     const webhookUrl = workflow ? firstProductionWebhookUrl(baseUrl, workflow) : '';
+    const webhookNode = workflow ? firstProductionWebhook(workflow) : null;
+    const webhookMethod = webhookNode?.method || 'GET';
     const formUrl = workflow ? firstFormUrl(baseUrl, workflow) : '';
     const hasWebhook = Boolean(workflow?.webhooks?.length);
     const hasForm = Boolean(workflow?.formTriggers?.length);
@@ -458,6 +509,7 @@ function buildWorkflowActions(n8n) {
     let runnable = false;
     let status = 'Workflow nicht gefunden';
     let primaryUrl = '';
+    let primaryMethod = 'POST';
 
     if (workflow) {
       status = workflow.active ? 'Workflow gefunden, aber kein externer Trigger konfiguriert' : 'Workflow ist in n8n inaktiv';
@@ -470,7 +522,8 @@ function buildWorkflowActions(n8n) {
         triggerType = 'webhook';
         runnable = true;
         primaryUrl = webhookUrl;
-        status = 'Webhook kann ausgelöst werden';
+        primaryMethod = webhookMethod;
+        status = `Webhook kann ausgelöst werden (${webhookMethod})`;
       } else if (hasForm && !workflow.active) {
         triggerType = 'form';
         status = 'Form-Trigger vorhanden, aber Workflow ist inaktiv';
@@ -494,6 +547,7 @@ function buildWorkflowActions(n8n) {
       runnable,
       status,
       primaryUrl,
+      primaryMethod,
       editorUrl,
       formTriggers: workflow?.formTriggers || [],
       webhooks: workflow?.webhooks || [],
@@ -953,6 +1007,108 @@ async function buildDashboard() {
   };
 }
 
+async function buildGuv(query) {
+  const zeitraum = clean(query.zeitraum) || 'monat';
+  const maschine = clean(query.maschine);
+  const { von, bis } = guvDateRange(zeitraum, clean(query.von), clean(query.bis));
+
+  let rows, source, sourceError;
+  try {
+    rows = await fetchLiveSheet('GuV_Tagesposten');
+    source = 'google_sheets_live';
+  } catch (err) {
+    const wb = readWorkbook(findLatestWorkbookFile());
+    rows = (wb.sheets && wb.sheets.GuV_Tagesposten) || [];
+    source = 'local_xlsx';
+    sourceError = err.message;
+  }
+
+  const machineSet = new Set();
+  for (const row of rows) {
+    const m = clean(row.machine_id);
+    if (m) machineSet.add(m);
+  }
+
+  const filtered = rows.filter((row) => {
+    const d = clean(row.date);
+    if (!d || d < von || d > bis) return false;
+    if (maschine && clean(row.machine_id) !== maschine) return false;
+    return true;
+  });
+
+  let totalUmsatz = 0;
+  let totalWareneinsatz = 0;
+  let totalGuv = 0;
+  let totalQty = 0;
+  let parseWarnings = 0;
+  const productMap = new Map();
+
+  for (const row of filtered) {
+    const u = normalizeNumber(row.umsatz_brutto);
+    const w = normalizeNumber(row.wareneinsatz_brutto);
+    const g = normalizeNumber(row.guv);
+    const q = normalizeNumber(row.quantity_sold);
+    if (!Number.isFinite(u) || !Number.isFinite(w) || !Number.isFinite(g)) parseWarnings += 1;
+    totalUmsatz       += Number.isFinite(u) ? u : 0;
+    totalWareneinsatz += Number.isFinite(w) ? w : 0;
+    totalGuv          += Number.isFinite(g) ? g : 0;
+    totalQty          += Number.isFinite(q) ? q : 0;
+
+    const pk = clean(row.product_key);
+    if (!pk) continue;
+    if (!productMap.has(pk)) {
+      productMap.set(pk, {
+        product_key: pk,
+        nayax_product_name: clean(row.nayax_product_name),
+        produktart: clean(row.produktart),
+        quantity_sold: 0,
+        umsatz_brutto: 0,
+        wareneinsatz_brutto: 0,
+        guv: 0,
+      });
+    }
+    const p = productMap.get(pk);
+    p.quantity_sold       += Number.isFinite(q) ? q : 0;
+    p.umsatz_brutto       += Number.isFinite(u) ? u : 0;
+    p.wareneinsatz_brutto += Number.isFinite(w) ? w : 0;
+    p.guv                 += Number.isFinite(g) ? g : 0;
+  }
+
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const margePct = (g, u) => (u > 0 ? Math.round((g / u) * 1000) / 10 : null);
+
+  const produkte = [...productMap.values()]
+    .map((p) => ({
+      ...p,
+      umsatz_brutto: round2(p.umsatz_brutto),
+      wareneinsatz_brutto: round2(p.wareneinsatz_brutto),
+      guv: round2(p.guv),
+      guv_marge_pct: margePct(p.guv, p.umsatz_brutto),
+    }))
+    .sort((a, b) => b.umsatz_brutto - a.umsatz_brutto);
+
+  return {
+    von,
+    bis,
+    zeitraum,
+    maschine: maschine || 'alle',
+    source,
+    sourceError: sourceError || '',
+    kpis: {
+      umsatz_brutto: round2(totalUmsatz),
+      wareneinsatz_brutto: round2(totalWareneinsatz),
+      guv: round2(totalGuv),
+      quantity_sold: Math.round(totalQty),
+      guv_marge_pct: margePct(totalGuv, totalUmsatz),
+    },
+    maschinen: [...machineSet].sort(),
+    produkte,
+    rowCount: filtered.length,
+    totalRows: rows.length,
+    parseWarnings,
+  };
+}
+
 function sendJson(res, status, data) {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -1056,28 +1212,55 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (action.triggerType === 'webhook') {
-        const response = await fetch(action.primaryUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            source: 'automatenlager_dashboard',
-            action_id: action.id,
-            workflow_id: action.workflowId,
-            triggered_at: new Date().toISOString(),
-          }),
-        });
-        const text = await response.text();
+        const method = (action.primaryMethod || 'GET').toUpperCase();
+        const payload = {
+          source: 'automatenlager_dashboard',
+          action_id: action.id,
+          workflow_id: action.workflowId,
+          triggered_at: new Date().toISOString(),
+        };
+        // GET: query-string statt body. POST/PUT/PATCH: body.
+        let url = action.primaryUrl;
+        const init = { method, headers: {} };
+        if (['POST', 'PUT', 'PATCH'].includes(method)) {
+          init.headers['Content-Type'] = 'application/json';
+          init.body = JSON.stringify(payload);
+        } else {
+          const qs = new URLSearchParams(payload).toString();
+          url = url + (url.includes('?') ? '&' : '?') + qs;
+        }
+        let response, text;
+        try {
+          response = await fetch(url, init);
+          text = await response.text();
+        } catch (err) {
+          sendJson(res, 502, {
+            ok: false,
+            mode: 'webhook',
+            method,
+            message: `Webhook-Aufruf fehlgeschlagen: ${err.message}`,
+            action,
+          });
+          return;
+        }
         sendJson(res, response.ok ? 200 : 502, {
           ok: response.ok,
           mode: 'webhook',
+          method,
           status: response.status,
           response: text.slice(0, 1000),
+          message: response.ok ? '' : `Webhook antwortete mit ${response.status}: ${text.slice(0, 200)}`,
           action,
         });
         return;
       }
 
       sendJson(res, 409, { ok: false, action, message: 'Diese Aktion ist noch nicht auslösbar.' });
+      return;
+    }
+
+    if (parsed.pathname === '/api/guv') {
+      sendJson(res, 200, await buildGuv(parsed.query));
       return;
     }
 

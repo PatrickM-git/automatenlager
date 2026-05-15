@@ -195,7 +195,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const config = $('Config - WF5').first().json;\nconst products = $items('Google Sheets - Produkte lesen').map(i => i.json);\nconst batches = $items('Google Sheets - Lagerchargen lesen').map(i => i.json);\n\nconst alerts = [];\n\nfunction clean(value) {\n  return String(value ?? '')\n    .replace(/\\n/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction num(value) {\n  const n = Number(String(value ?? '').replace(',', '.'));\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction parseDate(value) {\n  const raw = clean(value);\n  if (!raw) return null;\n\n  const d = new Date(raw);\n  if (!Number.isNaN(d.getTime())) return d;\n\n  const m = raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);\n  if (m) return new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);\n\n  return null;\n}\n\nfunction todayBerlinIso() {\n  const parts = new Intl.DateTimeFormat('en-CA', {\n    timeZone: 'Europe/Berlin',\n    year: 'numeric',\n    month: '2-digit',\n    day: '2-digit',\n  }).formatToParts(new Date());\n\n  return [\n    parts.find(p => p.type === 'year')?.value,\n    parts.find(p => p.type === 'month')?.value,\n    parts.find(p => p.type === 'day')?.value,\n  ].join('-');\n}\n\nfunction daysUntil(value) {\n  const d = parseDate(value);\n  if (!d) return null;\n\n  const today = new Date(`${todayBerlinIso()}T00:00:00+01:00`);\n  const target = new Date(d);\n  target.setHours(0, 0, 0, 0);\n\n  return Math.ceil((target - today) / 86400000);\n}\n\nfunction isActive(value) {\n  const v = clean(value).toUpperCase();\n  return ['TRUE', '1', 'JA', 'YES', 'AKTIV', 'ACTIVE'].includes(v);\n}\n\nfunction isActiveProduct(row) {\n  return isActive(row.active) && !clean(row.valid_to_datetime || row.valid_to);\n}\n\nfunction isActiveBatch(row) {\n  return isActive(row.status);\n}\n\nfunction productName(row) {\n  return clean(\n    row.internal_product_name ||\n    row.nayax_product_name ||\n    row.product_name ||\n    row.product_key ||\n    'Unbekanntes Produkt'\n  );\n}\n\nfunction productFor(productKey) {\n  return products.find(row => clean(row.product_key) === productKey) || {};\n}\n\nfunction activeBatchTotal(productKey) {\n  return batches\n    .filter(batch => clean(batch.product_key) === productKey)\n    .filter(isActiveBatch)\n    .reduce((sum, batch) => sum + (num(batch.remaining_qty) ?? 0), 0);\n}\n\nconst now = new Date().toISOString();\nconst mhdWarningDays = Number(config.mhd_warning_days ?? 30);\n\nfor (const batch of batches) {\n  const productKey = clean(batch.product_key);\n  if (!productKey || !isActiveBatch(batch)) continue;\n\n  const mhd = clean(batch.mhd);\n  const days = daysUntil(mhd);\n  if (!mhd || days === null || days > mhdWarningDays) continue;\n\n  const product = productFor(productKey);\n  const name = productName(product.product_key ? product : batch);\n  const currentMachineQty = num(product.current_machine_qty);\n  const warehouseStockQty = activeBatchTotal(productKey);\n  // remaining_qty der aktiven Lagerchargen ist bereits der Gesamtbestand inklusive Automatenbestand.\n  const totalStockQty = warehouseStockQty;\n\n  alerts.push({\n    created_at: now,\n    type: 'MHD_WARNING',\n    severity: days < 0 ? 'critical' : 'warning',\n    product_key: productKey,\n    product_name: name,\n    internal_product_name: clean(product.internal_product_name),\n    nayax_product_name: clean(product.nayax_product_name),\n    batch_id: clean(batch.batch_id),\n    mhd,\n    remaining_qty: num(batch.remaining_qty),\n    current_machine_qty: currentMachineQty,\n    warehouse_stock_qty: warehouseStockQty,\n    total_stock_qty: totalStockQty,\n    machine_id: clean(product.machine_id),\n    mdb_code: clean(product.mdb_code),\n    message: days < 0\n      ? `${name}: Charge ${clean(batch.batch_id)} ist seit ${Math.abs(days)} Tag(en) abgelaufen.`\n      : `${name}: Charge ${clean(batch.batch_id)} läuft in ${days} Tag(en) ab.`\n  });\n}\n\nfor (const product of products) {\n  const productKey = clean(product.product_key);\n  if (!productKey || !isActiveProduct(product)) continue;\n\n  const currentMachineQty = num(product.current_machine_qty);\n  const minStock = num(product.min_stock);\n  if (currentMachineQty === null || minStock === null) continue;\n  if (currentMachineQty > (minStock + 1)) continue;\n\n  const warehouseStockQty = activeBatchTotal(productKey);\n  // remaining_qty der aktiven Lagerchargen ist bereits der Gesamtbestand inklusive Automatenbestand.\n  const totalStockQty = warehouseStockQty;\n  const targetStock = num(product.target_stock);\n  const machineCapacity = num(product.machine_capacity);\n  const name = productName(product);\n\n  alerts.push({\n    created_at: now,\n    type: 'LOW_STOCK',\n    severity: 'warning',\n    product_key: productKey,\n    product_name: name,\n    internal_product_name: clean(product.internal_product_name),\n    nayax_product_name: clean(product.nayax_product_name),\n    machine_id: clean(product.machine_id),\n    mdb_code: clean(product.mdb_code),\n    current_machine_qty: currentMachineQty,\n    warehouse_stock_qty: warehouseStockQty,\n    total_stock_qty: totalStockQty,\n    min_stock: minStock,\n    target_stock: targetStock,\n    machine_capacity: machineCapacity,\n    message: `${name}: Nur noch ${currentMachineQty} Stück im Automaten. Bestand gesamt: ${totalStockQty}.`\n  });\n}\n\nreturn [{\n  json: {\n    alerts,\n    summary: {\n      checked_batches: batches.length,\n      checked_products: products.length,\n      alerts_created: alerts.length,\n      created_at: now\n    }\n  }\n}];",
+        "jsCode": "const rows = $input.all().map(i => i.json);\nconst alerts = [];\n\nfunction clean(value) {\n  return String(value ?? '')\n    .replace(/\\n/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction num(value) {\n  const n = Number(String(value ?? '').replace(',', '.'));\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction parseDate(value) {\n  const raw = clean(value);\n  if (!raw) return null;\n  const d = new Date(raw);\n  if (!Number.isNaN(d.getTime())) {\n    return d;\n  }\n  const m = raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);\n  if (m) {\n    return new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);\n  }\n  return null;\n}\n\nfunction daysUntil(value) {\n  const d = parseDate(value);\n  if (!d) return null;\n  const today = new Date();\n  today.setHours(0, 0, 0, 0);\n  const target = new Date(d);\n  target.setHours(0, 0, 0, 0);\n  return Math.ceil((target - today) / 86400000);\n}\n\nfunction isActive(value) {\n  const v = clean(value).toUpperCase();\n  return ['TRUE', '1', 'JA', 'YES', 'AKTIV', 'ACTIVE'].includes(v);\n}\n\nfunction productName(row) {\n  return clean(\n    row.internal_product_name ||\n    row.nayax_product_name ||\n    row.product_name ||\n    row.product_key ||\n    'Unbekanntes Produkt'\n  );\n}\n\nconst now = new Date().toISOString();\n\n// PATCH DEDUP_ALERTS: lade existierende Hinweise und baue Set\n// fuer Type+ProductKey-Combos, die innerhalb der letzten DEDUP_DAYS Tage\n// schon gemeldet wurden (resolved=FALSE). Diese werden im WF5-Run\n// uebersprungen, sodass User nicht jeden Tag dieselbe Mail bekommt.\nconst DEDUP_DAYS = 7;\nlet existingHinweise = [];\ntry {\n  existingHinweise = $('Google Sheets - Hinweise lesen').all().map(i => i.json);\n} catch (e) {\n  existingHinweise = [];\n}\nconst dedupCutoff = new Date(Date.now() - DEDUP_DAYS * 24 * 60 * 60 * 1000);\nconst recentNotifications = new Set();\nfor (const h of existingHinweise) {\n  const resolved = clean(h.resolved).toUpperCase();\n  if (['TRUE','JA','YES','1','ERLEDIGT','RESOLVED'].includes(resolved)) continue;\n  const createdRaw = clean(h.created_at);\n  const created = parseDate(createdRaw);\n  if (!created || created < dedupCutoff) continue;\n  const key = clean(h.type) + '|' + clean(h.product_key) + '|' + clean(h.batch_id || '');\n  recentNotifications.add(key);\n}\nfunction shouldEmitAlert(type, productKey, batchId) {\n  const key = (type || '') + '|' + (productKey || '') + '|' + (batchId || '');\n  if (recentNotifications.has(key)) return false;\n  recentNotifications.add(key);  // Auch innerhalb diesem Lauf nicht doppelt melden\n  return true;\n}\n\n// PATCH-A2c: Empty/Low-Batch Aggregat\n// Ziel: Erkenne wenn Lagercharge-Summe pro product_key <= Schwellwert,\n// unabhaengig vom (oft stale) current_machine_qty.\n// low_batch_qty_threshold kommt aus Config-Node (default 5).\nconst config = ($('Config - WF5') ? $('Config - WF5').first()?.json : {}) || {};\nconst lowBatchThreshold = Number(config.low_batch_qty_threshold ?? 5);\n\nconst remainPerKey = new Map();\nconst sampleRowPerKey = new Map();\nfor (const row of rows) {\n  const pk = clean(row.product_key);\n  if (!pk) continue;\n  const r = num(row.remaining_qty);\n  // Nur aktive Chargen mit numerischem remaining zaehlen.\n  // (Produkte-Zeilen ohne batch_id haben r=null und werden uebersprungen.)\n  if (r === null) continue;\n  const status = clean(row.status).toLowerCase();\n  // Pro Lagercharge-Zeile: nur aktiv oder leer (nicht 'verbraucht'/'verworfen') beruecksichtigen.\n  if (status && !['aktiv', 'leer'].includes(status)) continue;\n  remainPerKey.set(pk, (remainPerKey.get(pk) || 0) + r);\n  if (!sampleRowPerKey.has(pk)) sampleRowPerKey.set(pk, row);\n}\n\nconst emittedBatchAlert = new Set();\nfor (const [pk, total] of remainPerKey.entries()) {\n  if (total > lowBatchThreshold) continue;\n  if (emittedBatchAlert.has(pk)) continue;\n  const _typ = total <= 0 ? 'EMPTY_BATCH' : 'LOW_BATCH';\n  if (!shouldEmitAlert(_typ, pk, '')) { emittedBatchAlert.add(pk); continue; }\n  const sample = sampleRowPerKey.get(pk) || {};\n  const name = productName(sample);\n  const crit = total <= 0;\n  alerts.push({\n    created_at: now,\n    type: crit ? 'EMPTY_BATCH' : 'LOW_BATCH',\n    severity: crit ? 'critical' : 'warning',\n    product_key: pk,\n    product_name: name,\n    internal_product_name: clean(sample.internal_product_name),\n    nayax_product_name: clean(sample.nayax_product_name),\n    machine_id: clean(sample.machine_id),\n    mdb_code: clean(sample.mdb_code),\n    total_remaining_qty: total,\n    threshold: lowBatchThreshold,\n    message: crit\n      ? `${name}: Lagerbestand ist 0 — Produkt komplett leer.`\n      : `${name}: Nur noch ${total} Stueck im Lager (Schwellwert ${lowBatchThreshold}).`\n  });\n  emittedBatchAlert.add(pk);\n}\n\nfor (const row of rows) {\n  const productKey = clean(row.product_key);\n  if (!productKey) continue;\n\n  // Nur aktive Zeilen berücksichtigen\n  const active =\n    isActive(row.active) ||\n    isActive(row.status) ||\n    isActive(row.replenishment_status);\n  if (!active) continue;\n\n  const name = productName(row);\n  const currentMachineQty = num(row.current_machine_qty);\n  const minStock = num(row.min_stock);\n  const targetStock = num(row.target_stock);\n  const machineCapacity = num(row.machine_capacity);\n  const mhd = clean(row.mhd);\n  const remainingQty = num(row.remaining_qty);\n  const days = daysUntil(mhd);\n\n  // MHD Warnung\n  if (mhd && days !== null && days <= 30 && shouldEmitAlert('MHD_WARNING', productKey, clean(row.batch_id))) {\n    alerts.push({\n      created_at: now,\n      type: 'MHD_WARNING',\n      severity: days < 0 ? 'critical' : 'warning',\n      product_key: productKey,\n      product_name: name,\n      internal_product_name: clean(row.internal_product_name),\n      nayax_product_name: clean(row.nayax_product_name),\n      batch_id: clean(row.batch_id),\n      mhd,\n      remaining_qty: remainingQty,\n      machine_id: clean(row.machine_id),\n      mdb_code: clean(row.mdb_code),\n      message:\n        days < 0\n          ? `${name}: Charge ${clean(row.batch_id)} ist seit ${Math.abs(days)} Tag(en) abgelaufen.`\n          : `${name}: Charge ${clean(row.batch_id)} läuft in ${days} Tag(en) ab.`\n    });\n  }\n\n  // PATCH AUTO_REFILL_WF5: LOW_STOCK informativ statt warning/critical,\n  // DEDUP: nur einmal pro 7 Tage\n  // weil WF3 auto-refill den Slot beim naechsten Sale heilt.\n  if (\n    currentMachineQty !== null &&\n    minStock !== null &&\n    machineCapacity !== null &&\n    machineCapacity > 0 &&\n    currentMachineQty < minStock &&\n    shouldEmitAlert('LOW_STOCK', productKey, '')\n  ) {\n    alerts.push({\n      created_at: now,\n      type: 'LOW_STOCK',\n      severity: 'info',\n      product_key: productKey,\n      product_name: name,\n      internal_product_name: clean(row.internal_product_name),\n      nayax_product_name: clean(row.nayax_product_name),\n      machine_id: clean(row.machine_id),\n      mdb_code: clean(row.mdb_code),\n      current_machine_qty: currentMachineQty,\n      min_stock: minStock,\n      target_stock: targetStock,\n      machine_capacity: machineCapacity,\n      message: currentMachineQty <= 0\n        ? `${name}: Slot laut Sheet leer — wird beim naechsten Sale auto-aufgefuellt.`\n        : `${name}: Slot laut Sheet bei ${currentMachineQty} Stueck.`\n    });\n  }\n}\n\n// PATCH AUTO_RESOLVE_WF5: Offene Hinweise auflösen wenn Bedingung nicht mehr gilt\n// Wird täglich von WF5 geprüft — User muss resolved=TRUE nie mehr manuell setzen.\nconst autoResolveHints = [];\nfor (const h of existingHinweise) {\n  const hResolved = String(h.resolved ?? '').trim().toUpperCase();\n  if (['TRUE','JA','YES','1','ERLEDIGT','RESOLVED'].includes(hResolved)) continue;\n  const hType = String(h.type ?? '').trim();\n  const hPk   = String(h.product_key ?? '').trim();\n  const hCat  = clean(h.created_at);\n  if (!hType || !hPk || !hCat) continue;\n\n  let shouldAutoResolve = false;\n\n  if (['EMPTY_BATCH', 'INSUFFICIENT_BATCH_STOCK'].includes(hType)) {\n    const totalRemain = remainPerKey.get(hPk) || 0;\n    if (totalRemain > 0) shouldAutoResolve = true;\n  }\n  if (hType === 'LOW_BATCH') {\n    const totalRemain = remainPerKey.get(hPk) || 0;\n    if (totalRemain > lowBatchThreshold) shouldAutoResolve = true;\n  }\n  if (hType === 'LOW_STOCK') {\n    // Resolve wenn irgendein aktiver Produkte-Slot für diesen product_key >= min_stock\n    const productRow = rows.find(r =>\n      String(r.product_key ?? '').trim() === hPk &&\n      isActive(r.active) &&\n      r.current_machine_qty !== undefined &&\n      r.min_stock !== undefined\n    );\n    if (productRow) {\n      const cmq  = num(productRow.current_machine_qty);\n      const minS = num(productRow.min_stock);\n      if (cmq !== null && minS !== null && cmq >= minS) shouldAutoResolve = true;\n    }\n  }\n\n  if (shouldAutoResolve) {\n    autoResolveHints.push({ created_at: hCat, resolved: 'TRUE' });\n  }\n}\n\nreturn [{\n  json: {\n    alerts,\n    autoResolveHints,\n    summary: {\n      checked_batches: rows.length,\n      alerts_created: alerts.length,\n      auto_resolved: autoResolveHints.length,\n      created_at: now\n    }\n  }\n}];",
         "mode": "runOnceForAllItems"
       },
       "id": "7319d132-3c09-4129-9825-d662d0871964",
@@ -497,6 +497,79 @@
         1264,
         240
       ]
+    },
+    {
+      "id": "08258de5-dd44-43b0-b273-c622c44eacf5",
+      "name": "Extract - Auto-Resolve Hinweise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        256
+      ],
+      "parameters": {
+        "jsCode": "// PATCH AUTO_RESOLVE_WF5: Gibt autoResolveHints als einzelne Items zurück.\n// Wenn keine Einträge vorhanden → kein Item → Google-Sheets-Update wird nicht ausgeführt.\nconst hints = ($input.first()?.json?.autoResolveHints) || [];\nif (!hints.length) return [];\nreturn hints.map(h => ({ json: h }));"
+      }
+    },
+    {
+      "id": "1c26dbe2-bcd8-49cb-bab0-915f5bd2776d",
+      "name": "Google Sheets - Hinweise auflösen",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1740,
+        256
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "5XfHt3SzjHCj8B5H",
+          "name": "Sheets Automatenlager"
+        }
+      },
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Fehler_und_Hinweise",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "created_at": "={{ $json.created_at }}",
+            "resolved": "={{ $json.resolved }}"
+          },
+          "matchingColumns": [
+            "created_at"
+          ],
+          "schema": [
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved",
+              "displayName": "resolved",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      }
     }
   ],
   "connections": {
@@ -586,6 +659,11 @@
         [
           {
             "node": "Merge1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extract - Auto-Resolve Hinweise",
             "type": "main",
             "index": 0
           }
@@ -690,6 +768,17 @@
           },
           {
             "node": "Code - Email Zusammenfassung erstellen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract - Auto-Resolve Hinweise": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Hinweise auflösen",
             "type": "main",
             "index": 0
           }

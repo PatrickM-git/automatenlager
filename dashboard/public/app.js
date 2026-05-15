@@ -16,6 +16,16 @@ const elements = {
   dataQuality:     document.querySelector('#dataQuality'),
   refreshButton:   document.querySelector('#refreshButton'),
   exportButton:    document.querySelector('#exportButton'),
+  // GuV
+  guvHealth:      document.querySelector('#guvHealth'),
+  guvKpis:        document.querySelector('#guvKpis'),
+  guvProdukte:    document.querySelector('#guvProdukte'),
+  guvStatus:      document.querySelector('#guvStatus'),
+  guvMaschine:    document.querySelector('#guvMaschine'),
+  guvCustomRange: document.querySelector('#guvCustomRange'),
+  guvVon:         document.querySelector('#guvVon'),
+  guvBis:         document.querySelector('#guvBis'),
+  guvApply:       document.querySelector('#guvApply'),
   // Einstellungen
   configHealth:    document.querySelector('#configHealth'),
   configStatus:    document.querySelector('#configStatus'),
@@ -328,6 +338,104 @@ function exportDashboard() {
   URL.revokeObjectURL(url);
 }
 
+// ── GuV ────────────────────────────────────────────────────────────────────
+
+const guvState = { zeitraum: 'monat', maschine: '', von: '', bis: '' };
+
+async function loadGuv() {
+  elements.guvHealth.textContent = 'Lädt…';
+  elements.guvHealth.className = 'status-pill';
+
+  const params = new URLSearchParams({ zeitraum: guvState.zeitraum });
+  if (guvState.maschine) params.set('maschine', guvState.maschine);
+  if (guvState.zeitraum === 'custom') {
+    if (guvState.von) params.set('von', guvState.von);
+    if (guvState.bis) params.set('bis', guvState.bis);
+  }
+
+  try {
+    const res = await fetch(`/api/guv?${params}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    renderGuv(await res.json());
+  } catch (err) {
+    elements.guvHealth.textContent = 'Fehler';
+    elements.guvHealth.className = 'status-pill danger';
+    elements.guvKpis.innerHTML = `<div class="empty-state">GuV konnte nicht geladen werden: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderGuv(data) {
+  elements.guvHealth.className = `status-pill ${data.rowCount > 0 ? 'ok' : 'warn'}`;
+  elements.guvHealth.textContent = data.rowCount > 0 ? `${data.rowCount} Einträge` : 'Keine Daten';
+
+  const currentMaschine = elements.guvMaschine.value;
+  elements.guvMaschine.innerHTML = '<option value="">Alle Maschinen</option>' +
+    (data.maschinen || []).map((m) => `<option value="${escapeHtml(m)}"${m === currentMaschine ? ' selected' : ''}>${escapeHtml(m)}</option>`).join('');
+
+  const k = data.kpis;
+  const fmt = (n) => (typeof n === 'number' ? n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '–');
+  const fmtPct = (n) => (n !== null && n !== undefined ? `${n.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %` : '–');
+
+  elements.guvKpis.innerHTML = [
+    `<article class="metric-card">
+      <div class="metric-label">Umsatz (brutto)</div>
+      <div class="metric-value">${escapeHtml(fmt(k.umsatz_brutto))} €</div>
+      <div class="metric-note">${escapeHtml(data.von)} – ${escapeHtml(data.bis)}</div>
+    </article>`,
+    `<article class="metric-card">
+      <div class="metric-label">Wareneinsatz (brutto)</div>
+      <div class="metric-value">${escapeHtml(fmt(k.wareneinsatz_brutto))} €</div>
+      <div class="metric-note">${escapeHtml(data.maschine !== 'alle' ? data.maschine : 'alle Maschinen')}</div>
+    </article>`,
+    `<article class="metric-card">
+      <div class="metric-label">GuV (Rohertrag)</div>
+      <div class="metric-value ${k.guv < 0 ? 'guv-negative' : ''}">${escapeHtml(fmt(k.guv))} €</div>
+      <div class="metric-note ${k.guv >= 0 ? 'ok' : 'warn'}">${k.guv >= 0 ? 'positiv' : 'negativ'} · ${escapeHtml(fmtPct(k.guv_marge_pct))} Marge</div>
+    </article>`,
+    `<article class="metric-card">
+      <div class="metric-label">Stück verkauft</div>
+      <div class="metric-value">${escapeHtml(String(k.quantity_sold))}</div>
+      <div class="metric-note">Ø ${k.quantity_sold > 0 && k.umsatz_brutto > 0 ? escapeHtml(fmt(k.umsatz_brutto / k.quantity_sold)) + ' € / Stück' : '–'}</div>
+    </article>`,
+  ].join('');
+
+  renderTable(elements.guvProdukte, [
+    { label: 'Produkt', key: 'nayax_product_name' },
+    { label: 'Art', key: 'produktart' },
+    { label: 'Stück', key: 'quantity_sold' },
+    { label: 'Umsatz €', render: (row) => escapeHtml(fmt(row.umsatz_brutto)) },
+    { label: 'Wareneins. €', render: (row) => escapeHtml(fmt(row.wareneinsatz_brutto)) },
+    { label: 'GuV €', render: (row) => `<span class="${row.guv < 0 ? 'warn' : ''}">${escapeHtml(fmt(row.guv))}</span>` },
+    { label: 'Marge %', render: (row) => escapeHtml(fmtPct(row.guv_marge_pct)) },
+  ], data.produkte || [], 'Keine GuV-Daten für diesen Zeitraum. WF8 in n8n ausführen, um erste Daten zu erzeugen.');
+
+  const notes = [];
+  if (data.sourceError) notes.push(`Fallback auf lokale XLSX: ${data.sourceError}`);
+  if (data.parseWarnings) notes.push(`${data.parseWarnings} Zeile(n) mit Formatierungsfehler (z.B. Datumsformat in Zahlenfeld)`);
+  elements.guvStatus.textContent = notes.join(' · ') || `Quelle: ${data.source} · ${data.totalRows} Zeilen gesamt`;
+}
+
+document.querySelectorAll('.guv-tab').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.guv-tab').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    guvState.zeitraum = btn.dataset.zeitraum;
+    elements.guvCustomRange.hidden = guvState.zeitraum !== 'custom';
+    if (guvState.zeitraum !== 'custom') loadGuv();
+  });
+});
+
+elements.guvApply.addEventListener('click', () => {
+  guvState.von = elements.guvVon.value;
+  guvState.bis = elements.guvBis.value;
+  if (guvState.von && guvState.bis) loadGuv();
+});
+
+elements.guvMaschine.addEventListener('change', () => {
+  guvState.maschine = elements.guvMaschine.value;
+  loadGuv();
+});
+
 // ── Einstellungen ──────────────────────────────────────────────────────────
 
 async function loadConfig() {
@@ -424,3 +532,4 @@ elements.exportButton.addEventListener('click', exportDashboard);
 
 loadDashboard();
 loadConfig();
+loadGuv();
