@@ -1,10 +1,10 @@
 {
-  "updatedAt": "2026-05-12T15:46:27.826Z",
+  "updatedAt": "2026-05-15T14:43:10.523Z",
   "createdAt": "2026-05-11T20:56:32.392Z",
   "id": "qwpQMhZqDAIs8Wi9",
   "name": "WF8 - GuV Tagesposten Aggregator",
   "description": "Taeglich um 02:00 aggregiert WF8 alle Verkaufstransaktionen pro (Tag × Maschine × Produkt) zu GuV-Tagesposten mit Umsatz, Wareneinsatz und Gewinn. Idempotent ueber bereits aggregierte Schluessel.",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
@@ -201,7 +201,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "const transactions = $items('Read - Verarbeitete_Transaktionen').map(i => i.json);\nconst batches      = $items('Read - Lagerchargen').map(i => i.json);\nconst products     = $items('Read - Produkte').map(i => i.json);\nconst config       = $items('Read - GuV_Konfiguration').map(i => i.json)[0] || {};\nconst existingGuV  = $items('Read - GuV_Tagesposten (vorhanden)').map(i => i.json);\n\nfunction clean(v) { return String(v == null ? '' : v).trim(); }\nfunction num(v)   { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0; }\nfunction fmt(n, d) { return Number.isFinite(n) ? n.toFixed(d) : '0'; }\n\nconst kleinunternehmerAktiv = clean(config.kleinunternehmer_aktiv).toUpperCase() === 'TRUE';\nconst mwstSnack    = num(config.mwst_snack)    || 7;\nconst mwstGetraenk = num(config.mwst_getraenk) || 19;\n\nfunction mwstVonProduktart(art) {\n  const a = clean(art).toLowerCase();\n  if (a === 'snack' || a.includes('snack') || a === 'riegel') return mwstSnack;\n  if (a === 'getraenk' || a.includes('getraenk') || a.includes('drink')) return mwstGetraenk;\n  return mwstGetraenk;\n}\n\nconst batchMap = new Map();\nfor (const b of batches) {\n  const id = clean(b.batch_id);\n  if (id) batchMap.set(id, b);\n}\n\nconst productMap = new Map();\nfor (const p of products) {\n  const k = clean(p.product_key);\n  if (k) productMap.set(k, p);\n}\n\nfunction aggKey(date, machineId, productKey) { return date + '|' + machineId + '|' + productKey; }\nconst existingKeys = new Set();\nfor (const r of existingGuV) {\n  const d = clean(r.date), m = clean(r.machine_id), p = clean(r.product_key);\n  if (d && m && p) existingKeys.add(aggKey(d, m, p));\n}\n\nfunction deriveDate(tx) {\n  const ts = clean(tx.settlement_datetime_gmt || tx.sale_date || tx.timestamp || tx.processed_at);\n  if (!ts) return '';\n  const m = ts.match(/^(\\d{4}-\\d{2}-\\d{2})/);\n  if (!m) return '';\n  if (m[1].startsWith('2001-')) return ''; // Sentinel-Wert\n  return m[1];\n}\n\nconst aggregates = new Map();\nlet skippedStatus = 0, skippedNoPrice = 0, skippedExisting = 0, skippedInvalid = 0, processed = 0;\n\nfor (const tx of transactions) {\n  const status = clean(tx.status).toUpperCase();\n  if (status && status !== 'OK') { skippedStatus++; continue; }\n\n  const date = deriveDate(tx);\n  const machineId  = clean(tx.machine_id);\n  const productKey = clean(tx.product_key);\n  if (!date || !machineId || !productKey) { skippedInvalid++; continue; }\n\n  const vkBrutto = num(tx.vk_preis_brutto);\n  if (vkBrutto <= 0) { skippedNoPrice++; continue; }\n\n  const key = aggKey(date, machineId, productKey);\n  if (existingKeys.has(key)) { skippedExisting++; continue; }\n\n  const qty = num(tx.quantity || tx.qty || 1) || 1;\n  const umsatzBr = num(tx.umsatz_brutto) > 0 ? num(tx.umsatz_brutto) : qty * vkBrutto;\n\n  const batchIds = clean(tx.batch_id_abgebucht).split(',').map(s => s.trim()).filter(Boolean);\n  let ekBrutto = 0;\n  let mwstEinkauf = 0;\n  if (batchIds.length > 0) {\n    const firstBatch = batchMap.get(batchIds[0]);\n    if (firstBatch) {\n      ekBrutto    = num(firstBatch.unit_cost);\n      mwstEinkauf = num(firstBatch.mwst_satz);\n    }\n  }\n\n  const product = productMap.get(productKey) || {};\n  const produktart = clean(product.produktart);\n  if (!mwstEinkauf || mwstEinkauf <= 0) mwstEinkauf = mwstVonProduktart(produktart);\n\n  const ekNetto  = mwstEinkauf > 0 ? ekBrutto / (1 + mwstEinkauf / 100) : ekBrutto;\n  const warenein = qty * ekBrutto;\n\n  if (!aggregates.has(key)) {\n    aggregates.set(key, {\n      date, machine_id: machineId, product_key: productKey,\n      mdb_code: clean(tx.mdb_code_extracted || tx.mdb_code),\n      product_slot_id: clean(tx.product_slot_id),\n      nayax_product_name: clean(tx.nayax_product_name || tx.product_name),\n      produktart,\n      qty_sum: 0, umsatz_sum: 0, warenein_sum: 0,\n      vk_weighted: 0, ek_brutto_weighted: 0, ek_netto_weighted: 0, mwst_weighted: 0,\n      batch_missing: false\n    });\n  }\n  const a = aggregates.get(key);\n  a.qty_sum            += qty;\n  a.umsatz_sum         += umsatzBr;\n  a.warenein_sum       += warenein;\n  a.vk_weighted        += vkBrutto * qty;\n  a.ek_brutto_weighted += ekBrutto * qty;\n  a.ek_netto_weighted  += ekNetto  * qty;\n  a.mwst_weighted      += mwstEinkauf * qty;\n  if (batchIds.length === 0 || ekBrutto === 0) a.batch_missing = true;\n  processed++;\n}\n\nconst now = new Date().toISOString();\nconst out = [];\nfor (const a of aggregates.values()) {\n  const q = a.qty_sum || 1;\n  out.push({\n    json: {\n      date: a.date,\n      machine_id: a.machine_id,\n      mdb_code: a.mdb_code,\n      product_slot_id: a.product_slot_id,\n      product_key: a.product_key,\n      nayax_product_name: a.nayax_product_name,\n      produktart: a.produktart,\n      quantity_sold: a.qty_sum,\n      vk_preis_brutto: fmt(a.vk_weighted / q, 4),\n      umsatz_brutto:   fmt(a.umsatz_sum, 2),\n      ek_preis_netto:  fmt(a.ek_netto_weighted / q, 4),\n      mwst_satz_einkauf: fmt(a.mwst_weighted / q, 2),\n      ek_preis_brutto: fmt(a.ek_brutto_weighted / q, 4),\n      wareneinsatz_brutto: fmt(a.warenein_sum, 2),\n      guv: fmt(a.umsatz_sum - a.warenein_sum, 2),\n      kleinunternehmer_aktiv: kleinunternehmerAktiv ? 'TRUE' : 'FALSE',\n      aggregiert_am: now + (a.batch_missing ? ' [EK-Daten fehlen]' : '')\n    }\n  });\n}\n\nif (out.length === 0) {\n  return [{ json: { _info: 'Keine neuen Aggregationen', processed, skippedStatus, skippedNoPrice, skippedExisting, skippedInvalid, _empty: true } }];\n}\nreturn out;"
+        "jsCode": "const transactions = $items('Read - Verarbeitete_Transaktionen').map(i => i.json);\nconst batches      = $items('Read - Lagerchargen').map(i => i.json);\nconst products     = $items('Read - Produkte').map(i => i.json);\nconst config       = $items('Read - GuV_Konfiguration').map(i => i.json)[0] || {};\nconst existingGuV  = $items('Read - GuV_Tagesposten (vorhanden)').map(i => i.json);\n\nfunction clean(v) { return String(v == null ? '' : v).trim(); }\nfunction num(v)   { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0; }\nfunction r2(n)    { return Number.isFinite(n) ? Math.round(n * 100)   / 100   : 0; }\nfunction r4(n)    { return Number.isFinite(n) ? Math.round(n * 10000) / 10000 : 0; }\n\nconst kleinunternehmerAktiv = clean(config.kleinunternehmer_aktiv).toUpperCase() === 'TRUE';\nconst mwstSnack    = num(config.mwst_snack)    || 7;\nconst mwstGetraenk = num(config.mwst_getraenk) || 19;\n\nfunction mwstVonProduktart(art) {\n  const a = clean(art).toLowerCase();\n  if (a === 'snack' || a.includes('snack') || a === 'riegel') return mwstSnack;\n  if (a === 'getraenk' || a.includes('getraenk') || a.includes('drink')) return mwstGetraenk;\n  return mwstGetraenk;\n}\n\nconst batchMap = new Map();\nfor (const b of batches) {\n  const id = clean(b.batch_id);\n  if (id) batchMap.set(id, b);\n}\n\nconst productMap = new Map();\nfor (const p of products) {\n  const k = clean(p.product_key);\n  if (k) productMap.set(k, p);\n}\n\nfunction aggKey(date, machineId, productKey) { return date + '|' + machineId + '|' + productKey; }\nconst existingKeys = new Set();\nfor (const r of existingGuV) {\n  const d = clean(r.date), m = clean(r.machine_id), p = clean(r.product_key);\n  if (d && m && p) existingKeys.add(aggKey(d, m, p));\n}\n\nfunction deriveDate(tx) {\n  const ts = clean(tx.settlement_datetime_gmt || tx.sale_date || tx.timestamp || tx.processed_at);\n  if (!ts) return '';\n  const m = ts.match(/^(\\d{4}-\\d{2}-\\d{2})/);\n  if (!m) return '';\n  if (m[1].startsWith('2001-')) return ''; // Sentinel-Wert\n  return m[1];\n}\n\nconst aggregates = new Map();\nlet skippedStatus = 0, skippedNoPrice = 0, skippedExisting = 0, skippedInvalid = 0, processed = 0;\n\nfor (const tx of transactions) {\n  const status = clean(tx.status).toUpperCase();\n  if (status && status !== 'OK') { skippedStatus++; continue; }\n\n  const date      = deriveDate(tx);\n  const machineId  = clean(tx.machine_id);\n  const productKey = clean(tx.product_key);\n  if (!date || !machineId || !productKey) { skippedInvalid++; continue; }\n\n  const vkBrutto = num(tx.vk_preis_brutto);\n  if (vkBrutto <= 0) { skippedNoPrice++; continue; }\n\n  const key = aggKey(date, machineId, productKey);\n  if (existingKeys.has(key)) { skippedExisting++; continue; }\n\n  const qty      = num(tx.quantity || tx.qty || 1) || 1;\n  const umsatzBr = num(tx.umsatz_brutto) > 0 ? num(tx.umsatz_brutto) : qty * vkBrutto;\n\n  const batchIds = clean(tx.batch_id_abgebucht).split(',').map(s => s.trim()).filter(Boolean);\n  let ekBrutto = 0;\n  let mwstEinkauf = 0;\n  if (batchIds.length > 0) {\n    const firstBatch = batchMap.get(batchIds[0]);\n    if (firstBatch) {\n      ekBrutto    = num(firstBatch.unit_cost);\n      mwstEinkauf = num(firstBatch.mwst_satz);\n    }\n  }\n\n  const product    = productMap.get(productKey) || {};\n  const produktart = clean(product.produktart);\n  if (!mwstEinkauf || mwstEinkauf <= 0) mwstEinkauf = mwstVonProduktart(produktart);\n\n  const ekNetto  = mwstEinkauf > 0 ? ekBrutto / (1 + mwstEinkauf / 100) : ekBrutto;\n  const warenein = qty * ekBrutto;\n\n  if (!aggregates.has(key)) {\n    aggregates.set(key, {\n      date, machine_id: machineId, product_key: productKey,\n      mdb_code: clean(tx.mdb_code_extracted || tx.mdb_code),\n      product_slot_id: clean(tx.product_slot_id),\n      nayax_product_name: clean(tx.nayax_product_name || tx.product_name),\n      produktart,\n      qty_sum: 0, umsatz_sum: 0, warenein_sum: 0,\n      vk_weighted: 0, ek_brutto_weighted: 0, ek_netto_weighted: 0, mwst_weighted: 0,\n      batch_missing: false,\n    });\n  }\n  const a = aggregates.get(key);\n  a.qty_sum            += qty;\n  a.umsatz_sum         += umsatzBr;\n  a.warenein_sum       += warenein;\n  a.vk_weighted        += vkBrutto * qty;\n  a.ek_brutto_weighted += ekBrutto * qty;\n  a.ek_netto_weighted  += ekNetto  * qty;\n  a.mwst_weighted      += mwstEinkauf * qty;\n  if (batchIds.length === 0 || ekBrutto === 0) a.batch_missing = true;\n  processed++;\n}\n\nconst now = new Date().toISOString();\nconst out = [];\nfor (const a of aggregates.values()) {\n  const q = a.qty_sum || 1;\n  out.push({\n    json: {\n      date:                  a.date,\n      machine_id:            a.machine_id,\n      mdb_code:              a.mdb_code,\n      product_slot_id:       a.product_slot_id,\n      product_key:           a.product_key,\n      nayax_product_name:    a.nayax_product_name,\n      produktart:            a.produktart,\n      quantity_sold:         a.qty_sum,\n      vk_preis_brutto:       r4(a.vk_weighted / q),\n      umsatz_brutto:         r2(a.umsatz_sum),\n      ek_preis_netto:        r4(a.ek_netto_weighted / q),\n      mwst_satz_einkauf:     r2(a.mwst_weighted / q),\n      ek_preis_brutto:       r4(a.ek_brutto_weighted / q),\n      wareneinsatz_brutto:   r2(a.warenein_sum),\n      guv:                   r2(a.umsatz_sum - a.warenein_sum),\n      kleinunternehmer_aktiv: kleinunternehmerAktiv ? 'TRUE' : 'FALSE',\n      aggregiert_am:         now + (a.batch_missing ? ' [EK-Daten fehlen]' : ''),\n    }\n  });\n}\n\nif (out.length === 0) {\n  return [{ json: { _info: 'Keine neuen Aggregationen', processed, skippedStatus, skippedNoPrice, skippedExisting, skippedInvalid, _empty: true } }];\n}\nreturn out;"
       }
     },
     {
@@ -325,18 +325,25 @@
   },
   "settings": {
     "executionOrder": "v1",
-    "availableInMCP": true
+    "availableInMCP": true,
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
   },
-  "staticData": null,
+  "staticData": {
+    "node:Cron - Taeglich 02:00": {
+      "recurrenceRules": []
+    }
+  },
   "meta": {
     "aiBuilderAssisted": true,
     "builderVariant": "mcp"
   },
   "pinData": null,
-  "versionId": "94909a3f-6ad5-41f4-b7c2-ad822261d631",
-  "activeVersionId": null,
-  "versionCounter": 2,
-  "triggerCount": 0,
+  "versionId": "7861dd97-ac83-45c0-bb61-606568b05fcc",
+  "activeVersionId": "7861dd97-ac83-45c0-bb61-606568b05fcc",
+  "versionCounter": 11,
+  "triggerCount": 1,
   "shared": [
     {
       "updatedAt": "2026-05-11T20:56:32.395Z",
@@ -357,5 +364,357 @@
     }
   ],
   "tags": [],
-  "activeVersion": null
+  "activeVersion": {
+    "updatedAt": "2026-05-15T14:42:42.000Z",
+    "createdAt": "2026-05-15T14:13:11.629Z",
+    "versionId": "7861dd97-ac83-45c0-bb61-606568b05fcc",
+    "workflowId": "qwpQMhZqDAIs8Wi9",
+    "nodes": [
+      {
+        "id": "35b5c4db-6f49-4ae0-b203-00872b1364c9",
+        "name": "Cron - Taeglich 02:00",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "days",
+                "daysInterval": 1,
+                "triggerAtHour": 2,
+                "triggerAtMinute": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "f1e26403-8991-4d95-8f19-c580044fb151",
+        "name": "Read - Verarbeitete_Transaktionen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          224,
+          0
+        ],
+        "parameters": {
+          "resource": "sheet",
+          "operation": "read",
+          "documentId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+          },
+          "sheetName": {
+            "__rl": true,
+            "mode": "name",
+            "value": "Verarbeitete_Transaktionen"
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "5XfHt3SzjHCj8B5H",
+            "name": "Sheets Automatenlager"
+          }
+        }
+      },
+      {
+        "id": "ffbd4c31-7944-4e95-84ce-398799a47efd",
+        "name": "Read - Lagerchargen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          448,
+          0
+        ],
+        "parameters": {
+          "resource": "sheet",
+          "operation": "read",
+          "documentId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+          },
+          "sheetName": {
+            "__rl": true,
+            "mode": "name",
+            "value": "Lagerchargen"
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "5XfHt3SzjHCj8B5H",
+            "name": "Sheets Automatenlager"
+          }
+        },
+        "executeOnce": true
+      },
+      {
+        "id": "eb11257a-2d65-4086-aef4-af28b819f035",
+        "name": "Read - Produkte",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          672,
+          0
+        ],
+        "parameters": {
+          "resource": "sheet",
+          "operation": "read",
+          "documentId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+          },
+          "sheetName": {
+            "__rl": true,
+            "mode": "name",
+            "value": "Produkte"
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "5XfHt3SzjHCj8B5H",
+            "name": "Sheets Automatenlager"
+          }
+        },
+        "executeOnce": true
+      },
+      {
+        "id": "9847a7bb-83a4-481b-8bc5-f43405ae3505",
+        "name": "Read - GuV_Konfiguration",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          896,
+          0
+        ],
+        "parameters": {
+          "resource": "sheet",
+          "operation": "read",
+          "documentId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+          },
+          "sheetName": {
+            "__rl": true,
+            "mode": "name",
+            "value": "GuV_Konfiguration"
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "5XfHt3SzjHCj8B5H",
+            "name": "Sheets Automatenlager"
+          }
+        },
+        "executeOnce": true
+      },
+      {
+        "id": "7e6d3694-d36d-4fce-9af1-a30e9077acf5",
+        "name": "Read - GuV_Tagesposten (vorhanden)",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          1120,
+          0
+        ],
+        "parameters": {
+          "resource": "sheet",
+          "operation": "read",
+          "documentId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+          },
+          "sheetName": {
+            "__rl": true,
+            "mode": "name",
+            "value": "GuV_Tagesposten"
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "5XfHt3SzjHCj8B5H",
+            "name": "Sheets Automatenlager"
+          }
+        },
+        "executeOnce": true,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "7d53fafe-d426-48a0-baa0-69831dac1445",
+        "name": "Code - GuV aggregieren",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1344,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const transactions = $items('Read - Verarbeitete_Transaktionen').map(i => i.json);\nconst batches      = $items('Read - Lagerchargen').map(i => i.json);\nconst products     = $items('Read - Produkte').map(i => i.json);\nconst config       = $items('Read - GuV_Konfiguration').map(i => i.json)[0] || {};\nconst existingGuV  = $items('Read - GuV_Tagesposten (vorhanden)').map(i => i.json);\n\nfunction clean(v) { return String(v == null ? '' : v).trim(); }\nfunction num(v)   { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0; }\nfunction r2(n)    { return Number.isFinite(n) ? Math.round(n * 100)   / 100   : 0; }\nfunction r4(n)    { return Number.isFinite(n) ? Math.round(n * 10000) / 10000 : 0; }\n\nconst kleinunternehmerAktiv = clean(config.kleinunternehmer_aktiv).toUpperCase() === 'TRUE';\nconst mwstSnack    = num(config.mwst_snack)    || 7;\nconst mwstGetraenk = num(config.mwst_getraenk) || 19;\n\nfunction mwstVonProduktart(art) {\n  const a = clean(art).toLowerCase();\n  if (a === 'snack' || a.includes('snack') || a === 'riegel') return mwstSnack;\n  if (a === 'getraenk' || a.includes('getraenk') || a.includes('drink')) return mwstGetraenk;\n  return mwstGetraenk;\n}\n\nconst batchMap = new Map();\nfor (const b of batches) {\n  const id = clean(b.batch_id);\n  if (id) batchMap.set(id, b);\n}\n\nconst productMap = new Map();\nfor (const p of products) {\n  const k = clean(p.product_key);\n  if (k) productMap.set(k, p);\n}\n\nfunction aggKey(date, machineId, productKey) { return date + '|' + machineId + '|' + productKey; }\nconst existingKeys = new Set();\nfor (const r of existingGuV) {\n  const d = clean(r.date), m = clean(r.machine_id), p = clean(r.product_key);\n  if (d && m && p) existingKeys.add(aggKey(d, m, p));\n}\n\nfunction deriveDate(tx) {\n  const ts = clean(tx.settlement_datetime_gmt || tx.sale_date || tx.timestamp || tx.processed_at);\n  if (!ts) return '';\n  const m = ts.match(/^(\\d{4}-\\d{2}-\\d{2})/);\n  if (!m) return '';\n  if (m[1].startsWith('2001-')) return ''; // Sentinel-Wert\n  return m[1];\n}\n\nconst aggregates = new Map();\nlet skippedStatus = 0, skippedNoPrice = 0, skippedExisting = 0, skippedInvalid = 0, processed = 0;\n\nfor (const tx of transactions) {\n  const status = clean(tx.status).toUpperCase();\n  if (status && status !== 'OK') { skippedStatus++; continue; }\n\n  const date      = deriveDate(tx);\n  const machineId  = clean(tx.machine_id);\n  const productKey = clean(tx.product_key);\n  if (!date || !machineId || !productKey) { skippedInvalid++; continue; }\n\n  const vkBrutto = num(tx.vk_preis_brutto);\n  if (vkBrutto <= 0) { skippedNoPrice++; continue; }\n\n  const key = aggKey(date, machineId, productKey);\n  if (existingKeys.has(key)) { skippedExisting++; continue; }\n\n  const qty      = num(tx.quantity || tx.qty || 1) || 1;\n  const umsatzBr = num(tx.umsatz_brutto) > 0 ? num(tx.umsatz_brutto) : qty * vkBrutto;\n\n  const batchIds = clean(tx.batch_id_abgebucht).split(',').map(s => s.trim()).filter(Boolean);\n  let ekBrutto = 0;\n  let mwstEinkauf = 0;\n  if (batchIds.length > 0) {\n    const firstBatch = batchMap.get(batchIds[0]);\n    if (firstBatch) {\n      ekBrutto    = num(firstBatch.unit_cost);\n      mwstEinkauf = num(firstBatch.mwst_satz);\n    }\n  }\n\n  const product    = productMap.get(productKey) || {};\n  const produktart = clean(product.produktart);\n  if (!mwstEinkauf || mwstEinkauf <= 0) mwstEinkauf = mwstVonProduktart(produktart);\n\n  const ekNetto  = mwstEinkauf > 0 ? ekBrutto / (1 + mwstEinkauf / 100) : ekBrutto;\n  const warenein = qty * ekBrutto;\n\n  if (!aggregates.has(key)) {\n    aggregates.set(key, {\n      date, machine_id: machineId, product_key: productKey,\n      mdb_code: clean(tx.mdb_code_extracted || tx.mdb_code),\n      product_slot_id: clean(tx.product_slot_id),\n      nayax_product_name: clean(tx.nayax_product_name || tx.product_name),\n      produktart,\n      qty_sum: 0, umsatz_sum: 0, warenein_sum: 0,\n      vk_weighted: 0, ek_brutto_weighted: 0, ek_netto_weighted: 0, mwst_weighted: 0,\n      batch_missing: false,\n    });\n  }\n  const a = aggregates.get(key);\n  a.qty_sum            += qty;\n  a.umsatz_sum         += umsatzBr;\n  a.warenein_sum       += warenein;\n  a.vk_weighted        += vkBrutto * qty;\n  a.ek_brutto_weighted += ekBrutto * qty;\n  a.ek_netto_weighted  += ekNetto  * qty;\n  a.mwst_weighted      += mwstEinkauf * qty;\n  if (batchIds.length === 0 || ekBrutto === 0) a.batch_missing = true;\n  processed++;\n}\n\nconst now = new Date().toISOString();\nconst out = [];\nfor (const a of aggregates.values()) {\n  const q = a.qty_sum || 1;\n  out.push({\n    json: {\n      date:                  a.date,\n      machine_id:            a.machine_id,\n      mdb_code:              a.mdb_code,\n      product_slot_id:       a.product_slot_id,\n      product_key:           a.product_key,\n      nayax_product_name:    a.nayax_product_name,\n      produktart:            a.produktart,\n      quantity_sold:         a.qty_sum,\n      vk_preis_brutto:       r4(a.vk_weighted / q),\n      umsatz_brutto:         r2(a.umsatz_sum),\n      ek_preis_netto:        r4(a.ek_netto_weighted / q),\n      mwst_satz_einkauf:     r2(a.mwst_weighted / q),\n      ek_preis_brutto:       r4(a.ek_brutto_weighted / q),\n      wareneinsatz_brutto:   r2(a.warenein_sum),\n      guv:                   r2(a.umsatz_sum - a.warenein_sum),\n      kleinunternehmer_aktiv: kleinunternehmerAktiv ? 'TRUE' : 'FALSE',\n      aggregiert_am:         now + (a.batch_missing ? ' [EK-Daten fehlen]' : ''),\n    }\n  });\n}\n\nif (out.length === 0) {\n  return [{ json: { _info: 'Keine neuen Aggregationen', processed, skippedStatus, skippedNoPrice, skippedExisting, skippedInvalid, _empty: true } }];\n}\nreturn out;"
+        }
+      },
+      {
+        "id": "3a753900-d198-44f1-bd33-4a5f04e0bfb8",
+        "name": "Append - GuV_Tagesposten",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          1568,
+          0
+        ],
+        "parameters": {
+          "resource": "sheet",
+          "operation": "append",
+          "documentId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+          },
+          "sheetName": {
+            "__rl": true,
+            "mode": "name",
+            "value": "GuV_Tagesposten"
+          },
+          "columns": {
+            "mappingMode": "autoMapInputData",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "5XfHt3SzjHCj8B5H",
+            "name": "Sheets Automatenlager"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Cron - Taeglich 02:00": {
+        "main": [
+          [
+            {
+              "node": "Read - Verarbeitete_Transaktionen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read - Verarbeitete_Transaktionen": {
+        "main": [
+          [
+            {
+              "node": "Read - Lagerchargen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read - Lagerchargen": {
+        "main": [
+          [
+            {
+              "node": "Read - Produkte",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read - Produkte": {
+        "main": [
+          [
+            {
+              "node": "Read - GuV_Konfiguration",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read - GuV_Konfiguration": {
+        "main": [
+          [
+            {
+              "node": "Read - GuV_Tagesposten (vorhanden)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read - GuV_Tagesposten (vorhanden)": {
+        "main": [
+          [
+            {
+              "node": "Code - GuV aggregieren",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - GuV aggregieren": {
+        "main": [
+          [
+            {
+              "node": "Append - GuV_Tagesposten",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Patrick Matthes",
+    "name": "Version 1",
+    "description": "",
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-05-15T14:42:42.748Z",
+        "id": 55,
+        "workflowId": "qwpQMhZqDAIs8Wi9",
+        "versionId": "7861dd97-ac83-45c0-bb61-606568b05fcc",
+        "event": "activated",
+        "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+      },
+      {
+        "createdAt": "2026-05-15T14:43:00.157Z",
+        "id": 57,
+        "workflowId": "qwpQMhZqDAIs8Wi9",
+        "versionId": "7861dd97-ac83-45c0-bb61-606568b05fcc",
+        "event": "activated",
+        "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+      },
+      {
+        "createdAt": "2026-05-15T14:43:00.141Z",
+        "id": 56,
+        "workflowId": "qwpQMhZqDAIs8Wi9",
+        "versionId": "7861dd97-ac83-45c0-bb61-606568b05fcc",
+        "event": "deactivated",
+        "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+      }
+    ]
+  }
 }

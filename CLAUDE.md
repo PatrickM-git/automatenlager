@@ -106,17 +106,16 @@ N8N_API_KEY=...
 
 ## Current Next Step
 
-**Phase A5 + A6 abgeschlossen (2026-05-15):**
-- `/api/guv` Endpoint in `dashboard/server.js` implementiert
-- GuV-Frontend-Section (Zeitraum-Tabs, Maschinen-Dropdown, KPI-Tiles, Produkttabelle) in Dashboard eingebaut
-- WF7, WF8, WF9 in Workflow-Landschaft aufgenommen
+**Session 10 abgeschlossen (2026-05-18) — WF9 produktiv:**
+- WF9 vollstaendig getestet: 20/20 Produkte erkannt, Caps korrekt, Slots aktualisiert
+- Bugfixes: `c.active` → `c.status`, Backstock-Fill-Logik, Apostroph-Normalisierung, responseMode
+- Aktueller WF9-Code: `guv_check_tmp/wf9_pickliste_code.js`
+- Alle WF1–WF9 aktiv (ausser WF6 inaktiv/veraltet)
 
-**Naechste Schritte (manuell):**
-1. Google Drive Credential `UcOBo2UdCzAv1SBG` in n8n re-authentifizieren → WF9 freischalten
-2. Pickliste-Testdatei aus Google Drive Ordner entfernen
-3. GuV_Tagesposten Spalte `guv` im Google Sheet auf Format "Zahl" stellen
-4. WF8 auf "active" setzen (Cron taeglich 02:00)
-5. T08g Snickers: `current_machine_qty` auf 3 setzen → 25/25 Tests
+**Naechste Schritte:**
+1. Naechste echte Pickliste in Ordner legen → WF9 loest automatisch aus
+2. Lagerchargen-Abgleich mit Nayax-Transaktions-Excel (historische Bereinigung)
+3. Abgelaufene MHD-Produkte: `remaining_qty` auf 0 setzen, `current_machine_qty` anpassen
 
 ## WF7 Nachfuellung Webhook
 

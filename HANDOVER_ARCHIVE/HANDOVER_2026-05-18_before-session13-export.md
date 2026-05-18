@@ -2,18 +2,6 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-05-18 (Session 13 – WF7/WF8/WF9 JSON-Export aktualisiert)
-
-### Diese Session
-
-1. **WF7/WF8/WF9 JSON-Exporte aktualisiert** (Vorbereitung Miniserver-Migration):
-   - `WF7 - Nachfuellung melden.json` → Stand 2026-05-13 (13 Nodes)
-   - `WF8 - GuV Tagesposten Aggregator.json` → Stand 2026-05-15 (8 Nodes) — war veraltet (2026-05-12)
-   - `WF9 - Pickliste verarbeiten.json` → Stand 2026-05-18 (23 Nodes)
-   - Alle WF1–WF9 haben jetzt aktuelle JSON-Exporte im Projektordner ✅
-
----
-
 ## Stand: 2026-05-18 (Session 11+12 – Historischer Abgleich + GuV-Backfill abgeschlossen)
 
 ### Diese Session
