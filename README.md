@@ -6,7 +6,7 @@ Das Ziel ist ein operatives System, das Nayax-Verkaeufe automatisch verarbeitet,
 
 ## Aktueller Entwicklungsstand
 
-- WF1 bis WF5 liegen als n8n-Workflow-JSONs im Projekt.
+- WF0 bis WF5 und WF8 liegen als n8n-Workflow-JSONs im Projekt.
 - WF1 startet WF2 nach dem Rechnungseingang.
 - WF2 verarbeitet Produktstamm, Aliase, Lagerchargen und Rechnungsvorschlaege. Slotzuordnungen sollen nicht direkt in WF2 gesetzt werden.
 - WF2 kann WF4 optional ausloesen, wenn ein neues Produkt direkt einem Automaten/MDB-Slot zugeordnet werden soll.
@@ -14,7 +14,8 @@ Das Ziel ist ein operatives System, das Nayax-Verkaeufe automatisch verarbeitet,
 - WF3 kann WF4 bei MDB-Abweichungen vorbereiten, ohne Verkaeufe hart zu blockieren.
 - WF4 ist die einzige fachliche Wahrheit fuer aktive MDB-/Slot-Zuordnungen, product_slot_id, active TRUE/FALSE und Historisierung.
 - WF5 ueberwacht MHD, niedrige Lagerbestaende und Tagesverkaeufe und erstellt eine Mail-Zusammenfassung. Die lokale JSON rechnet `Bestand gesamt` aus aktiven Lagerchargen, ohne den Automatenbestand doppelt zu zaehlen.
-- Ein lokales Dashboard unter `dashboard/` zeigt Workflows, Live-n8n-Status, Google-Sheets-/XLSX-Datenqualitaet und Buttons zum Starten bzw. Oeffnen der wichtigsten Workflows.
+- WF8 aggregiert GuV-Tagesposten aus Verkaufstransaktionen.
+- Ein lokales Dashboard unter `dashboard/` zeigt Workflows, Live-n8n-Status, Google-Sheets-/XLSX-Datenqualitaet, GuV-KPIs ueber `/api/guv` und Buttons zum Starten bzw. Oeffnen der wichtigsten Workflows.
 - WF0 ist ein einmaliger Reparaturworkflow fuer product_slot_id-Backfill und gehoert nicht zum laufenden Tagesbetrieb.
 
 ## Tech-Stack
@@ -96,6 +97,7 @@ Die Workflow-Dateien koennen in n8n importiert oder mit den live vorhandenen Wor
 |-- WF3 Nayax Lynx FIFO Lagerbestand - manueller Abruf - mit WF4 Integration.json
 |-- WF4 - MDB Produktzuordnung bearbeiten.json
 |-- WF5 - MHD und niedrige Lagercharge ueberwachen.json
+|-- WF8 - GuV Tagesposten Aggregator.json
 |-- nayax_lager_google_sheets_import_aktualisiert_v3_kitkat_2026-05-02.xlsx
 `-- dashboard/
     |-- package.json
@@ -122,11 +124,12 @@ Die Workflow-Dateien koennen in n8n importiert oder mit den live vorhandenen Wor
 - `WF3 Nayax Lynx FIFO Lagerbestand - manueller Abruf - mit WF4 Integration.json`: Nayax-Verkaeufe, FIFO-Abbuchung und MDB-Kontrolllogik.
 - `WF4 - MDB Produktzuordnung bearbeiten.json`: Historisierte MDB-/Slot-/Produktzuordnung.
 - `WF5 - MHD und niedrige Lagercharge ueberwachen.json`: MHD- und Lagerbestandspruefung mit Benachrichtigung.
+- `WF8 - GuV Tagesposten Aggregator.json`: Aggregiert `Verarbeitete_Transaktionen` zu `GuV_Tagesposten`.
 - `nayax_lager_google_sheets_import_aktualisiert_v3_kitkat_2026-05-02.xlsx`: Lokaler Snapshot der Google-Sheets-Struktur und Arbeitsdaten.
 
 ### Dashboard
 
-- `dashboard/server.js`: Lokaler Node-Server, API fuer Dashboarddaten, Live-n8n-Abfrage, Google-Sheets-/XLSX-Auswertung und Workflow-Trigger.
+- `dashboard/server.js`: Lokaler Node-Server, API fuer Dashboarddaten, GuV-KPIs (`GET /api/guv`), Live-n8n-Abfrage, Google-Sheets-/XLSX-Auswertung und Workflow-Trigger.
 - `dashboard/public/index.html`: Dashboard-Struktur.
 - `dashboard/public/app.js`: Rendering, Aktionen, Tabellen, Workflow-Buttons.
 - `dashboard/public/styles.css`: Dashboard-Layout und UI-Styling.

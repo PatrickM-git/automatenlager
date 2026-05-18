@@ -14,6 +14,7 @@ flowchart LR
   WF2 --> Sheets
   WF4 --> Sheets
   WF5["WF5 MHD + Lagercheck"] --> Sheets
+  WF8["WF8 GuV Aggregator"] --> Sheets
   Sheets --> Dashboard["Lokales Dashboard"]
   N8N["n8n API"] --> Dashboard
   Dashboard -->|Webhook/Form| N8N
@@ -32,6 +33,7 @@ Das System besteht aus n8n-Workflows, Google Sheets als Arbeits- und Logschicht,
 | WF3 | Verkauf / FIFO | Nayax-Verkaeufe verarbeiten, FIFO abbuchen, Transaktionen loggen |
 | WF4 | Slot-Historie | Aktive MDB-/Slot-Zuordnungen setzen, schliessen und historisieren |
 | WF5 | Monitoring | MHD und niedrige Lagerbestaende pruefen, Hinweise loggen, Mail senden |
+| WF8 | GuV | Verkaufstransaktionen zu GuV-Tagesposten aggregieren |
 
 ## Zentrale Datenfluesse
 
@@ -51,6 +53,12 @@ Das System besteht aus n8n-Workflows, Google Sheets als Arbeits- und Logschicht,
 4. FIFO bucht aktive Lagerchargen ab.
 5. MDB-Code wird als Kontrollsignal genutzt.
 6. Bei MDB-Abweichung wird eine Warnung geschrieben und optional WF4 vorbereitet.
+
+### Verkauf zu GuV
+
+1. WF3 schreibt Verkaufsergebnisse inkl. `umsatz_brutto`, `batch_id_abgebucht` und MDB-Code nach `Verarbeitete_Transaktionen`.
+2. WF8 aggregiert daraus `GuV_Tagesposten` nach Tag, Maschine, MDB-Slot und Produkt.
+3. Das Dashboard liefert ueber `GET /api/guv` Zeitraum-/Maschinenfilter, KPI-Summen und Produkttabellen aus `GuV_Tagesposten`.
 
 ### Produkt-/MDB-Wechsel
 
@@ -166,6 +174,7 @@ Das Dashboard liegt in `dashboard/` und besteht aus:
 Der Server liefert:
 
 - `GET /api/dashboard`: Projekt-, Workflow-, n8n- und Datenqualitaetsstatus
+- `GET /api/guv`: GuV-KPIs und Produkttabelle aus `GuV_Tagesposten`, filterbar ueber `range`, `start`, `end` und `machine_id`
 - `POST /api/actions/:id/trigger`: Startet einen Webhook-Workflow oder oeffnet ein n8n Form
 
 Die Live-n8n-Verbindung nutzt:
