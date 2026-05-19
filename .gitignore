@@ -77,9 +77,12 @@ vite.config.ts.timestamp-*
 # Local one-off helper scripts
 patch_*.py
 
+# Temporäre Diagnose- und Patch-Skripte
+guv_check_tmp/
+guv_beispiel/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db
-.vscode/
 .idea/
 .vscode-test

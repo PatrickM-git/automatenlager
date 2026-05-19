@@ -1,0 +1,12 @@
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "files.exclude": {
+    "guv_check_tmp": true,
+    "guv_beispiel": true
+  },
+  "git.autofetch": true,
+  "git.confirmSync": false,
+  "github.gitProtocol": "https",
+  "claude.projectMemoryPath": "${workspaceFolder}/CLAUDE.md"
+}
