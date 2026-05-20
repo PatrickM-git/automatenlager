@@ -2,22 +2,6 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-05-20 (Session 16 – WF3 Multi-Slot MDB-Fix)
-
-### Diese Session
-
-1. **WF3 MDB-Kontrolle für Produkte auf mehreren Slots gefixt**:
-   - **Problem**: `MDB-Kontrolle für Lichtenauer still(47 = 1.50): erwartet 57, Nayax meldet 47. Verkauf wird weiter verarbeitet.` → falsche Warnung + Mail
-   - **Ursache**: Lichtenauer still ist auf **zwei aktiven Slots** (MDB 47 UND MDB 57). `findProductByName` gab den Slot mit MDB 57 zurück (erster Treffer). Die Mismatch-Prüfung `expectedMdb !== mdbCode` erkannte zwar, dass es kein *anderes* Produkt auf MDB 47 gibt, aber nicht, dass das *gleiche* Produkt dort ebenfalls aktiv ist → `MDB_CODE_CHANGED_FOR_PRODUCT` fälschlicherweise
-   - **Fix**: In `getProductForSale` (Node `Code - FIFO berechnen`): Vor dem `differentProductOnActualMdb`-Zweig neuer Multi-Slot-Check: Wenn `productOnActualMdb.product_key === product.product_key` → `reason: 'OK'` + `product` auf den korrekten Slot-Eintrag (mit MDB 47) umbiegen, damit `queueProductQtyDeduction` den richtigen `product_slot_id` nutzt
-   - Patch direkt via n8n REST API eingespielt (`PUT /api/v1/workflows/2PFfPf0sVmMW7Fpp`)
-   - Gepatchter Code: `guv_check_tmp/fifo_code_original.js`
-   - Lokales JSON aktualisiert: `WF3 Nayax Lynx FIFO Lagerbestand - manueller Abruf - mit WF4 Integration.json`
-
-2. **Fehler_und_Hinweise-Bereinigung**: Nicht durchgeführt (kein sicherer Zeilen-Identifier ohne Live-Sheet-Lesezugriff). Bereits existierende Warnung bleibt im Sheet — wird beim nächsten WF3-Lauf nicht mehr neu erzeugt.
-
----
-
 ## Stand: 2026-05-20 (Session 15 – WF1 Claude-JSON-Fix + Webhook-Diagnose)
 
 ### Diese Session
