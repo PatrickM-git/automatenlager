@@ -2,30 +2,6 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-05-20 (Session 15 – WF1 Claude-JSON-Fix + Webhook-Diagnose)
-
-### Diese Session
-
-1. **WF1 Claude-Node JSON-Fehler behoben**:
-   - Problem: `Claude - Rechnung auslesen` warf `The value in the "JSON Body" field is not valid JSON` bei großen PDFs (Position 41694)
-   - Ursache: `jsonBody` war ein n8n-Template-String `={"data":"{{ $json.file_base64 }}"}` — n8n-Template-Engine scheitert bei sehr langen base64-Strings daran, das Ergebnis als JSON zu parsen
-   - Fix: `Code - Claude Input vorbereiten` baut jetzt den gesamten Claude-API-Request via `JSON.stringify()` und gibt ihn als `claude_request_body` weiter
-   - `Claude - Rechnung auslesen` jsonBody = `={{ $json.claude_request_body }}` (vorberechneter String, kein Template mehr)
-   - Patch direkt via n8n REST API eingespielt (`PUT /api/v1/workflows/dKNRRxkCPmVsArJ0`) — kein Import nötig
-   - Patch-Script: `guv_check_tmp/patch_wf1_api.js`
-   - Lokales JSON aktualisiert: `WF1 - Rechnungseingang automatisch mit Claude.json`
-
-2. **WF1 Webhook-Diagnose**:
-   - Problem: Webhook wurde nicht automatisch durch Google Drive ausgelöst
-   - Ursache: n8n läuft auf `127.0.0.1:5678` — Google Drive Push-Notifications können Localhost nicht erreichen
-   - WF1 sucht Google Drive selbst ab (`Google Drive - Rechnungen suchen1` via Drive API), der Webhook muss nur den Start anstoßen
-   - Lösung: Webhook bleibt für manuelles Auslösen erhalten (Dashboard-Button "Workflow starten" funktioniert, da Dashboard ebenfalls auf Localhost läuft)
-   - Kein Schedule Trigger gewünscht — Auslösung nur manuell via Dashboard oder n8n Manual Trigger
-
-3. **WF1 ID ermittelt**: `dKNRRxkCPmVsArJ0`
-
----
-
 ## Stand: 2026-05-19 (Session 14 – WF5 Email-Dedup-Fix)
 
 ### Diese Session
@@ -128,7 +104,7 @@
 
 | WF | ID | Status | Beschreibung |
 |---|---|---|---|
-| WF1 | dKNRRxkCPmVsArJ0 | aktiv | Rechnungseingang mit Claude |
+| WF1 | — | aktiv | Rechnungseingang mit Claude |
 | WF2 | — | aktiv | Smart Product Selection, Freigabe |
 | WF3 | 2PFfPf0sVmMW7Fpp | aktiv | Nayax FIFO Lagerbestand (manueller Abruf) |
 | WF4 | — | aktiv | MDB Produktzuordnung |
@@ -153,7 +129,6 @@
 | WF5 ID | `A1TQ7CnHXonafVIv` |
 | WF7 ID | `nla63DjpTgJrFXDj` |
 | WF8 ID | `qwpQMhZqDAIs8Wi9` |
-| WF1 ID | `dKNRRxkCPmVsArJ0` |
 | WF9 ID | `UtXagT58XYNwxUM5` |
 | WF9 Webhook-Path | `pickliste-verarbeiten` |
 | WF9 Pickliste-Ordner (unbearbeitet) | `1Djrp-44NtazCB3pa-07S-uK769gJ2ZcS` |
