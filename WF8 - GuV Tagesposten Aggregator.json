@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-05-15T14:43:10.523Z",
-  "createdAt": "2026-05-11T20:56:32.392Z",
-  "id": "qwpQMhZqDAIs8Wi9",
+  "updatedAt": "2026-05-21T18:40:42.518Z",
+  "createdAt": "2026-05-21T18:40:42.518Z",
+  "id": "AMXktRs6Z28FuzSE",
   "name": "WF8 - GuV Tagesposten Aggregator",
-  "description": "Taeglich um 02:00 aggregiert WF8 alle Verkaufstransaktionen pro (Tag × Maschine × Produkt) zu GuV-Tagesposten mit Umsatz, Wareneinsatz und Gewinn. Idempotent ueber bereits aggregierte Schluessel.",
+  "description": null,
   "active": true,
   "isArchived": false,
   "nodes": [
@@ -324,51 +324,44 @@
     }
   },
   "settings": {
-    "executionOrder": "v1",
-    "availableInMCP": true,
-    "binaryMode": "separate",
-    "timeSavedMode": "fixed",
-    "callerPolicy": "workflowsFromSameOwner"
+    "executionOrder": "v1"
   },
   "staticData": {
     "node:Cron - Taeglich 02:00": {
       "recurrenceRules": []
     }
   },
-  "meta": {
-    "aiBuilderAssisted": true,
-    "builderVariant": "mcp"
-  },
+  "meta": null,
   "pinData": null,
-  "versionId": "7861dd97-ac83-45c0-bb61-606568b05fcc",
-  "activeVersionId": "7861dd97-ac83-45c0-bb61-606568b05fcc",
-  "versionCounter": 11,
+  "versionId": "3054736a-a752-45d4-80f0-50f3bcb30368",
+  "activeVersionId": "3054736a-a752-45d4-80f0-50f3bcb30368",
+  "versionCounter": 4,
   "triggerCount": 1,
   "shared": [
     {
-      "updatedAt": "2026-05-11T20:56:32.395Z",
-      "createdAt": "2026-05-11T20:56:32.395Z",
+      "updatedAt": "2026-05-21T18:40:42.518Z",
+      "createdAt": "2026-05-21T18:40:42.518Z",
       "role": "workflow:owner",
-      "workflowId": "qwpQMhZqDAIs8Wi9",
-      "projectId": "zeRVaMsDAPaDSWHo",
+      "workflowId": "AMXktRs6Z28FuzSE",
+      "projectId": "68wR1Q9zBUk0Gxhv",
       "project": {
-        "updatedAt": "2026-04-30T17:19:50.968Z",
-        "createdAt": "2026-04-30T17:15:04.288Z",
-        "id": "zeRVaMsDAPaDSWHo",
-        "name": "Patrick Matthes <patrickzinke@gmx.net>",
+        "updatedAt": "2026-05-19T17:59:53.408Z",
+        "createdAt": "2026-05-19T16:50:04.773Z",
+        "id": "68wR1Q9zBUk0Gxhv",
+        "name": "Patrick Matthes <patrickmatthes2609@gmail.com>",
         "type": "personal",
         "icon": null,
         "description": null,
-        "creatorId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+        "creatorId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }
     }
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-05-15T14:42:42.000Z",
-    "createdAt": "2026-05-15T14:13:11.629Z",
-    "versionId": "7861dd97-ac83-45c0-bb61-606568b05fcc",
-    "workflowId": "qwpQMhZqDAIs8Wi9",
+    "updatedAt": "2026-05-21T18:40:42.518Z",
+    "createdAt": "2026-05-21T18:40:42.518Z",
+    "versionId": "3054736a-a752-45d4-80f0-50f3bcb30368",
+    "workflowId": "AMXktRs6Z28FuzSE",
     "nodes": [
       {
         "id": "35b5c4db-6f49-4ae0-b203-00872b1364c9",
@@ -687,33 +680,17 @@
       }
     },
     "authors": "Patrick Matthes",
-    "name": "Version 1",
-    "description": "",
+    "name": null,
+    "description": null,
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-05-15T14:42:42.748Z",
-        "id": 55,
-        "workflowId": "qwpQMhZqDAIs8Wi9",
-        "versionId": "7861dd97-ac83-45c0-bb61-606568b05fcc",
+        "createdAt": "2026-05-21T18:41:50.893Z",
+        "id": 2,
+        "workflowId": "AMXktRs6Z28FuzSE",
+        "versionId": "3054736a-a752-45d4-80f0-50f3bcb30368",
         "event": "activated",
-        "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
-      },
-      {
-        "createdAt": "2026-05-15T14:43:00.157Z",
-        "id": 57,
-        "workflowId": "qwpQMhZqDAIs8Wi9",
-        "versionId": "7861dd97-ac83-45c0-bb61-606568b05fcc",
-        "event": "activated",
-        "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
-      },
-      {
-        "createdAt": "2026-05-15T14:43:00.141Z",
-        "id": 56,
-        "workflowId": "qwpQMhZqDAIs8Wi9",
-        "versionId": "7861dd97-ac83-45c0-bb61-606568b05fcc",
-        "event": "deactivated",
-        "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }
     ]
   }
