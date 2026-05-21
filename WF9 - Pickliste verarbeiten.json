@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-05-21T18:56:58.305Z",
+  "updatedAt": "2026-05-21T19:05:07.294Z",
   "createdAt": "2026-05-21T18:54:46.663Z",
   "id": "J7G8L8bfLB4R9ppJ",
   "name": "WF9 - Pickliste verarbeiten (Automaten-Nachfuellung)",
@@ -193,8 +193,8 @@
       ],
       "credentials": {
         "httpHeaderAuth": {
-          "id": "6JLrl6bb2ns3ISYe",
-          "name": "Nayax Lynx API"
+          "id": "HykwFghdDuUDa2lu",
+          "name": "Claude API Key"
         }
       },
       "parameters": {
@@ -830,14 +830,14 @@
   },
   "staticData": {
     "node:Google Drive Trigger": {
-      "lastTimeChecked": "2026-05-21T18:57:25Z"
+      "lastTimeChecked": "2026-05-21T19:05:07Z"
     }
   },
   "meta": null,
   "pinData": null,
-  "versionId": "a5d7eaa9-3d5f-4644-823b-3b0dfe29ffd9",
-  "activeVersionId": "a5d7eaa9-3d5f-4644-823b-3b0dfe29ffd9",
-  "versionCounter": 9,
+  "versionId": "ac271535-9b51-451f-8157-5b6c605076f8",
+  "activeVersionId": "ac271535-9b51-451f-8157-5b6c605076f8",
+  "versionCounter": 13,
   "triggerCount": 2,
   "shared": [
     {
@@ -860,9 +860,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-05-21T18:56:58.309Z",
-    "createdAt": "2026-05-21T18:56:58.309Z",
-    "versionId": "a5d7eaa9-3d5f-4644-823b-3b0dfe29ffd9",
+    "updatedAt": "2026-05-21T19:05:07.296Z",
+    "createdAt": "2026-05-21T19:05:07.296Z",
+    "versionId": "ac271535-9b51-451f-8157-5b6c605076f8",
     "workflowId": "J7G8L8bfLB4R9ppJ",
     "nodes": [
       {
@@ -1051,8 +1051,8 @@
         ],
         "credentials": {
           "httpHeaderAuth": {
-            "id": "6JLrl6bb2ns3ISYe",
-            "name": "Nayax Lynx API"
+            "id": "HykwFghdDuUDa2lu",
+            "name": "Claude API Key"
           }
         },
         "parameters": {
@@ -1689,10 +1689,18 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-05-21T18:57:25.871Z",
-        "id": 4,
+        "createdAt": "2026-05-21T19:05:07.371Z",
+        "id": 9,
         "workflowId": "J7G8L8bfLB4R9ppJ",
-        "versionId": "a5d7eaa9-3d5f-4644-823b-3b0dfe29ffd9",
+        "versionId": "ac271535-9b51-451f-8157-5b6c605076f8",
+        "event": "deactivated",
+        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      },
+      {
+        "createdAt": "2026-05-21T19:05:07.732Z",
+        "id": 10,
+        "workflowId": "J7G8L8bfLB4R9ppJ",
+        "versionId": "ac271535-9b51-451f-8157-5b6c605076f8",
         "event": "activated",
         "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }
