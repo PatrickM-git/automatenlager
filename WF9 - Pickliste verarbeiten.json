@@ -1,7 +1,7 @@
 {
-  "updatedAt": "2026-05-18T15:54:13.977Z",
-  "createdAt": "2026-05-13T21:37:23.354Z",
-  "id": "UtXagT58XYNwxUM5",
+  "updatedAt": "2026-05-21T18:56:58.305Z",
+  "createdAt": "2026-05-21T18:54:46.663Z",
+  "id": "J7G8L8bfLB4R9ppJ",
   "name": "WF9 - Pickliste verarbeiten (Automaten-Nachfuellung)",
   "description": null,
   "active": true,
@@ -18,8 +18,8 @@
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
-          "id": "UcOBo2UdCzAv1SBG",
-          "name": "Google Drive - Automatenlager"
+          "id": "kOLyDv48afTu5P9q",
+          "name": "Google Drive account"
         }
       },
       "parameters": {
@@ -81,8 +81,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       },
       "parameters": {
@@ -153,8 +153,8 @@
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
-          "id": "UcOBo2UdCzAv1SBG",
-          "name": "Google Drive - Automatenlager"
+          "id": "kOLyDv48afTu5P9q",
+          "name": "Google Drive account"
         }
       },
       "parameters": {
@@ -193,8 +193,8 @@
       ],
       "credentials": {
         "httpHeaderAuth": {
-          "id": "MYA5fchuUNDDWJ4Z",
-          "name": "Claude API Key"
+          "id": "6JLrl6bb2ns3ISYe",
+          "name": "Nayax Lynx API"
         }
       },
       "parameters": {
@@ -245,8 +245,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       },
       "parameters": {
@@ -296,8 +296,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       },
       "parameters": {
@@ -378,8 +378,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       },
       "parameters": {
@@ -458,8 +458,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       },
       "parameters": {
@@ -518,8 +518,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       },
       "parameters": {
@@ -551,8 +551,8 @@
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
-          "id": "UcOBo2UdCzAv1SBG",
-          "name": "Google Drive - Automatenlager"
+          "id": "kOLyDv48afTu5P9q",
+          "name": "Google Drive account"
         }
       },
       "parameters": {
@@ -830,40 +830,40 @@
   },
   "staticData": {
     "node:Google Drive Trigger": {
-      "lastTimeChecked": "2026-05-18T15:54:14Z"
+      "lastTimeChecked": "2026-05-21T18:57:25Z"
     }
   },
   "meta": null,
   "pinData": null,
-  "versionId": "8fe11546-6134-4fae-973a-9e908081db55",
-  "activeVersionId": "8fe11546-6134-4fae-973a-9e908081db55",
-  "versionCounter": 31,
+  "versionId": "a5d7eaa9-3d5f-4644-823b-3b0dfe29ffd9",
+  "activeVersionId": "a5d7eaa9-3d5f-4644-823b-3b0dfe29ffd9",
+  "versionCounter": 9,
   "triggerCount": 2,
   "shared": [
     {
-      "updatedAt": "2026-05-13T21:37:23.358Z",
-      "createdAt": "2026-05-13T21:37:23.358Z",
+      "updatedAt": "2026-05-21T18:54:46.663Z",
+      "createdAt": "2026-05-21T18:54:46.663Z",
       "role": "workflow:owner",
-      "workflowId": "UtXagT58XYNwxUM5",
-      "projectId": "zeRVaMsDAPaDSWHo",
+      "workflowId": "J7G8L8bfLB4R9ppJ",
+      "projectId": "68wR1Q9zBUk0Gxhv",
       "project": {
-        "updatedAt": "2026-04-30T17:19:50.968Z",
-        "createdAt": "2026-04-30T17:15:04.288Z",
-        "id": "zeRVaMsDAPaDSWHo",
-        "name": "Patrick Matthes <patrickzinke@gmx.net>",
+        "updatedAt": "2026-05-19T17:59:53.408Z",
+        "createdAt": "2026-05-19T16:50:04.773Z",
+        "id": "68wR1Q9zBUk0Gxhv",
+        "name": "Patrick Matthes <patrickmatthes2609@gmail.com>",
         "type": "personal",
         "icon": null,
         "description": null,
-        "creatorId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+        "creatorId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }
     }
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-05-18T15:54:13.978Z",
-    "createdAt": "2026-05-18T15:54:13.978Z",
-    "versionId": "8fe11546-6134-4fae-973a-9e908081db55",
-    "workflowId": "UtXagT58XYNwxUM5",
+    "updatedAt": "2026-05-21T18:56:58.309Z",
+    "createdAt": "2026-05-21T18:56:58.309Z",
+    "versionId": "a5d7eaa9-3d5f-4644-823b-3b0dfe29ffd9",
+    "workflowId": "J7G8L8bfLB4R9ppJ",
     "nodes": [
       {
         "id": "wf9-01",
@@ -876,8 +876,8 @@
         ],
         "credentials": {
           "googleDriveOAuth2Api": {
-            "id": "UcOBo2UdCzAv1SBG",
-            "name": "Google Drive - Automatenlager"
+            "id": "kOLyDv48afTu5P9q",
+            "name": "Google Drive account"
           }
         },
         "parameters": {
@@ -939,8 +939,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         },
         "parameters": {
@@ -1011,8 +1011,8 @@
         ],
         "credentials": {
           "googleDriveOAuth2Api": {
-            "id": "UcOBo2UdCzAv1SBG",
-            "name": "Google Drive - Automatenlager"
+            "id": "kOLyDv48afTu5P9q",
+            "name": "Google Drive account"
           }
         },
         "parameters": {
@@ -1051,8 +1051,8 @@
         ],
         "credentials": {
           "httpHeaderAuth": {
-            "id": "MYA5fchuUNDDWJ4Z",
-            "name": "Claude API Key"
+            "id": "6JLrl6bb2ns3ISYe",
+            "name": "Nayax Lynx API"
           }
         },
         "parameters": {
@@ -1103,8 +1103,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         },
         "parameters": {
@@ -1154,8 +1154,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         },
         "parameters": {
@@ -1236,8 +1236,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         },
         "parameters": {
@@ -1316,8 +1316,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         },
         "parameters": {
@@ -1376,8 +1376,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         },
         "parameters": {
@@ -1409,8 +1409,8 @@
         ],
         "credentials": {
           "googleDriveOAuth2Api": {
-            "id": "UcOBo2UdCzAv1SBG",
-            "name": "Google Drive - Automatenlager"
+            "id": "kOLyDv48afTu5P9q",
+            "name": "Google Drive account"
           }
         },
         "parameters": {
@@ -1689,12 +1689,12 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-05-18T15:54:14.490Z",
-        "id": 72,
-        "workflowId": "UtXagT58XYNwxUM5",
-        "versionId": "8fe11546-6134-4fae-973a-9e908081db55",
+        "createdAt": "2026-05-21T18:57:25.871Z",
+        "id": 4,
+        "workflowId": "J7G8L8bfLB4R9ppJ",
+        "versionId": "a5d7eaa9-3d5f-4644-823b-3b0dfe29ffd9",
         "event": "activated",
-        "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }
     ]
   }

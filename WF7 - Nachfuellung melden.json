@@ -1,7 +1,7 @@
 {
-  "updatedAt": "2026-05-13T20:52:40.997Z",
-  "createdAt": "2026-05-13T20:52:40.997Z",
-  "id": "nla63DjpTgJrFXDj",
+  "updatedAt": "2026-05-21T18:58:57.664Z",
+  "createdAt": "2026-05-21T18:54:45.790Z",
+  "id": "s6uclVVlJHPvJqSd",
   "name": "WF7 - Nachfuellung melden (Slot-Update ohne Verkauf)",
   "description": null,
   "active": true,
@@ -19,7 +19,7 @@
       "parameters": {
         "httpMethod": "GET",
         "path": "nachfuellung",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {}
       },
       "webhookId": "488ccf39-576c-4998-97e7-367fc9a41197"
@@ -58,8 +58,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       },
       "parameters": {
@@ -98,8 +98,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       },
       "parameters": {
@@ -195,8 +195,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       },
       "parameters": {
@@ -275,8 +275,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       },
       "parameters": {
@@ -335,8 +335,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       },
       "parameters": {
@@ -505,35 +505,35 @@
   "staticData": null,
   "meta": null,
   "pinData": null,
-  "versionId": "14de9cc0-00ed-40ef-9565-dd67bdc415fd",
-  "activeVersionId": "14de9cc0-00ed-40ef-9565-dd67bdc415fd",
-  "versionCounter": 6,
+  "versionId": "f8adfd84-9352-467f-8944-152862337893",
+  "activeVersionId": "f8adfd84-9352-467f-8944-152862337893",
+  "versionCounter": 9,
   "triggerCount": 1,
   "shared": [
     {
-      "updatedAt": "2026-05-13T20:52:41.001Z",
-      "createdAt": "2026-05-13T20:52:41.001Z",
+      "updatedAt": "2026-05-21T18:54:45.790Z",
+      "createdAt": "2026-05-21T18:54:45.790Z",
       "role": "workflow:owner",
-      "workflowId": "nla63DjpTgJrFXDj",
-      "projectId": "zeRVaMsDAPaDSWHo",
+      "workflowId": "s6uclVVlJHPvJqSd",
+      "projectId": "68wR1Q9zBUk0Gxhv",
       "project": {
-        "updatedAt": "2026-04-30T17:19:50.968Z",
-        "createdAt": "2026-04-30T17:15:04.288Z",
-        "id": "zeRVaMsDAPaDSWHo",
-        "name": "Patrick Matthes <patrickzinke@gmx.net>",
+        "updatedAt": "2026-05-19T17:59:53.408Z",
+        "createdAt": "2026-05-19T16:50:04.773Z",
+        "id": "68wR1Q9zBUk0Gxhv",
+        "name": "Patrick Matthes <patrickmatthes2609@gmail.com>",
         "type": "personal",
         "icon": null,
         "description": null,
-        "creatorId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+        "creatorId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }
     }
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-05-13T20:52:41.003Z",
-    "createdAt": "2026-05-13T20:52:41.003Z",
-    "versionId": "14de9cc0-00ed-40ef-9565-dd67bdc415fd",
-    "workflowId": "nla63DjpTgJrFXDj",
+    "updatedAt": "2026-05-21T18:58:57.665Z",
+    "createdAt": "2026-05-21T18:58:57.665Z",
+    "versionId": "f8adfd84-9352-467f-8944-152862337893",
+    "workflowId": "s6uclVVlJHPvJqSd",
     "nodes": [
       {
         "id": "e6b79733-0181-481d-be02-0ad0a7d472f2",
@@ -547,7 +547,7 @@
         "parameters": {
           "httpMethod": "GET",
           "path": "nachfuellung",
-          "responseMode": "lastNode",
+          "responseMode": "responseNode",
           "options": {}
         },
         "webhookId": "488ccf39-576c-4998-97e7-367fc9a41197"
@@ -586,8 +586,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         },
         "parameters": {
@@ -626,8 +626,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         },
         "parameters": {
@@ -723,8 +723,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         },
         "parameters": {
@@ -803,8 +803,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         },
         "parameters": {
@@ -863,8 +863,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         },
         "parameters": {
@@ -1033,12 +1033,20 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-05-13T20:52:41.262Z",
-        "id": 54,
-        "workflowId": "nla63DjpTgJrFXDj",
-        "versionId": "14de9cc0-00ed-40ef-9565-dd67bdc415fd",
+        "createdAt": "2026-05-21T18:58:57.696Z",
+        "id": 7,
+        "workflowId": "s6uclVVlJHPvJqSd",
+        "versionId": "f8adfd84-9352-467f-8944-152862337893",
+        "event": "deactivated",
+        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      },
+      {
+        "createdAt": "2026-05-21T18:58:57.712Z",
+        "id": 8,
+        "workflowId": "s6uclVVlJHPvJqSd",
+        "versionId": "f8adfd84-9352-467f-8944-152862337893",
         "event": "activated",
-        "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }
     ]
   }
