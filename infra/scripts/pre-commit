@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Scans staged files for accidentally committed secrets.
+# hook-scan: skip
+
+WHITELIST=(
+  "NAYAX_TOKEN_IN_N8N_CREDENTIAL_EINTRAGEN"
+)
+
+PATTERNS=(
+  "Bearer "
+  "apikey"
+  "api_key"
+  "password="
+  "secret="
+  "-----BEGIN PRIVATE KEY-----"
+)
+
+staged_files=$(git diff --cached --name-only --diff-filter=ACM)
+
+if [ -z "$staged_files" ]; then
+  exit 0
+fi
+
+found=0
+
+while IFS= read -r file; do
+  # Skip files that opt out of scanning (scanner scripts, test files with dummy secrets)
+  git show :"$file" 2>/dev/null | grep -q "hook-scan: skip" && continue
+
+  while IFS= read -r line; do
+    # Check whitelist first
+    skip=0
+    for w in "${WHITELIST[@]}"; do
+      case "$line" in *"$w"*) skip=1; break ;; esac
+    done
+    [ "$skip" -eq 1 ] && continue
+
+    # Check secret patterns
+    for pattern in "${PATTERNS[@]}"; do
+      case "$line" in
+        *"$pattern"*)
+          echo "ERROR: Possible secret found in $file:"
+          echo "  $line"
+          found=1
+          ;;
+      esac
+    done
+  done < <(git show :"$file" 2>/dev/null)
+done <<< "$staged_files"
+
+if [ "$found" -eq 1 ]; then
+  echo ""
+  echo "Commit blocked. Remove secrets before committing."
+  exit 1
+fi
+
+exit 0

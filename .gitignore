@@ -86,3 +86,6 @@ guv_beispiel/
 Thumbs.db
 .idea/
 .vscode-test
+
+# Test-Artefakte
+.tmp-hook-test
