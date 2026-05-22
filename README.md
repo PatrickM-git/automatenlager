@@ -14,13 +14,13 @@ Das Ziel ist ein operatives System, das Nayax-Verkaeufe automatisch verarbeitet,
 - WF3 kann WF4 bei MDB-Abweichungen vorbereiten, ohne Verkaeufe hart zu blockieren.
 - WF4 ist die einzige fachliche Wahrheit fuer aktive MDB-/Slot-Zuordnungen, product_slot_id, active TRUE/FALSE und Historisierung.
 - WF5 ueberwacht MHD, niedrige Lagerbestaende und Tagesverkaeufe und erstellt eine Mail-Zusammenfassung. Die lokale JSON rechnet `Bestand gesamt` aus aktiven Lagerchargen, ohne den Automatenbestand doppelt zu zaehlen.
-- WF8 aggregiert GuV-Tagesposten aus Verkaufstransaktionen.
+- WF8 aggregiert GuV-Tagesposten aus Verkaufstransaktionen. Stand 2026-05-23: Mai 2026 ist gegen Nayax auf **207,80 EUR** abgeglichen; WF8 nutzt sicheren Append + Existing-Key-Skip statt Google-Sheets-Composite-Upsert.
 - Ein lokales Dashboard unter `dashboard/` zeigt Workflows, Live-n8n-Status, Google-Sheets-/XLSX-Datenqualitaet, GuV-KPIs ueber `/api/guv` und Buttons zum Starten bzw. Oeffnen der wichtigsten Workflows.
 - WF0 ist ein einmaliger Reparaturworkflow fuer product_slot_id-Backfill und gehoert nicht zum laufenden Tagesbetrieb.
 
 ## Tech-Stack
 
-- n8n Self Hosted, Zielversion 2.18.5
+- n8n Self Hosted auf HP Mini, produktiv verifiziert mit n8n 2.21.4
 - Nayax Lynx API und Moma als operative Automaten-/Produktdatenquelle
 - Google Sheets als Arbeitsgrundlage und Logsystem
 - Node.js fuer das lokale Dashboard
@@ -142,6 +142,7 @@ Die Workflow-Dateien koennen in n8n importiert oder mit den live vorhandenen Wor
 - `active = TRUE` bedeutet nicht: Produkt existiert im Produktstamm.
 - WF2 darf keine aktive Slotbelegung als Nebenwirkung erzeugen.
 - WF4 ist allein verantwortlich fuer Slot-Historisierung und `product_slot_id`.
+- WF8 darf in Google Sheets keinen `appendOrUpdate` mit mehreren Matching-Spalten verwenden; das ist kein sicherer Composite-Key.
 - Google Sheets wird nur ueber n8n Forms und Workflows geaendert.
 - Preise bleiben in Nayax/Moma fuehrend und werden in Google Sheets nur als Vergleich/Historie genutzt.
 - Nayax/Moma werden aktuell nicht produktiv aus den Workflows heraus geaendert.

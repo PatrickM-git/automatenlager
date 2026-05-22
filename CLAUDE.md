@@ -8,7 +8,7 @@ This repository contains an n8n-based vending-machine inventory system for Nayax
 
 The project is not a generic Node.js skeleton anymore. It now contains:
 
-- n8n workflow exports `WF0` to `WF5`, `WF7` (Nachfüllung)
+- n8n workflow exports `WF0` to `WF5`, `WF7` (Nachfüllung), `WF8`, `WF9`
 - a local Node.js dashboard in `dashboard/`
 - Google Sheets/XLSX working data
 - handover and architecture documentation
@@ -93,10 +93,11 @@ N8N_API_KEY=...
 
 ## n8n Workflow Notes
 
-- The target n8n version is 2.18.5.
+- The production n8n instance runs on the HP Mini (`homelab-n8n`, n8n 2.21.4).
 - Code nodes using `.first()` or `$items(...)` must run in `Run Once for All Items` mode.
 - Before changing a production workflow, decide whether the local JSON export or the live n8n workflow is authoritative.
 - Test workflow changes in n8n before replacing active production versions.
+- WF8 must not use Google Sheets `appendOrUpdate` with multiple matching columns. Use append + Existing-Key-Skip, or a future single technical key such as `guv_key`.
 
 ## Handover Convention
 
@@ -106,16 +107,16 @@ N8N_API_KEY=...
 
 ## Current Next Step
 
-**Session 10 abgeschlossen (2026-05-18) — WF9 produktiv:**
-- WF9 vollstaendig getestet: 20/20 Produkte erkannt, Caps korrekt, Slots aktualisiert
-- Bugfixes: `c.active` → `c.status`, Backstock-Fill-Logik, Apostroph-Normalisierung, responseMode
-- Aktueller WF9-Code: `guv_check_tmp/wf9_pickliste_code.js`
-- Alle WF1–WF9 aktiv (ausser WF6 inaktiv/veraltet)
+**Session 17 abgeschlossen (2026-05-23) — Mai-GuV repariert:**
+- Nayax Mai 2026, `Verarbeitete_Transaktionen` und `GuV_Tagesposten` sind live auf **207,80 EUR** abgeglichen.
+- Fehlende Verkäufe vom 08.05.2026 wurden nachgetragen; zwei bestehende 0/leer-Umsatz-Zeilen wurden korrigiert.
+- `GuV_Tagesposten` Mai wurde aus `Verarbeitete_Transaktionen` neu aufgebaut.
+- WF8 auf HP Mini (`AMXktRs6Z28FuzSE`) ist aktiv und wieder im sicheren Append-Modus mit Existing-Key-Skip.
 
 **Naechste Schritte:**
-1. Naechste echte Pickliste in Ordner legen → WF9 loest automatisch aus
-2. Lagerchargen-Abgleich mit Nayax-Transaktions-Excel (historische Bereinigung)
-3. Abgelaufene MHD-Produkte: `remaining_qty` auf 0 setzen, `current_machine_qty` anpassen
+1. Dashboard-Zeitraum Mai/Gesamt prüfen: Mai-Umsatz muss 207,80 EUR zeigen.
+2. Nach dem nächsten WF8-02:00-Lauf kontrollieren, dass keine neuen GuV-Duplikate entstehen.
+3. Für Phase 1 echten Aggregat-Key oder PostgreSQL-Upsert einführen; Google-Sheets-Composite-Upsert nicht mehr verwenden.
 
 ## WF7 Nachfuellung Webhook
 
