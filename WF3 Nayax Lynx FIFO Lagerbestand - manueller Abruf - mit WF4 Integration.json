@@ -1,7 +1,7 @@
 {
-  "updatedAt": "2026-05-20T15:26:22.424Z",
-  "createdAt": "2026-05-07T16:44:11.100Z",
-  "id": "2PFfPf0sVmMW7Fpp",
+  "updatedAt": "2026-05-22T09:34:23.452Z",
+  "createdAt": "2026-05-22T09:34:23.452Z",
+  "id": "QzjXla1Lek3r23Mc",
   "name": "WF3 Nayax Lynx FIFO Lagerbestand - manueller Abruf",
   "description": null,
   "active": true,
@@ -89,8 +89,8 @@
       ],
       "credentials": {
         "httpHeaderAuth": {
-          "id": "gYiacVrhGvrjsRuW",
-          "name": "Nayax Bearer"
+          "id": "6JLrl6bb2ns3ISYe",
+          "name": "Nayax Lynx API"
         }
       },
       "notes": "Credential in n8n anlegen. Header: Authorization. Wert: API-Key oder Bearer <Token>, je nachdem was Nayax für euren Account freischaltet."
@@ -142,8 +142,8 @@
       "executeOnce": true,
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       }
     },
@@ -172,8 +172,8 @@
       "executeOnce": true,
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       }
     },
@@ -202,8 +202,8 @@
       "executeOnce": true,
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       }
     },
@@ -467,8 +467,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       },
       "notes": "Nach Import: Spaltenzuordnung im Node prüfen und ggf. 'Map automatically' / Matching Column batch_id setzen."
@@ -651,8 +651,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       }
     },
@@ -780,8 +780,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       }
     },
@@ -1018,8 +1018,8 @@
       "alwaysOutputData": false,
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       }
     },
@@ -1073,9 +1073,9 @@
       "parameters": {
         "workflowId": {
           "__rl": true,
-          "value": "Tz2o62qXQyeJdlbE",
+          "value": "lJHQNrestWqc9Brj",
           "mode": "id",
-          "cachedResultUrl": "/workflow/Tz2o62qXQyeJdlbE"
+          "cachedResultUrl": "/workflow/lJHQNrestWqc9Brj"
         },
         "workflowInputs": {
           "value": {
@@ -1323,8 +1323,8 @@
       "executeOnce": true,
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       }
     },
@@ -1414,8 +1414,8 @@
       "name": "Google Sheets - letzter Verkaufsworkflow aktualisieren",
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       }
     },
@@ -1687,8 +1687,8 @@
       "name": "Produktbestand Update",
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       }
     },
@@ -2011,44 +2011,40 @@
     }
   },
   "settings": {
-    "executionOrder": "v1",
-    "binaryMode": "separate",
-    "availableInMCP": true
+    "executionOrder": "v1"
   },
   "staticData": null,
-  "meta": {
-    "templateCredsSetupCompleted": true
-  },
-  "pinData": {},
-  "versionId": "35cc28e2-f34d-40a9-92b2-56f24b544a49",
-  "activeVersionId": "35cc28e2-f34d-40a9-92b2-56f24b544a49",
-  "versionCounter": 162,
+  "meta": null,
+  "pinData": null,
+  "versionId": "b197285a-d81e-4834-9393-6929de32a549",
+  "activeVersionId": "b197285a-d81e-4834-9393-6929de32a549",
+  "versionCounter": 3,
   "triggerCount": 1,
   "shared": [
     {
-      "updatedAt": "2026-05-07T16:44:11.102Z",
-      "createdAt": "2026-05-07T16:44:11.102Z",
+      "updatedAt": "2026-05-22T09:34:23.452Z",
+      "createdAt": "2026-05-22T09:34:23.452Z",
       "role": "workflow:owner",
-      "workflowId": "2PFfPf0sVmMW7Fpp",
-      "projectId": "zeRVaMsDAPaDSWHo",
+      "workflowId": "QzjXla1Lek3r23Mc",
+      "projectId": "68wR1Q9zBUk0Gxhv",
       "project": {
-        "updatedAt": "2026-04-30T17:19:50.968Z",
-        "createdAt": "2026-04-30T17:15:04.288Z",
-        "id": "zeRVaMsDAPaDSWHo",
-        "name": "Patrick Matthes <patrickzinke@gmx.net>",
+        "updatedAt": "2026-05-19T17:59:53.408Z",
+        "createdAt": "2026-05-19T16:50:04.773Z",
+        "id": "68wR1Q9zBUk0Gxhv",
+        "name": "Patrick Matthes <patrickmatthes2609@gmail.com>",
         "type": "personal",
         "icon": null,
         "description": null,
-        "creatorId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+        "creatorId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }
     }
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-05-20T15:26:22.427Z",
-    "createdAt": "2026-05-20T15:26:22.427Z",
-    "versionId": "35cc28e2-f34d-40a9-92b2-56f24b544a49",
-    "workflowId": "2PFfPf0sVmMW7Fpp",
+    "updatedAt": "2026-05-22T09:34:23.452Z",
+    "createdAt": "2026-05-22T09:34:23.452Z",
+    "versionId": "b197285a-d81e-4834-9393-6929de32a549",
+    "workflowId": "QzjXla1Lek3r23Mc",
     "nodes": [
       {
         "parameters": {},
@@ -2132,8 +2128,8 @@
         ],
         "credentials": {
           "httpHeaderAuth": {
-            "id": "gYiacVrhGvrjsRuW",
-            "name": "Nayax Bearer"
+            "id": "6JLrl6bb2ns3ISYe",
+            "name": "Nayax Lynx API"
           }
         },
         "notes": "Credential in n8n anlegen. Header: Authorization. Wert: API-Key oder Bearer <Token>, je nachdem was Nayax für euren Account freischaltet."
@@ -2185,8 +2181,8 @@
         "executeOnce": true,
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         }
       },
@@ -2215,8 +2211,8 @@
         "executeOnce": true,
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         }
       },
@@ -2245,8 +2241,8 @@
         "executeOnce": true,
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         }
       },
@@ -2510,8 +2506,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         },
         "notes": "Nach Import: Spaltenzuordnung im Node prüfen und ggf. 'Map automatically' / Matching Column batch_id setzen."
@@ -2694,8 +2690,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         }
       },
@@ -2823,8 +2819,8 @@
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         }
       },
@@ -3061,8 +3057,8 @@
         "alwaysOutputData": false,
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         }
       },
@@ -3116,9 +3112,9 @@
         "parameters": {
           "workflowId": {
             "__rl": true,
-            "value": "Tz2o62qXQyeJdlbE",
+            "value": "lJHQNrestWqc9Brj",
             "mode": "id",
-            "cachedResultUrl": "/workflow/Tz2o62qXQyeJdlbE"
+            "cachedResultUrl": "/workflow/lJHQNrestWqc9Brj"
           },
           "workflowInputs": {
             "value": {
@@ -3366,8 +3362,8 @@
         "executeOnce": true,
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         }
       },
@@ -3457,8 +3453,8 @@
         "name": "Google Sheets - letzter Verkaufsworkflow aktualisieren",
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         }
       },
@@ -3730,8 +3726,8 @@
         "name": "Produktbestand Update",
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "5XfHt3SzjHCj8B5H",
-            "name": "Sheets Automatenlager"
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
           }
         }
       },
@@ -4059,20 +4055,12 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-05-20T15:26:22.507Z",
-        "id": 80,
-        "workflowId": "2PFfPf0sVmMW7Fpp",
-        "versionId": "35cc28e2-f34d-40a9-92b2-56f24b544a49",
+        "createdAt": "2026-05-22T09:34:23.552Z",
+        "id": 12,
+        "workflowId": "QzjXla1Lek3r23Mc",
+        "versionId": "b197285a-d81e-4834-9393-6929de32a549",
         "event": "activated",
-        "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
-      },
-      {
-        "createdAt": "2026-05-20T15:26:22.484Z",
-        "id": 79,
-        "workflowId": "2PFfPf0sVmMW7Fpp",
-        "versionId": "35cc28e2-f34d-40a9-92b2-56f24b544a49",
-        "event": "deactivated",
-        "userId": "120361c7-55fb-4132-84f7-3db7136ad7b6"
+        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }
     ]
   }
