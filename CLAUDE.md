@@ -81,7 +81,24 @@ Local secrets belong in `dashboard/.env.local`, never in Git:
 ```text
 N8N_BASE_URL=http://127.0.0.1:5678
 N8N_API_KEY=...
+DASHBOARD_ADMIN_LOGIN=patrick@example.com
+DASHBOARD_AUDIT_LOG=dashboard/logs/guest-access.jsonl
 ```
+
+Dashboard tests:
+
+```powershell
+cd dashboard
+npm test
+```
+
+Read-Only guest access:
+
+- The dashboard reads `Tailscale-User-Login`.
+- Missing header means local admin mode.
+- Logins starting with `patrick` or listed in `DASHBOARD_ADMIN_LOGIN` are admins.
+- Other logins are guests: workflow trigger buttons are hidden and `POST /api/actions/:id/trigger` returns `403`.
+- Guest access is logged as JSONL under `dashboard/logs/guest-access.jsonl` unless `DASHBOARD_AUDIT_LOG` overrides the path.
 
 ## Security Rules — Mandatory
 
@@ -114,9 +131,10 @@ N8N_API_KEY=...
 - WF8 auf HP Mini (`AMXktRs6Z28FuzSE`) ist aktiv und wieder im sicheren Append-Modus mit Existing-Key-Skip.
 
 **Naechste Schritte:**
-1. Dashboard-Zeitraum Mai/Gesamt prüfen: Mai-Umsatz muss 207,80 EUR zeigen.
-2. Nach dem nächsten WF8-02:00-Lauf kontrollieren, dass keine neuen GuV-Duplikate entstehen.
-3. Für Phase 1 echten Aggregat-Key oder PostgreSQL-Upsert einführen; Google-Sheets-Composite-Upsert nicht mehr verwenden.
+1. Issue #11 Read-Only-Gastzugriff lokal und im Browser pruefen.
+2. Danach Dashboard auf Mini deployen und `DASHBOARD_ADMIN_LOGIN` setzen.
+3. Tailscale-ACL laut `homelab/docs/runbooks/guest-access.md` erst mit echtem Gast-Login aktivieren.
+4. Dashboard-Zeitraum Mai/Gesamt weiter im Blick behalten: Mai-Umsatz muss 207,80 EUR zeigen.
 
 ## WF7 Nachfuellung Webhook
 

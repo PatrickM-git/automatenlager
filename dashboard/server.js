@@ -108,6 +108,38 @@ function dashboardConfig() {
   };
 }
 
+function getViewer(req) {
+  const login = clean(req.headers['tailscale-user-login']);
+  const configuredAdmins = clean(process.env.DASHBOARD_ADMIN_LOGIN)
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  const normalizedLogin = login.toLowerCase();
+  const isAdmin = !normalizedLogin
+    || configuredAdmins.includes(normalizedLogin)
+    || normalizedLogin.startsWith('patrick');
+
+  return {
+    login: login || 'local-admin',
+    role: isAdmin ? 'admin' : 'guest',
+    canTriggerActions: isAdmin,
+  };
+}
+
+function auditGuestAccess(viewer, event, details = {}) {
+  if (viewer.role !== 'guest') return;
+  const auditPath = process.env.DASHBOARD_AUDIT_LOG || path.join(__dirname, 'logs', 'guest-access.jsonl');
+  const entry = {
+    timestamp: new Date().toISOString(),
+    event,
+    login: viewer.login,
+    role: viewer.role,
+    ...details,
+  };
+  fs.mkdirSync(path.dirname(auditPath), { recursive: true });
+  fs.appendFileSync(auditPath, `${JSON.stringify(entry)}\n`, 'utf8');
+}
+
 function clean(value) {
   return String(value ?? '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -1142,7 +1174,13 @@ const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
   try {
     if (parsed.pathname === '/api/dashboard') {
-      sendJson(res, 200, await buildDashboard());
+      const viewer = getViewer(req);
+      auditGuestAccess(viewer, 'dashboard_view');
+      const dashboard = await buildDashboard();
+      sendJson(res, 200, {
+        ...dashboard,
+        viewer,
+      });
       return;
     }
 
@@ -1193,6 +1231,19 @@ const server = http.createServer(async (req, res) => {
 
     const actionMatch = parsed.pathname.match(/^\/api\/actions\/([^/]+)\/trigger$/);
     if (actionMatch && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        auditGuestAccess(viewer, 'action_trigger_denied', {
+          actionId: decodeURIComponent(actionMatch[1]),
+        });
+        sendJson(res, 403, {
+          ok: false,
+          message: 'Read-Only-Benutzer duerfen keine Workflows ausloesen.',
+          viewer,
+        });
+        return;
+      }
+
       const dashboard = await buildDashboard();
       const action = dashboard.actions.find((item) => item.id === decodeURIComponent(actionMatch[1]));
 

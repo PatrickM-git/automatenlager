@@ -142,42 +142,15 @@ function renderWorkflows(data) {
 function renderWorkflowActions(data) {
   const actions = data.actions || [];
   const runnableCount = actions.filter((action) => action.runnable).length;
+  const canTriggerActions = data.viewer?.canTriggerActions !== false;
   elements.actionHealth.className = `status-pill ${runnableCount ? 'ok' : 'warn'}`;
-  elements.actionHealth.textContent = runnableCount
+  elements.actionHealth.textContent = !canTriggerActions
+    ? 'Read-Only'
+    : runnableCount
     ? `${runnableCount}/${actions.length} auslösbar`
     : 'Trigger fehlen';
 
-  elements.actionGrid.innerHTML = actions.map((action) => {
-    const stateClass = action.runnable ? 'ok' : action.workflowId ? 'warn' : 'danger';
-    const buttonLabel = action.triggerType === 'form'
-      ? 'Formular öffnen'
-      : action.triggerType === 'webhook'
-        ? 'Workflow starten'
-        : 'Noch nicht auslösbar';
-    const editorButton = action.editorUrl
-      ? `<a class="button small" href="${escapeHtml(action.editorUrl)}" target="_blank" rel="noreferrer">In n8n öffnen</a>`
-      : '';
-
-    return `
-      <article class="action-card">
-        <div class="action-card-top">
-          <div>
-            <span class="chip ${stateClass}">${escapeHtml(action.workflowActive ? 'aktiv' : action.workflowId ? 'inaktiv' : 'fehlt')}</span>
-            <h3>${escapeHtml(action.label)}</h3>
-          </div>
-        </div>
-        <p>${escapeHtml(action.description)}</p>
-        <div class="action-meta">
-          <span class="mono">${escapeHtml(action.workflowName || 'kein Workflow zugeordnet')}</span>
-          <span>${escapeHtml(action.status)}</span>
-        </div>
-        <div class="action-buttons">
-          <button class="button primary small" type="button" data-action-id="${escapeHtml(action.id)}" ${action.runnable ? '' : 'disabled'}>${escapeHtml(buttonLabel)}</button>
-          ${editorButton}
-        </div>
-      </article>
-    `;
-  }).join('');
+  elements.actionGrid.innerHTML = window.workflowActionsView.renderWorkflowActionCards(data, escapeHtml);
 
   elements.actionGrid.querySelectorAll('[data-action-id]').forEach((button) => {
     button.addEventListener('click', () => triggerWorkflowAction(button.dataset.actionId, button));

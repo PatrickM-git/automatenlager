@@ -16,6 +16,7 @@ Das Ziel ist ein operatives System, das Nayax-Verkaeufe automatisch verarbeitet,
 - WF5 ueberwacht MHD, niedrige Lagerbestaende und Tagesverkaeufe und erstellt eine Mail-Zusammenfassung. Die lokale JSON rechnet `Bestand gesamt` aus aktiven Lagerchargen, ohne den Automatenbestand doppelt zu zaehlen.
 - WF8 aggregiert GuV-Tagesposten aus Verkaufstransaktionen. Stand 2026-05-23: Mai 2026 ist gegen Nayax auf **207,80 EUR** abgeglichen; WF8 nutzt sicheren Append + Existing-Key-Skip statt Google-Sheets-Composite-Upsert.
 - Ein lokales Dashboard unter `dashboard/` zeigt Workflows, Live-n8n-Status, Google-Sheets-/XLSX-Datenqualitaet, GuV-KPIs ueber `/api/guv` und Buttons zum Starten bzw. Oeffnen der wichtigsten Workflows.
+- Das Dashboard unterstuetzt Read-Only-Gastzugriff ueber den Tailscale-Header `Tailscale-User-Login`: Patrick/Admins duerfen Workflows ausloesen, Gaeste sehen keine Trigger-Buttons und erhalten `403` auf Trigger-Endpunkte.
 - WF0 ist ein einmaliger Reparaturworkflow fuer product_slot_id-Backfill und gehoert nicht zum laufenden Tagesbetrieb.
 
 ## Tech-Stack
@@ -64,9 +65,20 @@ Inhalt:
 ```text
 N8N_BASE_URL=http://127.0.0.1:5678
 N8N_API_KEY=deinen_n8n_api_key_hier_einfuegen
+DASHBOARD_ADMIN_LOGIN=patrick@example.com
+DASHBOARD_AUDIT_LOG=dashboard/logs/guest-access.jsonl
 ```
 
 `dashboard/.env.local` ist absichtlich in `.gitignore`, damit API-Keys nicht committed werden.
+
+`DASHBOARD_ADMIN_LOGIN` akzeptiert bei Bedarf mehrere kommaseparierte Logins. Ohne `Tailscale-User-Login`-Header laeuft das Dashboard im lokalen Admin-Modus, damit lokale Entwicklung und Mini-Betrieb ohne Header weiter funktionieren.
+
+### Dashboard testen
+
+```powershell
+cd dashboard
+npm test
+```
 
 ### Autostart des Dashboards
 
@@ -106,7 +118,9 @@ Die Workflow-Dateien koennen in n8n importiert oder mit den live vorhandenen Wor
     |-- public/
     |   |-- index.html
     |   |-- app.js
+    |   |-- workflow-actions-view.js
     |   `-- styles.css
+    |-- tests/
     |-- start-dashboard.ps1
     |-- start-dashboard-hidden.vbs
     |-- register-dashboard-autostart.ps1
@@ -132,7 +146,9 @@ Die Workflow-Dateien koennen in n8n importiert oder mit den live vorhandenen Wor
 - `dashboard/server.js`: Lokaler Node-Server, API fuer Dashboarddaten, GuV-KPIs (`GET /api/guv`), Live-n8n-Abfrage, Google-Sheets-/XLSX-Auswertung und Workflow-Trigger.
 - `dashboard/public/index.html`: Dashboard-Struktur.
 - `dashboard/public/app.js`: Rendering, Aktionen, Tabellen, Workflow-Buttons.
+- `dashboard/public/workflow-actions-view.js`: Render-Helfer fuer Workflow-Aktionskarten inkl. Read-Only-Modus.
 - `dashboard/public/styles.css`: Dashboard-Layout und UI-Styling.
+- `dashboard/tests/`: Node-Test-Runner-Tests fuer Dashboard-Auth, Read-Only-UI und Audit-Log.
 - `dashboard/.env.example`: Beispiel fuer lokale n8n-Konfiguration.
 - `dashboard/logs/`: Lokale Laufzeitlogs, nicht versioniert.
 

@@ -2,42 +2,6 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-05-23 (Session 18 – Dashboard Read-Only-Gastzugriff)
-
-### Diese Session
-
-1. **Issue #11 Dashboard-Auth umgesetzt**
-   - Dashboard liest `Tailscale-User-Login`.
-   - Kein Header bleibt lokaler Admin-Modus.
-   - Logins aus `DASHBOARD_ADMIN_LOGIN` oder beginnend mit `patrick` sind Admins.
-   - Alle anderen Logins sind Gaeste/Read-Only.
-
-2. **Gast-Trigger serverseitig blockiert**
-   - `POST /api/actions/:id/trigger` antwortet fuer Gaeste mit `403`.
-   - Admins koennen runnable Workflow-Aktionen weiterhin starten.
-
-3. **Read-Only-UI ergaenzt**
-   - Workflow-Triggerbuttons werden fuer Gaeste nicht gerendert.
-   - Renderlogik liegt in `dashboard/public/workflow-actions-view.js` und wird separat getestet.
-
-4. **Gast-Audit vorbereitet**
-   - Gastzugriffe werden als JSONL unter `dashboard/logs/guest-access.jsonl` geschrieben.
-   - Pfad ist per `DASHBOARD_AUDIT_LOG` ueberschreibbar.
-
-5. **Tests eingefuehrt**
-   - `dashboard/package.json`: `npm test` nutzt `node --test`.
-   - Tests liegen unter `dashboard/tests/`.
-   - Abgedeckt: Gast-403, Admin-Trigger, Viewer-Permissions, Gast-Audit, Read-Only-Rendering.
-
-### Nächster Schritt
-
-- Browser-QA lokal durchfuehren.
-- Danach Dashboard auf den HP Mini deployen.
-- `DASHBOARD_ADMIN_LOGIN` auf dem Mini setzen.
-- Tailscale-ACL laut `homelab/docs/runbooks/guest-access.md` erst mit echtem Gast-Login und auf Patricks Signal aktivieren.
-
----
-
 ## Stand: 2026-05-23 (Session 17 – GuV Mai-Reconciliation + WF8 Safe Append)
 
 ### Diese Session
