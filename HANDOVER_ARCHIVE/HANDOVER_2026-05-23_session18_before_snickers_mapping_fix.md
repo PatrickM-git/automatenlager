@@ -2,44 +2,6 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-05-23 (Session 19 – Snickers/Creamy Produktmapping korrigiert)
-
-### Diese Session
-
-1. **Nayax-XLSX gegen Google Sheets vollstaendig revalidiert**
-   - Quelle: `C:/Users/patri/Downloads/DynamicTransactionsMonitorMega_2026-05-22T183329.xlsx`
-   - Erfolgreiche Nayax-Transaktionen im Zeitraum 01.05.–22.05.2026: **157**
-   - Umsatzsumme: **207,80 EUR**
-   - Produktmapping-Check gegen `Verarbeitete_Transaktionen`: nach Fix **0 Mismatches**
-
-2. **Snickers Cream Peanut Butter korrekt umgebucht**
-   - Falsch zugeordnet waren genau 2 Transaktionen:
-     - `6779304800`
-     - `63107529742`
-   - Beide wurden von `SKU_SNICKERS` auf `SKU_SNICKERS_CREAMY` korrigiert.
-   - `mdb_code_extracted` wurde auf `12` gesetzt.
-   - `batch_id_abgebucht` wurde auf `B_SNICKERS_CREAMY_20260502_1` gesetzt.
-   - Creamy-Charge `B_SNICKERS_CREAMY_20260502_1`: `remaining_qty` von 23 auf **21** korrigiert.
-
-3. **Mai-GuV neu aufgebaut**
-   - Alle Mai-Zeilen in `GuV_Tagesposten` wurden per temporaerem n8n-Workflow geloescht und aus korrigierten Transaktionen neu aufgebaut.
-   - Ergebnis fuer 01.05.–23.05.2026:
-     - Umsatz: **207,80 EUR**
-     - Wareneinsatz: **109,57 EUR**
-     - GuV: **98,23 EUR**
-     - Stueck verkauft: **157**
-   - Snickers-Aggregat:
-     - `SKU_SNICKERS`: **20 Stück**
-     - `SKU_SNICKERS_CREAMY`: **2 Stück**
-
-### Nächster Schritt
-
-- Dashboard hart neu laden und Zeitraum `2026-05-01` bis `2026-05-23` prüfen.
-- Erwartung: Snickers = 20 Stück, Snickers Cream Peanut Butter = 2 Stück.
-- Tailscale-/Guest-Access-Aktivierung bleibt weiterhin separat und erst nach Patricks Signal.
-
----
-
 ## Stand: 2026-05-23 (Session 18 – Dashboard Read-Only-Gastzugriff)
 
 ### Diese Session
