@@ -6,6 +6,7 @@ Das Ziel ist ein operatives System, das Nayax-Verkaeufe automatisch verarbeitet,
 
 ## Aktueller Entwicklungsstand
 
+- Workflows + Dashboard laufen auf HP Mini. Das EliteBook ist Cold-Standby und dient nicht mehr als produktiver Runtime-Host.
 - WF0 bis WF5 und WF8 liegen als n8n-Workflow-JSONs im Projekt.
 - WF1 startet WF2 nach dem Rechnungseingang.
 - WF2 verarbeitet Produktstamm, Aliase, Lagerchargen und Rechnungsvorschlaege. Slotzuordnungen sollen nicht direkt in WF2 gesetzt werden.

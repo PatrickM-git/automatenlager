@@ -2,30 +2,6 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-05-24 (Session 21 – Phase-0-Cold-Standby fuer Issue #12 dokumentiert)
-
-### Diese Session
-
-1. **EliteBook-Cold-Standby finalisiert**
-   - Lokaler `node server.js`-Dashboard-Prozess auf dem EliteBook wurde gestoppt.
-   - Kein lokaler `n8n`-Prozess auf dem EliteBook gefunden.
-   - HP Mini bleibt der einzige produktive n8n- und Dashboard-Host.
-
-2. **Phase-0-Smoke-Test als Abschlussbeleg dokumentiert**
-   - Homelab-Runbook: `docs/runbooks/phase-0-cold-standby.md`.
-   - Smoke-Test-Status: WF3, WF5, WF8, WF1 und Dashboard jeweils `OK`.
-   - WF6 als Legacy-Ausnahme dokumentiert: nicht auf Mini migriert, erwartetes Verhalten.
-
-3. **README-Produktionsmarker gesetzt**
-   - `README.md` dokumentiert jetzt explizit: `Workflows + Dashboard laufen auf HP Mini`.
-
-### Nächster Schritt
-
-- Issue #12 kann geschlossen werden.
-- Danach ist Issue #13 der naechste ready Phase-1-Schritt: PostgreSQL-Schema-Migrationen 0001-0010 und WF-Migrate.
-
----
-
 ## Stand: 2026-05-24 (Session 20 – Read-Only-Gastzugriff auf Mini deployed)
 
 ### Diese Session
