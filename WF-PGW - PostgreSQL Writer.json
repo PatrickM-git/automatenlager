@@ -1,0 +1,103 @@
+{
+  "id": "pYrIB2bSQXxayFHq",
+  "name": "WF-PGW - PostgreSQL Writer",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT automatenlager.pgw_write($1::text, $2::text, $3::jsonb) AS result",
+        "additionalFields": {
+          "queryParameters": "={{ [$json.event_type, $json.batch_run_id, JSON.stringify($json.data ?? {})] }}"
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000002",
+      "name": "PG - pgw_write",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [240, 0],
+      "credentials": {
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-status",
+              "name": "status",
+              "value": "={{ $json.result.status }}",
+              "type": "string"
+            },
+            {
+              "id": "field-run_id",
+              "name": "run_id",
+              "value": "={{ $json.result.run_id }}",
+              "type": "number"
+            },
+            {
+              "id": "field-records_out",
+              "name": "records_out",
+              "value": "={{ $json.result.records_out ?? 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "field-error",
+              "name": "error",
+              "value": "={{ $json.result.error ?? null }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000003",
+      "name": "Format Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [480, 0]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "PG - pgw_write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG - pgw_write": {
+      "main": [
+        [
+          {
+            "node": "Format Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {}
+}
