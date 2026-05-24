@@ -71,7 +71,7 @@ DASHBOARD_AUDIT_LOG=dashboard/logs/guest-access.jsonl
 
 `dashboard/.env.local` ist absichtlich in `.gitignore`, damit API-Keys nicht committed werden.
 
-`DASHBOARD_ADMIN_LOGIN` akzeptiert bei Bedarf mehrere kommaseparierte Logins. Ohne `Tailscale-User-Login`-Header laeuft das Dashboard im lokalen Admin-Modus, damit lokale Entwicklung und Mini-Betrieb ohne Header weiter funktionieren.
+`DASHBOARD_ADMIN_LOGIN` akzeptiert bei Bedarf mehrere kommaseparierte Logins. Ohne `Tailscale-User-Login`-Header ist nur `localhost`/`127.0.0.1` Admin; Tailnet-Hosts ohne Identity-Header laufen read-only, damit ein roher Tailscale-Port keinen Admin-Zugriff bekommt.
 
 ### Dashboard testen
 

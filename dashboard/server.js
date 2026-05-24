@@ -115,15 +115,24 @@ function getViewer(req) {
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
   const normalizedLogin = login.toLowerCase();
-  const isAdmin = !normalizedLogin
+  const isLocalRequestWithoutLogin = !normalizedLogin && isLocalDashboardHost(req.headers.host);
+  const isAdmin = isLocalRequestWithoutLogin
     || configuredAdmins.includes(normalizedLogin)
     || normalizedLogin.startsWith('patrick');
 
   return {
-    login: login || 'local-admin',
+    login: login || (isLocalRequestWithoutLogin ? 'local-admin' : 'unknown-guest'),
     role: isAdmin ? 'admin' : 'guest',
     canTriggerActions: isAdmin,
   };
+}
+
+function isLocalDashboardHost(hostHeader) {
+  const host = clean(hostHeader).toLowerCase();
+  const hostname = host.startsWith('[')
+    ? host.slice(1, host.indexOf(']'))
+    : host.split(':')[0];
+  return ['localhost', '127.0.0.1', '::1'].includes(hostname);
 }
 
 function auditGuestAccess(viewer, event, details = {}) {

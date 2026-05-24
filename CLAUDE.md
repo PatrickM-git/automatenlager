@@ -95,7 +95,7 @@ npm test
 Read-Only guest access:
 
 - The dashboard reads `Tailscale-User-Login`.
-- Missing header means local admin mode.
+- Missing header means local admin mode only on `localhost`/`127.0.0.1`; tailnet hosts without identity headers are guests.
 - Logins starting with `patrick` or listed in `DASHBOARD_ADMIN_LOGIN` are admins.
 - Other logins are guests: workflow trigger buttons are hidden and `POST /api/actions/:id/trigger` returns `403`.
 - Guest access is logged as JSONL under `dashboard/logs/guest-access.jsonl` unless `DASHBOARD_AUDIT_LOG` overrides the path.

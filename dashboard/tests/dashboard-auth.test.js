@@ -62,6 +62,31 @@ function startMockN8n() {
   return { server, calls };
 }
 
+function requestDashboard(port, options = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: options.path || '/',
+      method: options.method || 'GET',
+      headers: options.headers || {},
+    }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        resolve({
+          status: res.statusCode,
+          json: () => JSON.parse(body),
+        });
+      });
+    });
+    req.on('error', reject);
+    if (options.body) req.write(options.body);
+    req.end();
+  });
+}
+
 function startDashboard(port, n8nPort, envOverrides = {}) {
   const child = spawn(process.execPath, ['server.js'], {
     cwd: process.cwd(),
@@ -120,6 +145,57 @@ test('guest users cannot trigger workflow actions', async (t) => {
   assert.equal(response.status, 403);
   const body = await response.json();
   assert.equal(body.ok, false);
+});
+
+test('requests without Tailscale identity are guests on tailnet hosts', async (t) => {
+  const mockN8n = startMockN8n();
+  const n8nPort = await listen(mockN8n.server);
+  const dashboardPort = await getFreePort();
+  const dashboard = await startDashboard(dashboardPort, n8nPort);
+
+  t.after(() => {
+    dashboard.kill();
+    mockN8n.server.close();
+  });
+
+  const response = await requestDashboard(dashboardPort, {
+    method: 'POST',
+    path: '/api/actions/invoice-intake/trigger',
+    headers: {
+      'Content-Type': 'application/json',
+      Host: 'hp-mini-server.tail573a13.ts.net:8787',
+    },
+  });
+
+  assert.equal(response.status, 403);
+  const body = response.json();
+  assert.equal(body.viewer.login, 'unknown-guest');
+  assert.equal(body.viewer.role, 'guest');
+  assert.equal(mockN8n.calls.some((call) => call.method === 'POST' && call.url === '/webhook/dashboard-test-wf1'), false);
+});
+
+test('localhost requests without Tailscale identity stay admin for local operation', async (t) => {
+  const mockN8n = startMockN8n();
+  const n8nPort = await listen(mockN8n.server);
+  const dashboardPort = await getFreePort();
+  const dashboard = await startDashboard(dashboardPort, n8nPort);
+
+  t.after(() => {
+    dashboard.kill();
+    mockN8n.server.close();
+  });
+
+  const response = await fetch(`http://127.0.0.1:${dashboardPort}/api/actions/invoice-intake/trigger`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(mockN8n.calls.some((call) => call.method === 'POST' && call.url === '/webhook/dashboard-test-wf1'), true);
 });
 
 test('admin users can still trigger workflow actions', async (t) => {

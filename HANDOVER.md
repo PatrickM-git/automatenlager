@@ -2,6 +2,33 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
+## Stand: 2026-05-24 (Session 20 – Read-Only-Gastzugriff auf Mini deployed)
+
+### Diese Session
+
+1. **Dashboard auf HP Mini aktualisiert**
+   - `dashboard/server.js`, `dashboard/public/*`, `dashboard/package.json` und `dashboard/tests/*` nach `C:\homelab\projekte\automatenlager\dashboard` kopiert.
+   - `C:\homelab\docker-compose.yml` aktualisiert und `DASHBOARD_ADMIN_LOGIN` an den Container durchgereicht.
+   - `homelab-dashboard` per Docker Compose neu gebaut/gestartet.
+
+2. **Read-Only-Sicherheit nachgeschaerft**
+   - `Tailscale-User-Login: lantspeku@gmail.com` wird als `guest` erkannt.
+   - `POST /api/actions/invoice-intake/trigger` gibt fuer diesen Gast `403` zurueck.
+   - Tailnet-Hosts ohne Identity-Header laufen jetzt ebenfalls als `unknown-guest`; nur `localhost`/`127.0.0.1` ohne Header bleibt lokaler Admin-Modus.
+
+3. **Tests**
+   - Lokal im Repo: `npm test` unter `dashboard` -> **7/7 gruen**.
+   - Live im Container: `npm test` unter `homelab-dashboard` -> **7/7 gruen**.
+   - Live ueber Tailscale-IP: ohne Header `unknown-guest`, mit `lantspeku@gmail.com` Gast; beide Trigger-POSTs auf `invoice-intake` -> `403`.
+
+### Nächster Schritt
+
+- Finale Tailscale-Invite/ACL-Aktivierung in der Tailscale Admin Console durchfuehren.
+- Danach mit echtem Gastgeraet testen, ob nur Dashboard-Port `8787` erreichbar ist und n8n/Postgres/Open WebUI blockiert bleiben.
+- Issue #11 erst nach diesem echten ACL-Test schliessen.
+
+---
+
 ## Stand: 2026-05-23 (Session 19 – Snickers/Creamy Produktmapping korrigiert)
 
 ### Diese Session
