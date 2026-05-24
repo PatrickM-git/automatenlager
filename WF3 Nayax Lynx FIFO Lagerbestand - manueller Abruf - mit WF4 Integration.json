@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-05-22T09:34:23.452Z",
+  "updatedAt": "2026-05-24T14:33:50.254Z",
   "createdAt": "2026-05-22T09:34:23.452Z",
   "id": "QzjXla1Lek3r23Mc",
   "name": "WF3 Nayax Lynx FIFO Lagerbestand - manueller Abruf",
-  "description": null,
+  "description": "",
   "active": true,
   "isArchived": false,
   "nodes": [
@@ -1719,6 +1719,76 @@
       "id": "b1c96c06-1fc1-4137-b684-4a83524e8bee",
       "name": "Webhook",
       "webhookId": "5fed350b-9f51-4027-8ecd-957daed17c7a"
+    },
+    {
+      "id": "eca43843-44cc-4620-92a8-10b9d3f20a9a",
+      "name": "Prepare PGW - sale",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        480
+      ],
+      "parameters": {
+        "jsCode": "const batchRunId = 'wf3_' + new Date().toISOString().slice(0, 10);\n\nreturn $input.all().map(item => {\n  const tx = item.json;\n  const gross = Number(tx.umsatz_brutto) || 0;\n  return {\n    json: {\n      event_type: 'sale',\n      batch_run_id: batchRunId,\n      data: {\n        nayax_transaction_id: String(tx.transaction_id),\n        machine_key: String(tx.machine_id),\n        mdb_code: tx.mdb_code_extracted || null,\n        product_key: tx.product_key || null,\n        product_slot_key: tx.product_slot_id || null,\n        product_name_raw: tx.nayax_product_name || '',\n        quantity: Number(tx.quantity) || 1,\n        gross_amount: gross,\n        net_amount: gross,\n        vat_amount: 0,\n        settlement_at: tx.settlement_datetime_gmt,\n        processing_status: tx.status || 'UNKNOWN',\n        processing_note: tx.notes || null,\n        source: 'nayax_lastSales'\n      }\n    }\n  };\n});",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "fb68e721-00e3-4f22-a7b6-914f56eb336d",
+      "name": "WF-PGW - sale",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        320,
+        480
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "pYrIB2bSQXxayFHq",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "45a86522-fb41-4ce5-8c8c-09e6aba81904",
+      "name": "Prepare PGW - stock_movement",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        256
+      ],
+      "parameters": {
+        "jsCode": "const batchRunId = 'wf3_' + new Date().toISOString().slice(0, 10);\nconst originalBatches = $items('Google Sheets - Lagerchargen lesen').map(i => i.json);\nconst originalMap = new Map(originalBatches.map(b => [String(b.batch_id), b]));\n\nreturn $input.all().flatMap(item => {\n  const updated = item.json;\n  const batchKey = String(updated.batch_id);\n  const original = originalMap.get(batchKey);\n  if (!original) return [];\n  const delta = (Number(updated.remaining_qty) || 0) - (Number(original.remaining_qty) || 0);\n  if (delta === 0) return [];\n  return [{\n    json: {\n      event_type: 'stock_movement',\n      batch_run_id: batchRunId,\n      data: {\n        movement_key: 'wf3_sale_' + batchKey + '_' + batchRunId,\n        batch_key: batchKey,\n        movement_type: 'sale',\n        quantity_delta_total: delta,\n        quantity_delta_slot: 0,\n        reason: 'WF3 FIFO Nayax sale deduction',\n        source: 'wf3_nayax_last_sales',\n        occurred_at: new Date().toISOString()\n      }\n    }\n  }];\n});",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "d2a5c77c-4e77-4a6e-ab5b-56ef15d5e8c4",
+      "name": "WF-PGW - stock_movement",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        320,
+        256
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "pYrIB2bSQXxayFHq",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
     }
   ],
   "connections": {
@@ -2008,17 +2078,62 @@
           }
         ]
       ]
+    },
+    "Google Sheets - Transaktionen anhängen": {
+      "main": [
+        [
+          {
+            "node": "Prepare PGW - sale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PGW - sale": {
+      "main": [
+        [
+          {
+            "node": "WF-PGW - sale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Lagerchargen aktualisieren": {
+      "main": [
+        [
+          {
+            "node": "Prepare PGW - stock_movement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PGW - stock_movement": {
+      "main": [
+        [
+          {
+            "node": "WF-PGW - stock_movement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate"
   },
   "staticData": null,
   "meta": null,
-  "pinData": null,
-  "versionId": "b197285a-d81e-4834-9393-6929de32a549",
-  "activeVersionId": "b197285a-d81e-4834-9393-6929de32a549",
-  "versionCounter": 3,
+  "pinData": {},
+  "versionId": "574c35d1-778d-4046-b932-fb230f3f5b0c",
+  "activeVersionId": "574c35d1-778d-4046-b932-fb230f3f5b0c",
+  "versionCounter": 15,
   "triggerCount": 1,
   "shared": [
     {
@@ -2041,9 +2156,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-05-22T09:34:23.452Z",
-    "createdAt": "2026-05-22T09:34:23.452Z",
-    "versionId": "b197285a-d81e-4834-9393-6929de32a549",
+    "updatedAt": "2026-05-24T14:33:50.257Z",
+    "createdAt": "2026-05-24T14:33:50.257Z",
+    "versionId": "574c35d1-778d-4046-b932-fb230f3f5b0c",
     "workflowId": "QzjXla1Lek3r23Mc",
     "nodes": [
       {
@@ -3758,6 +3873,76 @@
         "id": "b1c96c06-1fc1-4137-b684-4a83524e8bee",
         "name": "Webhook",
         "webhookId": "5fed350b-9f51-4027-8ecd-957daed17c7a"
+      },
+      {
+        "id": "eca43843-44cc-4620-92a8-10b9d3f20a9a",
+        "name": "Prepare PGW - sale",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          80,
+          480
+        ],
+        "parameters": {
+          "jsCode": "const batchRunId = 'wf3_' + new Date().toISOString().slice(0, 10);\n\nreturn $input.all().map(item => {\n  const tx = item.json;\n  const gross = Number(tx.umsatz_brutto) || 0;\n  return {\n    json: {\n      event_type: 'sale',\n      batch_run_id: batchRunId,\n      data: {\n        nayax_transaction_id: String(tx.transaction_id),\n        machine_key: String(tx.machine_id),\n        mdb_code: tx.mdb_code_extracted || null,\n        product_key: tx.product_key || null,\n        product_slot_key: tx.product_slot_id || null,\n        product_name_raw: tx.nayax_product_name || '',\n        quantity: Number(tx.quantity) || 1,\n        gross_amount: gross,\n        net_amount: gross,\n        vat_amount: 0,\n        settlement_at: tx.settlement_datetime_gmt,\n        processing_status: tx.status || 'UNKNOWN',\n        processing_note: tx.notes || null,\n        source: 'nayax_lastSales'\n      }\n    }\n  };\n});",
+          "mode": "runOnceForAllItems"
+        }
+      },
+      {
+        "id": "fb68e721-00e3-4f22-a7b6-914f56eb336d",
+        "name": "WF-PGW - sale",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          320,
+          480
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "pYrIB2bSQXxayFHq",
+            "mode": "id"
+          },
+          "mode": "each",
+          "options": {
+            "waitForSubWorkflow": false
+          }
+        }
+      },
+      {
+        "id": "45a86522-fb41-4ce5-8c8c-09e6aba81904",
+        "name": "Prepare PGW - stock_movement",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          80,
+          256
+        ],
+        "parameters": {
+          "jsCode": "const batchRunId = 'wf3_' + new Date().toISOString().slice(0, 10);\nconst originalBatches = $items('Google Sheets - Lagerchargen lesen').map(i => i.json);\nconst originalMap = new Map(originalBatches.map(b => [String(b.batch_id), b]));\n\nreturn $input.all().flatMap(item => {\n  const updated = item.json;\n  const batchKey = String(updated.batch_id);\n  const original = originalMap.get(batchKey);\n  if (!original) return [];\n  const delta = (Number(updated.remaining_qty) || 0) - (Number(original.remaining_qty) || 0);\n  if (delta === 0) return [];\n  return [{\n    json: {\n      event_type: 'stock_movement',\n      batch_run_id: batchRunId,\n      data: {\n        movement_key: 'wf3_sale_' + batchKey + '_' + batchRunId,\n        batch_key: batchKey,\n        movement_type: 'sale',\n        quantity_delta_total: delta,\n        quantity_delta_slot: 0,\n        reason: 'WF3 FIFO Nayax sale deduction',\n        source: 'wf3_nayax_last_sales',\n        occurred_at: new Date().toISOString()\n      }\n    }\n  }];\n});",
+          "mode": "runOnceForAllItems"
+        }
+      },
+      {
+        "id": "d2a5c77c-4e77-4a6e-ab5b-56ef15d5e8c4",
+        "name": "WF-PGW - stock_movement",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          320,
+          256
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "pYrIB2bSQXxayFHq",
+            "mode": "id"
+          },
+          "mode": "each",
+          "options": {
+            "waitForSubWorkflow": false
+          }
+        }
       }
     ],
     "connections": {
@@ -4047,21 +4232,56 @@
             }
           ]
         ]
+      },
+      "Google Sheets - Transaktionen anhängen": {
+        "main": [
+          [
+            {
+              "node": "Prepare PGW - sale",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare PGW - sale": {
+        "main": [
+          [
+            {
+              "node": "WF-PGW - sale",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Sheets - Lagerchargen aktualisieren": {
+        "main": [
+          [
+            {
+              "node": "Prepare PGW - stock_movement",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare PGW - stock_movement": {
+        "main": [
+          [
+            {
+              "node": "WF-PGW - stock_movement",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "authors": "Patrick Matthes",
     "name": null,
     "description": null,
     "autosaved": false,
-    "workflowPublishHistory": [
-      {
-        "createdAt": "2026-05-22T09:34:23.552Z",
-        "id": 12,
-        "workflowId": "QzjXla1Lek3r23Mc",
-        "versionId": "b197285a-d81e-4834-9393-6929de32a549",
-        "event": "activated",
-        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
-      }
-    ]
+    "workflowPublishHistory": []
   }
 }
