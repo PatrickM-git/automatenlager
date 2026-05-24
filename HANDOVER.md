@@ -23,9 +23,9 @@
 
 ### Nächster Schritt
 
-- Finale Tailscale-Invite/ACL-Aktivierung in der Tailscale Admin Console durchfuehren.
-- Danach mit echtem Gastgeraet testen, ob nur Dashboard-Port `8787` erreichbar ist und n8n/Postgres/Open WebUI blockiert bleiben.
-- Issue #11 erst nach diesem echten ACL-Test schliessen.
+- Finale Tailscale-Invite/ACL-Aktivierung wurde am 2026-05-24 durchgefuehrt.
+- Echtes Gastgeraet `galaxy-xcover7` ist im Tailnet sichtbar und Dashboard-Zugriff funktioniert.
+- Issue #11 kann geschlossen werden.
 
 ---
 
