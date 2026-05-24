@@ -601,6 +601,40 @@
         "respondWith": "json",
         "responseBody": "={{ JSON.stringify({ skip: true, reason: $json.reason, fileName: $json.fileName }) }}"
       }
+    },
+    {
+      "id": "issue20-prepare-pgw-wf9-pick-movements",
+      "name": "Prepare PGW - WF9 Pick Movements",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3340,
+        80
+      ],
+      "parameters": {
+        "jsCode": "const result = $(\"Code - Pickliste verarbeiten\").first().json;\nconst products = $(\"Google Sheets - Produkte lesen\").all().map((item) => item.json);\nconst batches = $(\"Google Sheets - Lagerchargen lesen\").all().map((item) => item.json);\nconst fileName = clean(result.fileName || $(\"Code - Datei-ID ermitteln\").first().json.fileName);\nconst batchRunId = \"wf9_\" + new Date().toISOString().slice(0, 10);\n\nfunction clean(value) {\n  return String(value ?? \"\").replace(/\\n/g, \" \").replace(/\\s+/g, \" \").trim();\n}\n\nfunction num(value) {\n  const n = Number(String(value ?? \"\").replace(\",\", \".\"));\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction isActive(value) {\n  return [\"TRUE\", \"1\", \"JA\", \"YES\", \"AKTIV\", \"ACTIVE\", \"\"].includes(clean(value).toUpperCase());\n}\n\nfunction sanitize(value) {\n  return clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, \"_\").replace(/^_+|_+$/g, \"\");\n}\n\nfunction batchFor(productKey) {\n  return batches\n    .filter((batch) => clean(batch.product_key) === productKey)\n    .filter((batch) => isActive(batch.status))\n    .filter((batch) => (num(batch.remaining_qty) ?? 0) > 0)\n    .sort((a, b) => clean(a.mhd).localeCompare(clean(b.mhd)) || clean(a.batch_id).localeCompare(clean(b.batch_id)))[0];\n}\n\nreturn (result.slotUpdates || []).flatMap((update) => {\n  const slot = products.find((product) => clean(product.product_slot_id) === clean(update.product_slot_id));\n  if (!slot) return [];\n  const delta = (num(update.current_machine_qty) ?? 0) - (num(slot.current_machine_qty) ?? 0);\n  if (delta <= 0) return [];\n  const batch = batchFor(clean(slot.product_key));\n  if (!batch) return [];\n  const movementKey = [\"MOV\", \"PICK\", fileName, update.product_slot_id, batch.batch_id, delta].map(sanitize).join(\"_\");\n  return [{\n    json: {\n      event_type: \"stock_movement\",\n      batch_run_id: batchRunId,\n      data: {\n        movement_key: movementKey,\n        batch_key: clean(batch.batch_id),\n        product_slot_key: clean(update.product_slot_id),\n        movement_type: \"pick\",\n        quantity_delta_total: -delta,\n        quantity_delta_slot: delta,\n        reason: \"Pickliste verarbeitet: \" + fileName,\n        source: \"wf9_pickliste\",\n        occurred_at: clean(update.last_stock_update_at) || new Date().toISOString(),\n      },\n    },\n  }];\n});"
+      }
+    },
+    {
+      "id": "issue20-wf-pgw-wf9",
+      "name": "WF-PGW - WF9",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        3580,
+        80
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "pYrIB2bSQXxayFHq",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
     }
   ],
   "connections": {
@@ -776,6 +810,11 @@
             "node": "Google Drive - Datei verschieben",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Prepare PGW - WF9 Pick Movements",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -818,6 +857,17 @@
         [
           {
             "node": "Respond - Erfolg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PGW - WF9 Pick Movements": {
+      "main": [
+        [
+          {
+            "node": "WF-PGW - WF9",
             "type": "main",
             "index": 0
           }

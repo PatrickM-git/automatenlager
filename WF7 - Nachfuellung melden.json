@@ -370,6 +370,85 @@
         "respondWith": "json",
         "responseBody": "={{ JSON.stringify($('Code - Nachfuellung verarbeiten').first().json) }}"
       }
+    },
+    {
+      "id": "issue20-wf7-lagerchargen-lesen",
+      "name": "Google Sheets - Lagerchargen lesen",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        120
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
+        }
+      },
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Lagerchargen",
+          "mode": "name"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "issue20-merge-wf7-pgw-daten",
+      "name": "Merge - WF7 PGW Daten",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        900,
+        220
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "multiplex",
+        "options": {}
+      }
+    },
+    {
+      "id": "issue20-prepare-pgw-wf7-refill-movement",
+      "name": "Prepare PGW - WF7 Refill Movement",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const result = $(\"Code - Nachfuellung verarbeiten\").first().json;\nconst products = $(\"Google Sheets - Produkte lesen\").all().map((item) => item.json);\nconst batches = $(\"Google Sheets - Lagerchargen lesen\").all().map((item) => item.json);\nconst batchRunId = \"wf7_\" + new Date().toISOString().slice(0, 10);\n\nfunction clean(value) {\n  return String(value ?? \"\").replace(/\\n/g, \" \").replace(/\\s+/g, \" \").trim();\n}\n\nfunction num(value) {\n  const n = Number(String(value ?? \"\").replace(\",\", \".\"));\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction isActive(value) {\n  return [\"TRUE\", \"1\", \"JA\", \"YES\", \"AKTIV\", \"ACTIVE\", \"\"].includes(clean(value).toUpperCase());\n}\n\nfunction sanitize(value) {\n  return clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, \"_\").replace(/^_+|_+$/g, \"\");\n}\n\nfunction batchFor(productKey) {\n  return batches\n    .filter((batch) => clean(batch.product_key) === productKey)\n    .filter((batch) => isActive(batch.status))\n    .filter((batch) => (num(batch.remaining_qty) ?? 0) > 0)\n    .sort((a, b) => clean(a.mhd).localeCompare(clean(b.mhd)) || clean(a.batch_id).localeCompare(clean(b.batch_id)))[0];\n}\n\nreturn (result.slotUpdates || []).flatMap((update) => {\n  const slot = products.find((product) => clean(product.product_slot_id) === clean(update.product_slot_id));\n  if (!slot) return [];\n  const delta = (num(update.current_machine_qty) ?? 0) - (num(slot.current_machine_qty) ?? 0);\n  if (delta <= 0) return [];\n  const batch = batchFor(clean(slot.product_key));\n  if (!batch) return [];\n  const movementKey = [\"MOV\", \"REFILL\", update.product_slot_id, batch.batch_id, new Date().toISOString().slice(0, 10), delta].map(sanitize).join(\"_\");\n  return [{\n    json: {\n      event_type: \"stock_movement\",\n      batch_run_id: batchRunId,\n      data: {\n        movement_key: movementKey,\n        batch_key: clean(batch.batch_id),\n        product_slot_key: clean(update.product_slot_id),\n        movement_type: \"refill\",\n        quantity_delta_total: 0,\n        quantity_delta_slot: delta,\n        reason: clean(result.auditEntry?.message || \"Nachfuellung erfasst\"),\n        source: \"wf7_nachfuellung\",\n        occurred_at: clean(update.last_stock_update_at) || new Date().toISOString(),\n      },\n    },\n  }];\n});"
+      }
+    },
+    {
+      "id": "issue20-wf-pgw-wf7",
+      "name": "WF-PGW - WF7",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        220
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "pYrIB2bSQXxayFHq",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
     }
   ],
   "connections": {
@@ -394,6 +473,11 @@
           },
           {
             "node": "Google Sheets - Hinweise lesen",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Sheets - Lagerchargen lesen",
             "type": "main",
             "index": 0
           }
@@ -450,6 +534,11 @@
             "node": "Extract - Audit",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Merge - WF7 PGW Daten",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -492,6 +581,39 @@
         [
           {
             "node": "Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Lagerchargen lesen": {
+      "main": [
+        [
+          {
+            "node": "Merge - WF7 PGW Daten",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge - WF7 PGW Daten": {
+      "main": [
+        [
+          {
+            "node": "Prepare PGW - WF7 Refill Movement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PGW - WF7 Refill Movement": {
+      "main": [
+        [
+          {
+            "node": "WF-PGW - WF7",
             "type": "main",
             "index": 0
           }

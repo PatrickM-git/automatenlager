@@ -565,6 +565,40 @@
           "name": "Google Sheets API"
         }
       }
+    },
+    {
+      "id": "issue20-prepare-pgw-wf5-warnings",
+      "name": "Prepare PGW - WF5 Warnings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        24
+      ],
+      "parameters": {
+        "jsCode": "const batchRunId = \"wf5_\" + new Date().toISOString().slice(0, 10);\n\nfunction clean(value) {\n  return String(value ?? \"\").replace(/\\n/g, \" \").replace(/\\s+/g, \" \").trim();\n}\n\nfunction sanitize(value) {\n  return clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, \"_\").replace(/^_+|_+$/g, \"\");\n}\n\nfunction warningType(type) {\n  const normalized = clean(type).toUpperCase();\n  return normalized === \"MHD_WARNING\" ? \"MHD_NEAR\" : normalized || \"WF5_WARNING\";\n}\n\nfunction numericOrUndefined(value) {\n  const n = Number(String(value ?? \"\").replace(\",\", \".\"));\n  return Number.isFinite(n) ? n : undefined;\n}\n\nreturn $input.all().map((item) => {\n  const alert = item.json;\n  const type = warningType(alert.type);\n  const productKey = clean(alert.product_key);\n  const batchId = clean(alert.batch_id);\n  const mdb = clean(alert.mdb_code);\n  const createdDay = clean(alert.created_at).slice(0, 10) || new Date().toISOString().slice(0, 10);\n  const data = {\n    warning_key: [\"WARN\", type, productKey || \"NO_PRODUCT\", batchId || mdb || \"NO_SLOT\", createdDay].map(sanitize).filter(Boolean).join(\"_\"),\n    warning_type: type,\n    severity: clean(alert.severity || \"warning\"),\n    machine_key: clean(alert.machine_id) || undefined,\n    product_key: productKey || undefined,\n    mdb_code: numericOrUndefined(mdb),\n    message: clean(alert.message),\n    source_workflow: \"wf5\",\n  };\n  return { json: { event_type: \"warning\", batch_run_id: batchRunId, data } };\n});"
+      }
+    },
+    {
+      "id": "issue20-wf-pgw-wf5",
+      "name": "WF-PGW - WF5",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        24
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "pYrIB2bSQXxayFHq",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
     }
   ],
   "connections": {
@@ -672,6 +706,11 @@
             "node": "Google Sheets - Hinweise anhaengen",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Prepare PGW - WF5 Warnings",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -774,6 +813,17 @@
         [
           {
             "node": "Google Sheets - Hinweise auflösen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PGW - WF5 Warnings": {
+      "main": [
+        [
+          {
+            "node": "WF-PGW - WF5",
             "type": "main",
             "index": 0
           }
