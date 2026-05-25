@@ -3,6 +3,7 @@ const http = require('http');
 const path = require('path');
 const url = require('url');
 const zlib = require('zlib');
+const { buildEconomicsData, queryEconomicsPg } = require('./lib/economics.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -216,12 +217,13 @@ function buildDashboardV2Error(area, code, message, status = 503) {
   };
 }
 
-async function buildDashboardV2Area(area) {
+async function buildDashboardV2Area(area, query = {}) {
   if (!dashboardV2Areas.has(area)) {
     return buildDashboardV2Error(area, 'V2_AREA_NOT_FOUND', 'Dieser Dashboard-v2-Bereich ist nicht definiert.', 404);
   }
 
-  if (!dashboardV2PgUrl()) {
+  const pgUrl = dashboardV2PgUrl();
+  if (!pgUrl) {
     return buildDashboardV2Error(
       area,
       'PG_UNCONFIGURED',
@@ -229,10 +231,34 @@ async function buildDashboardV2Area(area) {
     );
   }
 
+  if (area === 'economics') {
+    try {
+      const pgRows = await queryEconomicsPg(pgUrl, query);
+      const data = buildEconomicsData(pgRows, query);
+      const now = new Date();
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          area,
+          source: 'postgres',
+          generatedAt: now.toISOString(),
+          generatedAtDisplay: formatBerlinDateTime(now),
+          lastSuccessfulAt: now.toISOString(),
+          lastSuccessfulAtDisplay: formatBerlinDateTime(now),
+          data,
+          error: null,
+        },
+      };
+    } catch (err) {
+      return buildDashboardV2Error(area, 'PG_ERROR', `PostgreSQL-Abfrage fehlgeschlagen: ${err.message}`);
+    }
+  }
+
   return buildDashboardV2Error(
     area,
     'PG_READER_NOT_AVAILABLE',
-    'PostgreSQL ist konfiguriert, aber der Dashboard-v2-PG-Reader ist in diesem Foundation-Slice noch nicht verbunden.',
+    'PostgreSQL ist konfiguriert, aber der Dashboard-v2-PG-Reader ist fuer diesen Bereich noch nicht verbunden.',
   );
 }
 
@@ -1279,7 +1305,7 @@ const server = http.createServer(async (req, res) => {
     const v2Area = [...dashboardV2Areas.entries()]
       .find(([, config]) => parsed.pathname === config.path);
     if (v2Area && req.method === 'GET') {
-      const result = await buildDashboardV2Area(v2Area[0]);
+      const result = await buildDashboardV2Area(v2Area[0], parsed.query);
       sendJson(res, result.status, result.body);
       return;
     }

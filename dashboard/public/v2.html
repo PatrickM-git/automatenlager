@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dashboard v2 · Faltrix Betreiber-Cockpit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/v2.css">
   </head>
   <body>
@@ -50,10 +52,78 @@
             <h2>Priorisierte Risiken</h2>
             <div class="v2-panel-state">Noch keine PG-Antwort geladen.</div>
           </article>
-          <article id="economics" class="v2-panel" data-endpoint="/api/v2/economics">
-            <p class="v2-eyebrow">GuV &amp; KPI</p>
-            <h2>Wirtschaftliche Sicht</h2>
-            <div class="v2-panel-state">Noch keine PG-Antwort geladen.</div>
+          <article id="economics" class="v2-panel v2-panel--economics" data-endpoint="/api/v2/economics">
+            <div class="v2-panel-header">
+              <div>
+                <p class="v2-eyebrow">GuV &amp; KPI</p>
+                <h2 class="v2-eco-title">Wirtschaftliche Sicht</h2>
+              </div>
+              <div class="v2-eco-filters">
+                <label class="v2-filter-label" for="ecoMachineFilter">
+                  <svg class="v2-filter-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M2 4h12M5 8h6M7 12h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
+                  Automat
+                </label>
+                <input class="v2-filter-input" id="ecoMachineFilter" type="text" placeholder="alle" autocomplete="off" spellcheck="false">
+              </div>
+            </div>
+
+            <div id="ecoState" class="v2-eco-state" aria-live="polite" aria-label="Ladestatus GuV">
+              <div class="v2-skeleton-hero">
+                <div class="v2-skeleton-card"></div>
+                <div class="v2-skeleton-card"></div>
+                <div class="v2-skeleton-card"></div>
+              </div>
+              <div class="v2-skeleton-rows">
+                <div class="v2-skeleton-row"></div>
+                <div class="v2-skeleton-row v2-skeleton-row--short"></div>
+                <div class="v2-skeleton-row"></div>
+                <div class="v2-skeleton-row v2-skeleton-row--mid"></div>
+              </div>
+            </div>
+
+            <div id="ecoContent" hidden>
+              <div id="ecoHero" class="v2-eco-hero" aria-label="Gesamt-KPIs"></div>
+
+              <div class="v2-eco-section">
+                <p class="v2-eyebrow v2-section-gap">Produkt-KPIs <span class="v2-eyebrow-sub">· monatlich aggregiert</span></p>
+                <div class="v2-kpi-table-wrap">
+                  <table class="v2-kpi-table" aria-label="Produkt-KPIs">
+                    <thead>
+                      <tr>
+                        <th class="v2-th-label">Produkt-ID</th>
+                        <th class="v2-th-sort"><button class="v2-sort-btn" data-sort="revenue_net" data-table="product">Umsatz</button></th>
+                        <th class="v2-th-sort"><button class="v2-sort-btn" data-sort="db_net" data-table="product">DB netto</button></th>
+                        <th class="v2-th-sort"><button class="v2-sort-btn" data-sort="margin_pct" data-table="product">Marge %</button></th>
+                        <th class="v2-th-sort"><button class="v2-sort-btn" data-sort="qty" data-table="product">Stück</button></th>
+                      </tr>
+                    </thead>
+                    <tbody id="ecoProductBody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="v2-eco-section">
+                <p class="v2-eyebrow v2-section-gap">Slot-KPIs <span class="v2-eyebrow-sub">· monatlich aggregiert</span></p>
+                <div class="v2-kpi-table-wrap">
+                  <table class="v2-kpi-table" aria-label="Slot-KPIs">
+                    <thead>
+                      <tr>
+                        <th class="v2-th-label">Automat</th>
+                        <th class="v2-th-label">MDB</th>
+                        <th class="v2-th-sort"><button class="v2-sort-btn" data-sort="revenue_net" data-table="slot">Umsatz</button></th>
+                        <th class="v2-th-sort"><button class="v2-sort-btn" data-sort="db_net" data-table="slot">DB netto</button></th>
+                        <th class="v2-th-sort"><button class="v2-sort-btn" data-sort="qty" data-table="slot">Stück</button></th>
+                      </tr>
+                    </thead>
+                    <tbody id="ecoSlotBody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div id="ecoTotalsBar" class="v2-eco-totals-bar" aria-label="Summenzeile"></div>
+            </div>
           </article>
           <article id="assortment" class="v2-panel" data-endpoint="/api/v2/assortment-slots">
             <p class="v2-eyebrow">Sortiment &amp; Slots</p>
