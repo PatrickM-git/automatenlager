@@ -125,7 +125,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT warning_key FROM automatenlager.warnings WHERE source_workflow = 'wf-monitor' AND created_at >= CURRENT_DATE AT TIME ZONE 'Europe/Berlin'"
+        "query": "SELECT warning_key FROM automatenlager.warnings WHERE source_workflow = 'wf-monitor' AND created_at >= (CURRENT_DATE AT TIME ZONE 'Europe/Berlin')"
       },
       "id": "a1000000-0000-0000-0000-000000000017",
       "name": "Postgres - Existing Today Warnings",
