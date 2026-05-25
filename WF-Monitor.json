@@ -98,7 +98,7 @@
       "position": [100, -140],
       "credentials": {
         "postgres": {
-          "id": "POSTGRES_N8N_DB_PLACEHOLDER",
+          "id": "gN8QyJ99aeXsLiUK",
           "name": "PostgreSQL n8n DB"
         }
       },
@@ -124,13 +124,31 @@
     },
     {
       "parameters": {
-        "jsCode": "// Inline: wf-monitor-logic (buildMonitoringReport)\nconst SCHEDULE_GAP_THRESHOLD_H = 25;\nconst BACKUP_STALE_THRESHOLD_H = 26;\nconst DISK_THRESHOLD_GB = 20;\n\nfunction hoursBetween(olderIso, nowIso) {\n  if (!olderIso) return Number.POSITIVE_INFINITY;\n  const start = new Date(olderIso).getTime();\n  const end = new Date(nowIso).getTime();\n  if (!Number.isFinite(start)) return Number.POSITIVE_INFINITY;\n  return (end - start) / 36e5;\n}\n\nfunction isoDay(isoString) {\n  return String(isoString || new Date().toISOString()).slice(0, 10);\n}\n\nfunction warnEvent(warningType, subjectKey, severity, message, now, details) {\n  const day = isoDay(now);\n  return {\n    event_type: 'warning',\n    batch_run_id: 'wf-monitor_' + day,\n    data: {\n      warning_key: warningType + '|' + subjectKey + '|' + day,\n      warning_type: warningType,\n      severity,\n      source_workflow: 'wf-monitor',\n      subject_key: subjectKey,\n      message,\n      details: details || {},\n    },\n  };\n}\n\nfunction buildMonitoringReport(input) {\n  const now = input.now || new Date().toISOString();\n  const alerts = [];\n  const warningEvents = [];\n\n  for (const container of (input.containers || [])) {\n    if (!container.up) {\n      alerts.push({ type: 'CONTAINER_DOWN', container: container.name });\n      warningEvents.push(warnEvent('CONTAINER_DOWN', container.name, 'critical', 'Container ' + container.name + ' is down', now, { container: container.name }));\n    }\n  }\n\n  if (input.postgresReachable === false) {\n    alerts.push({ type: 'PG_UNREACHABLE' });\n    warningEvents.push(warnEvent('PG_UNREACHABLE', 'postgres', 'critical', 'PostgreSQL is unreachable', now));\n  }\n\n  for (const err of (input.workflowErrors || [])) {\n    alerts.push({ type: 'WORKFLOW_ERROR', workflowName: err.workflowName, workflowId: err.workflowId, errorAt: err.errorAt });\n    warningEvents.push(warnEvent('WORKFLOW_ERROR', err.workflowId || err.workflowName, 'warning', 'Workflow error in ' + err.workflowName + ' at ' + err.errorAt, now, { workflowName: err.workflowName, errorAt: err.errorAt }));\n  }\n\n  for (const [key, lastSuccess] of Object.entries(input.scheduleLastSuccess || {})) {\n    const ageH = hoursBetween(lastSuccess, now);\n    if (ageH > SCHEDULE_GAP_THRESHOLD_H) {\n      alerts.push({ type: 'SCHEDULE_GAP', workflowKey: key, ageH, lastSuccessAt: lastSuccess });\n    }\n  }\n\n  if (input.diskFreeGb != null && input.diskFreeGb < DISK_THRESHOLD_GB) {\n    alerts.push({ type: 'LOW_DISK_SPACE', freeGb: input.diskFreeGb, thresholdGb: DISK_THRESHOLD_GB });\n    warningEvents.push(warnEvent('LOW_DISK_SPACE', 'C_HOMELAB', 'warning', 'Disk free ' + input.diskFreeGb + ' GB below threshold ' + DISK_THRESHOLD_GB + ' GB', now, { freeGb: input.diskFreeGb, thresholdGb: DISK_THRESHOLD_GB }));\n  }\n\n  const backupAgeH = hoursBetween(input.lastBackupOkAt, now);\n  if (backupAgeH > BACKUP_STALE_THRESHOLD_H) {\n    alerts.push({ type: 'BACKUP_STALE', ageH: backupAgeH, lastBackupOkAt: input.lastBackupOkAt || null });\n  }\n\n  const mail = buildMail(alerts, now);\n  return { status: alerts.length > 0 ? 'alert' : 'ok', alerts, warningEvents, mail };\n}\n\nfunction buildMail(alerts, now) {\n  const day = isoDay(now);\n  if (alerts.length === 0) {\n    return { sendTo: 'PatrickZinke@gmx.net', subject: 'WF-Monitor ' + day + ': ok', text: 'WF-Monitor ' + day + ': alle Checks ok', html: '<pre>WF-Monitor ' + day + ': alle Checks ok</pre>' };\n  }\n  const first = alerts.find(a => ['CONTAINER_DOWN','PG_UNREACHABLE','BACKUP_STALE'].includes(a.type)) || alerts[0];\n  const detail = first.type === 'CONTAINER_DOWN' ? first.container : first.type;\n  const lines = ['WF-Monitor ' + day + ': ' + alerts.length + ' Alert(s)', ''].concat(alerts.map(a => {\n    if (a.type === 'CONTAINER_DOWN') return 'CONTAINER_DOWN: ' + a.container + ' ist down';\n    if (a.type === 'PG_UNREACHABLE') return 'PG_UNREACHABLE: PostgreSQL nicht erreichbar';\n    if (a.type === 'WORKFLOW_ERROR') return 'WORKFLOW_ERROR: ' + a.workflowName + ' Fehler um ' + a.errorAt;\n    if (a.type === 'SCHEDULE_GAP') return 'SCHEDULE_GAP: ' + a.workflowKey + ' zuletzt vor ' + Math.round(a.ageH) + 'h (Limit: ' + SCHEDULE_GAP_THRESHOLD_H + 'h)';\n    if (a.type === 'LOW_DISK_SPACE') return 'LOW_DISK_SPACE: ' + a.freeGb + ' GB frei (Limit: ' + DISK_THRESHOLD_GB + ' GB)';\n    if (a.type === 'BACKUP_STALE') return 'BACKUP_STALE: letztes BACKUP_OK vor ' + Math.round(a.ageH) + 'h (Limit: ' + BACKUP_STALE_THRESHOLD_H + 'h)';\n    return a.type;\n  }));\n  const text = lines.join('\\n');\n  return { sendTo: 'PatrickZinke@gmx.net', subject: 'WF-Monitor ' + day + ': ALERT – ' + detail, text, html: '<pre>' + text + '</pre>' };\n}\n\n// --- Collect data ---\n\n// 1. Container health via HTTP (error property = connection refused = container down)\nfunction isHttpUp(nodeName) {\n  try {\n    const items = $(nodeName).all();\n    if (!items || items.length === 0) return false;\n    const j = items[0].json;\n    // ECONNREFUSED or similar error → down\n    if (j.error !== undefined || (j.code && j.code.includes('ECONN'))) return false;\n    return true;\n  } catch(e) { return false; }\n}\nconst containers = [\n  { name: 'homelab-ollama',      up: isHttpUp('HTTP Request - Check homelab-ollama') },\n  { name: 'homelab-open-webui',  up: isHttpUp('HTTP Request - Check homelab-open-webui') },\n  { name: 'homelab-dashboard',   up: isHttpUp('HTTP Request - Check homelab-dashboard') },\n];\n\n// 2. PG heartbeat\nconst pgRows = $('Postgres - Heartbeat').all();\nconst postgresReachable = pgRows.length > 0 && pgRows[0].json.heartbeat === 1;\nif (!postgresReachable) {\n  containers.push({ name: 'homelab-postgres', up: false });\n}\n\n// 3. n8n execution data\nconst execRows = $('Postgres - n8n Execution Check').all();\nconst execData = execRows.length > 0 ? execRows[0].json : {};\nconst rawErrors = execData.recent_errors;\nconst workflowErrors = (Array.isArray(rawErrors) ? rawErrors : (typeof rawErrors === 'string' ? JSON.parse(rawErrors) : []))\n  .map(e => ({ workflowId: e.workflowId, workflowName: e.workflowName || e.workflowId, errorAt: e.errorAt }));\nconst scheduleLastSuccess = {\n  wf5: execData.wf5_last_success || null,\n  wf8: execData.wf8_last_success || null,\n};\n\n// 4. Last backup OK (disk check delegated to homelab-backup.js via Task Scheduler)\nconst backupRows = $('Postgres - Last Backup OK At').all();\nconst lastBackupOkAt = backupRows.length > 0 ? backupRows[0].json.last_backup_ok_at : null;\n\nconst report = buildMonitoringReport({\n  now: new Date().toISOString(),\n  containers,\n  postgresReachable,\n  workflowErrors,\n  scheduleLastSuccess,\n  diskFreeGb: null, // disk check handled by homelab-backup.js Task Scheduler\n  lastBackupOkAt,\n});\n\nreturn [{ json: report }];"
+        "operation": "executeQuery",
+        "query": "SELECT warning_key FROM automatenlager.warnings WHERE source_workflow = 'wf-monitor' AND created_at >= CURRENT_DATE AT TIME ZONE 'Europe/Berlin'"
+      },
+      "id": "a1000000-0000-0000-0000-000000000017",
+      "name": "Postgres - Existing Today Warnings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [580, -140],
+      "credentials": {
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Inline: wf-monitor-logic (buildMonitoringReport) with deduplication\nconst SCHEDULE_GAP_THRESHOLD_H = 25;\nconst BACKUP_STALE_THRESHOLD_H = 26;\nconst DISK_THRESHOLD_GB = 20;\n\nfunction hoursBetween(olderIso, nowIso) {\n  if (!olderIso) return Number.POSITIVE_INFINITY;\n  const start = new Date(olderIso).getTime();\n  const end = new Date(nowIso).getTime();\n  if (!Number.isFinite(start)) return Number.POSITIVE_INFINITY;\n  return (end - start) / 36e5;\n}\n\nfunction isoDay(isoString) {\n  return String(isoString || new Date().toISOString()).slice(0, 10);\n}\n\nfunction warnEvent(warningType, subjectKey, severity, message, now, details) {\n  const day = isoDay(now);\n  return {\n    event_type: 'warning',\n    batch_run_id: 'wf-monitor_' + day,\n    data: {\n      warning_key: warningType + '|' + subjectKey + '|' + day,\n      warning_type: warningType,\n      severity,\n      source_workflow: 'wf-monitor',\n      subject_key: subjectKey,\n      message,\n      details: details || {},\n    },\n  };\n}\n\nfunction alertToWarningKey(alert, now) {\n  const day = isoDay(now);\n  switch (alert.type) {\n    case 'CONTAINER_DOWN': return 'CONTAINER_DOWN|' + alert.container + '|' + day;\n    case 'PG_UNREACHABLE': return 'PG_UNREACHABLE|postgres|' + day;\n    case 'WORKFLOW_ERROR': return 'WORKFLOW_ERROR|' + (alert.workflowId || alert.workflowName) + '|' + day;\n    case 'SCHEDULE_GAP': return 'SCHEDULE_GAP|' + alert.workflowKey + '|' + day;\n    case 'LOW_DISK_SPACE': return 'LOW_DISK_SPACE|C_HOMELAB|' + day;\n    case 'BACKUP_STALE': return 'BACKUP_STALE|backup|' + day;\n    default: return null;\n  }\n}\n\nfunction buildMonitoringReport(input) {\n  const now = input.now || new Date().toISOString();\n  const alerts = [];\n  const warningEvents = [];\n\n  for (const container of (input.containers || [])) {\n    if (!container.up) {\n      alerts.push({ type: 'CONTAINER_DOWN', container: container.name });\n      warningEvents.push(warnEvent('CONTAINER_DOWN', container.name, 'critical', 'Container ' + container.name + ' is down', now, { container: container.name }));\n    }\n  }\n\n  if (input.postgresReachable === false) {\n    alerts.push({ type: 'PG_UNREACHABLE' });\n    warningEvents.push(warnEvent('PG_UNREACHABLE', 'postgres', 'critical', 'PostgreSQL is unreachable', now));\n  }\n\n  for (const err of (input.workflowErrors || [])) {\n    alerts.push({ type: 'WORKFLOW_ERROR', workflowName: err.workflowName, workflowId: err.workflowId, errorAt: err.errorAt });\n    warningEvents.push(warnEvent('WORKFLOW_ERROR', err.workflowId || err.workflowName, 'warning', 'Workflow error in ' + err.workflowName + ' at ' + err.errorAt, now, { workflowName: err.workflowName, errorAt: err.errorAt }));\n  }\n\n  for (const [key, lastSuccess] of Object.entries(input.scheduleLastSuccess || {})) {\n    const ageH = hoursBetween(lastSuccess, now);\n    if (ageH > SCHEDULE_GAP_THRESHOLD_H) {\n      alerts.push({ type: 'SCHEDULE_GAP', workflowKey: key, ageH, lastSuccessAt: lastSuccess });\n      warningEvents.push(warnEvent('SCHEDULE_GAP', key, 'warning', 'Schedule gap: ' + key + ' last success ' + Math.round(ageH) + 'h ago (limit: ' + SCHEDULE_GAP_THRESHOLD_H + 'h)', now, { workflowKey: key, ageH, lastSuccessAt: lastSuccess || null }));\n    }\n  }\n\n  if (input.diskFreeGb != null && input.diskFreeGb < DISK_THRESHOLD_GB) {\n    alerts.push({ type: 'LOW_DISK_SPACE', freeGb: input.diskFreeGb, thresholdGb: DISK_THRESHOLD_GB });\n    warningEvents.push(warnEvent('LOW_DISK_SPACE', 'C_HOMELAB', 'warning', 'Disk free ' + input.diskFreeGb + ' GB below threshold ' + DISK_THRESHOLD_GB + ' GB', now, { freeGb: input.diskFreeGb, thresholdGb: DISK_THRESHOLD_GB }));\n  }\n\n  const backupAgeH = hoursBetween(input.lastBackupOkAt, now);\n  if (backupAgeH > BACKUP_STALE_THRESHOLD_H) {\n    alerts.push({ type: 'BACKUP_STALE', ageH: backupAgeH, lastBackupOkAt: input.lastBackupOkAt || null });\n    warningEvents.push(warnEvent('BACKUP_STALE', 'backup', 'warning', 'Backup stale: last BACKUP_OK ' + Math.round(backupAgeH) + 'h ago (limit: ' + BACKUP_STALE_THRESHOLD_H + 'h)', now, { ageH: backupAgeH, lastBackupOkAt: input.lastBackupOkAt || null }));\n  }\n\n  const existingKeys = new Set(input.existingWarningKeys || []);\n  const newAlerts = alerts.filter(a => { const k = alertToWarningKey(a, now); return k === null || !existingKeys.has(k); });\n  const mail = buildMail(newAlerts, now);\n  return { status: alerts.length > 0 ? 'alert' : 'ok', alerts, warningEvents, mail, shouldSendMail: newAlerts.length > 0 };\n}\n\nfunction buildMail(alerts, now) {\n  const day = isoDay(now);\n  if (alerts.length === 0) {\n    return { sendTo: 'PatrickZinke@gmx.net', subject: 'WF-Monitor ' + day + ': ok', text: 'WF-Monitor ' + day + ': alle Checks ok', html: '<pre>WF-Monitor ' + day + ': alle Checks ok</pre>' };\n  }\n  const first = alerts.find(a => ['CONTAINER_DOWN','PG_UNREACHABLE','BACKUP_STALE'].includes(a.type)) || alerts[0];\n  const detail = first.type === 'CONTAINER_DOWN' ? first.container : first.type;\n  const lines = ['WF-Monitor ' + day + ': ' + alerts.length + ' Alert(s)', ''].concat(alerts.map(a => {\n    if (a.type === 'CONTAINER_DOWN') return 'CONTAINER_DOWN: ' + a.container + ' ist down';\n    if (a.type === 'PG_UNREACHABLE') return 'PG_UNREACHABLE: PostgreSQL nicht erreichbar';\n    if (a.type === 'WORKFLOW_ERROR') return 'WORKFLOW_ERROR: ' + a.workflowName + ' Fehler um ' + a.errorAt;\n    if (a.type === 'SCHEDULE_GAP') return 'SCHEDULE_GAP: ' + a.workflowKey + ' zuletzt vor ' + Math.round(a.ageH) + 'h (Limit: ' + SCHEDULE_GAP_THRESHOLD_H + 'h)';\n    if (a.type === 'LOW_DISK_SPACE') return 'LOW_DISK_SPACE: ' + a.freeGb + ' GB frei (Limit: ' + DISK_THRESHOLD_GB + ' GB)';\n    if (a.type === 'BACKUP_STALE') return 'BACKUP_STALE: letztes BACKUP_OK vor ' + Math.round(a.ageH) + 'h (Limit: ' + BACKUP_STALE_THRESHOLD_H + 'h)';\n    return a.type;\n  }));\n  const text = lines.join('\\n');\n  return { sendTo: 'PatrickZinke@gmx.net', subject: 'WF-Monitor ' + day + ': ALERT – ' + detail, text, html: '<pre>' + text + '</pre>' };\n}\n\n// --- Collect data ---\n\nfunction isHttpUp(nodeName) {\n  try {\n    const items = $(nodeName).all();\n    if (!items || items.length === 0) return false;\n    const j = items[0].json;\n    if (j.error !== undefined || (j.code && j.code.includes('ECONN'))) return false;\n    return true;\n  } catch(e) { return false; }\n}\nconst containers = [\n  { name: 'homelab-ollama',      up: isHttpUp('HTTP Request - Check homelab-ollama') },\n  { name: 'homelab-open-webui',  up: isHttpUp('HTTP Request - Check homelab-open-webui') },\n  { name: 'homelab-dashboard',   up: isHttpUp('HTTP Request - Check homelab-dashboard') },\n];\n\nconst pgRows = $('Postgres - Heartbeat').all();\nconst postgresReachable = pgRows.length > 0 && pgRows[0].json.heartbeat === 1;\nif (!postgresReachable) {\n  containers.push({ name: 'homelab-postgres', up: false });\n}\n\nconst execRows = $('Postgres - n8n Execution Check').all();\nconst execData = execRows.length > 0 ? execRows[0].json : {};\nconst rawErrors = execData.recent_errors;\nconst workflowErrors = (Array.isArray(rawErrors) ? rawErrors : (typeof rawErrors === 'string' ? JSON.parse(rawErrors) : []))\n  .map(e => ({ workflowId: e.workflowId, workflowName: e.workflowName || e.workflowId, errorAt: e.errorAt }));\nconst scheduleLastSuccess = {\n  wf5: execData.wf5_last_success || null,\n  wf8: execData.wf8_last_success || null,\n};\n\nconst backupRows = $('Postgres - Last Backup OK At').all();\nconst lastBackupOkAt = backupRows.length > 0 ? backupRows[0].json.last_backup_ok_at : null;\n\nconst warnRows = $('Postgres - Existing Today Warnings').all();\nconst existingWarningKeys = warnRows.map(r => r.json.warning_key).filter(Boolean);\n\nconst report = buildMonitoringReport({\n  now: new Date().toISOString(),\n  containers,\n  postgresReachable,\n  workflowErrors,\n  scheduleLastSuccess,\n  diskFreeGb: null,\n  lastBackupOkAt,\n  existingWarningKeys,\n});\n\nreturn [{ json: report }];"
       },
       "id": "a1000000-0000-0000-0000-000000000010",
       "name": "Code - Build Monitoring Report",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [580, -140]
+      "position": [820, -140]
     },
     {
       "parameters": {
@@ -138,10 +156,10 @@
           "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
           "conditions": [
             {
-              "id": "if-has-alerts",
-              "leftValue": "={{ $json.status }}",
-              "rightValue": "alert",
-              "operator": { "type": "string", "operation": "equals" }
+              "id": "if-should-send-mail",
+              "leftValue": "={{ $json.shouldSendMail }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
             }
           ],
           "combinator": "and"
@@ -149,10 +167,10 @@
         "options": {}
       },
       "id": "a1000000-0000-0000-0000-000000000011",
-      "name": "IF - Has Alerts",
+      "name": "IF - Should Send Mail",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [820, -140]
+      "position": [1060, -140]
     },
     {
       "parameters": {
@@ -162,7 +180,7 @@
       "name": "Code - Warning Events",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1060, -260]
+      "position": [1300, -260]
     },
     {
       "parameters": {
@@ -180,7 +198,7 @@
       "name": "WF-PGW - Write Warning Events",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
-      "position": [1300, -260]
+      "position": [1540, -260]
     },
     {
       "parameters": {
@@ -194,7 +212,7 @@
       "name": "Gmail - Send Alert Mail",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
-      "position": [1060, -20],
+      "position": [1300, -20],
       "credentials": {
         "gmailOAuth2": {
           "id": "8zhryCRhHAc2OnKA",
@@ -242,15 +260,20 @@
     },
     "Postgres - Last Backup OK At": {
       "main": [
+        [{ "node": "Postgres - Existing Today Warnings", "type": "main", "index": 0 }]
+      ]
+    },
+    "Postgres - Existing Today Warnings": {
+      "main": [
         [{ "node": "Code - Build Monitoring Report", "type": "main", "index": 0 }]
       ]
     },
     "Code - Build Monitoring Report": {
       "main": [
-        [{ "node": "IF - Has Alerts", "type": "main", "index": 0 }]
+        [{ "node": "IF - Should Send Mail", "type": "main", "index": 0 }]
       ]
     },
-    "IF - Has Alerts": {
+    "IF - Should Send Mail": {
       "main": [
         [
           { "node": "Code - Warning Events", "type": "main", "index": 0 },
