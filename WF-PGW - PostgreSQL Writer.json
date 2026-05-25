@@ -1,6 +1,11 @@
 {
-  "id": "pYrIB2bSQXxayFHq",
+  "updatedAt": "2026-05-25T13:56:58.634Z",
+  "createdAt": "2026-05-25T13:56:58.634Z",
+  "id": "Sajezv8tJll0CLIv",
   "name": "WF-PGW - PostgreSQL Writer",
+  "description": null,
+  "active": true,
+  "isArchived": false,
   "nodes": [
     {
       "parameters": {
@@ -10,21 +15,28 @@
       "name": "Execute Workflow Trigger",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
-      "position": [0, 0]
+      "position": [
+        -240,
+        0
+      ]
     },
     {
       "parameters": {
+        "resource": "database",
         "operation": "executeQuery",
         "query": "SELECT automatenlager.pgw_write($1::text, $2::text, $3::jsonb) AS result",
-        "additionalFields": {
-          "queryParameters": "={{ [$json.event_type, $json.batch_run_id, JSON.stringify($json.data ?? {})] }}"
+        "options": {
+          "queryReplacement": "={{ $json.event_type }},={{ $json.batch_run_id }},={{ JSON.stringify($json.data ?? {}) }}"
         }
       },
       "id": "a1b2c3d4-0001-0001-0001-000000000002",
       "name": "PG - pgw_write",
       "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [240, 0],
+      "typeVersion": 2.6,
+      "position": [
+        240,
+        0
+      ],
       "credentials": {
         "postgres": {
           "id": "Jept3990Uq8aN3Tr",
@@ -68,7 +80,10 @@
       "name": "Format Result",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [480, 0]
+      "position": [
+        720,
+        0
+      ]
     }
   ],
   "connections": {
@@ -99,5 +114,154 @@
     "executionOrder": "v1"
   },
   "staticData": null,
-  "pinData": {}
+  "meta": null,
+  "pinData": null,
+  "versionId": "927666ad-b944-431f-9e4c-275f5eadd6e9",
+  "activeVersionId": "927666ad-b944-431f-9e4c-275f5eadd6e9",
+  "versionCounter": 3,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-05-25T13:56:58.634Z",
+      "createdAt": "2026-05-25T13:56:58.634Z",
+      "role": "workflow:owner",
+      "workflowId": "Sajezv8tJll0CLIv",
+      "projectId": "68wR1Q9zBUk0Gxhv",
+      "project": {
+        "updatedAt": "2026-05-19T17:59:53.408Z",
+        "createdAt": "2026-05-19T16:50:04.773Z",
+        "id": "68wR1Q9zBUk0Gxhv",
+        "name": "Patrick Matthes <patrickmatthes2609@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-05-25T13:56:58.634Z",
+    "createdAt": "2026-05-25T13:56:58.634Z",
+    "versionId": "927666ad-b944-431f-9e4c-275f5eadd6e9",
+    "workflowId": "Sajezv8tJll0CLIv",
+    "nodes": [
+      {
+        "parameters": {
+          "inputSource": "passthrough"
+        },
+        "id": "a1b2c3d4-0001-0001-0001-000000000001",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          -240,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "database",
+          "operation": "executeQuery",
+          "query": "SELECT automatenlager.pgw_write($1::text, $2::text, $3::jsonb) AS result",
+          "options": {
+            "queryReplacement": "={{ $json.event_type }},={{ $json.batch_run_id }},={{ JSON.stringify($json.data ?? {}) }}"
+          }
+        },
+        "id": "a1b2c3d4-0001-0001-0001-000000000002",
+        "name": "PG - pgw_write",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          240,
+          0
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Jept3990Uq8aN3Tr",
+            "name": "PostgreSQL"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "field-status",
+                "name": "status",
+                "value": "={{ $json.result.status }}",
+                "type": "string"
+              },
+              {
+                "id": "field-run_id",
+                "name": "run_id",
+                "value": "={{ $json.result.run_id }}",
+                "type": "number"
+              },
+              {
+                "id": "field-records_out",
+                "name": "records_out",
+                "value": "={{ $json.result.records_out ?? 0 }}",
+                "type": "number"
+              },
+              {
+                "id": "field-error",
+                "name": "error",
+                "value": "={{ $json.result.error ?? null }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "a1b2c3d4-0001-0001-0001-000000000003",
+        "name": "Format Result",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          720,
+          0
+        ]
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "PG - pgw_write",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "PG - pgw_write": {
+        "main": [
+          [
+            {
+              "node": "Format Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Patrick Matthes",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-05-25T13:56:58.714Z",
+        "id": 63,
+        "workflowId": "Sajezv8tJll0CLIv",
+        "versionId": "927666ad-b944-431f-9e4c-275f5eadd6e9",
+        "event": "activated",
+        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      }
+    ]
+  }
 }
