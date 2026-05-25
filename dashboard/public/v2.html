@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard v2 · Faltrix Betreiber-Cockpit</title>
+    <link rel="stylesheet" href="/v2.css">
+  </head>
+  <body>
+    <div class="v2-shell">
+      <aside class="v2-sidebar">
+        <a class="v2-legacy-link" href="/">Legacy-Dashboard</a>
+        <div class="v2-brand">
+          <div class="v2-brand-mark">F</div>
+          <div>
+            <div class="v2-brand-title">Faltrix</div>
+            <div class="v2-brand-subtitle">Dashboard v2</div>
+          </div>
+        </div>
+
+        <nav class="v2-nav" aria-label="Dashboard v2 Navigation">
+          <a href="#overview" class="v2-nav-link active">Überblick</a>
+          <a href="#inventory" class="v2-nav-link">Bestand &amp; MHD</a>
+          <a href="#economics" class="v2-nav-link">GuV &amp; KPI</a>
+          <a href="#assortment" class="v2-nav-link">Sortiment &amp; Slots</a>
+          <a href="#monitoring" class="v2-nav-link">Monitoring</a>
+        </nav>
+      </aside>
+
+      <main class="v2-main">
+        <header class="v2-topbar">
+          <div>
+            <p class="v2-eyebrow">PostgreSQL-first · Parallelbetrieb</p>
+            <h1>Dashboard v2</h1>
+          </div>
+          <div class="v2-status" id="v2Status" role="status" aria-live="polite">API: /api/v2/overview</div>
+        </header>
+
+        <section id="overview" class="v2-section v2-decision-band">
+          <div>
+            <p class="v2-eyebrow">Handlungsbedarf heute</p>
+            <h2>Warten auf PostgreSQL-Daten</h2>
+          </div>
+          <p>Dieser Einstieg ersetzt das produktive Legacy-Dashboard nicht. Sobald die v2-API Daten liefert, erscheinen hier Prioritäten, Ampeln und zentrale Kennzahlen.</p>
+        </section>
+
+        <section class="v2-grid" aria-label="Dashboard v2 Datenbereiche">
+          <article id="inventory" class="v2-panel" data-endpoint="/api/v2/inventory-mhd">
+            <p class="v2-eyebrow">Bestand &amp; MHD</p>
+            <h2>Priorisierte Risiken</h2>
+            <div class="v2-panel-state">Noch keine PG-Antwort geladen.</div>
+          </article>
+          <article id="economics" class="v2-panel" data-endpoint="/api/v2/economics">
+            <p class="v2-eyebrow">GuV &amp; KPI</p>
+            <h2>Wirtschaftliche Sicht</h2>
+            <div class="v2-panel-state">Noch keine PG-Antwort geladen.</div>
+          </article>
+          <article id="assortment" class="v2-panel" data-endpoint="/api/v2/assortment-slots">
+            <p class="v2-eyebrow">Sortiment &amp; Slots</p>
+            <h2>Belegung und Indikatoren</h2>
+            <div class="v2-panel-state">Noch keine PG-Antwort geladen.</div>
+          </article>
+          <article id="monitoring" class="v2-panel" data-endpoint="/api/v2/monitoring">
+            <p class="v2-eyebrow">Monitoring</p>
+            <h2>Systemzustand</h2>
+            <div class="v2-panel-state">Noch keine PG-Antwort geladen.</div>
+          </article>
+        </section>
+      </main>
+    </div>
+    <script src="/v2.js"></script>
+  </body>
+</html>

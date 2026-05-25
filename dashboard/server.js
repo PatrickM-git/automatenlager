@@ -47,6 +47,14 @@ const liveSheetNames = [
   'System_Status',
 ];
 
+const dashboardV2Areas = new Map([
+  ['overview', { path: '/api/v2/overview', label: 'Overview' }],
+  ['inventory-mhd', { path: '/api/v2/inventory-mhd', label: 'Bestand & MHD' }],
+  ['economics', { path: '/api/v2/economics', label: 'GuV & KPI' }],
+  ['assortment-slots', { path: '/api/v2/assortment-slots', label: 'Sortiment & Slots' }],
+  ['monitoring', { path: '/api/v2/monitoring', label: 'Monitoring' }],
+]);
+
 function parseEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {};
   const values = {};
@@ -151,6 +159,81 @@ function auditGuestAccess(viewer, event, details = {}) {
 
 function clean(value) {
   return String(value ?? '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function formatBerlinDateTime(date) {
+  return new Intl.DateTimeFormat('de-DE', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'short',
+  }).format(date);
+}
+
+function dashboardV2PgUrl() {
+  return clean(process.env.DASHBOARD_V2_PG_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL);
+}
+
+function readDashboardV2LastSuccess(area) {
+  const filePath = process.env.DASHBOARD_V2_LAST_SUCCESS_FILE
+    || path.join(__dirname, 'logs', 'dashboard-v2-last-success.json');
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const stamp = clean(data?.[area]?.generatedAt || data?.[area]?.lastSuccessfulAt);
+    const parsed = stamp ? new Date(stamp) : null;
+    if (!parsed || Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString();
+  } catch {
+    return null;
+  }
+}
+
+function buildDashboardV2Error(area, code, message, status = 503) {
+  const now = new Date();
+  const lastSuccessfulAt = readDashboardV2LastSuccess(area);
+  const lastSuccessfulDate = lastSuccessfulAt ? new Date(lastSuccessfulAt) : null;
+  return {
+    status,
+    body: {
+      ok: false,
+      area,
+      source: 'postgres',
+      generatedAt: now.toISOString(),
+      generatedAtDisplay: formatBerlinDateTime(now),
+      lastSuccessfulAt,
+      lastSuccessfulAtDisplay: lastSuccessfulDate ? formatBerlinDateTime(lastSuccessfulDate) : null,
+      data: null,
+      error: {
+        code,
+        message,
+      },
+    },
+  };
+}
+
+async function buildDashboardV2Area(area) {
+  if (!dashboardV2Areas.has(area)) {
+    return buildDashboardV2Error(area, 'V2_AREA_NOT_FOUND', 'Dieser Dashboard-v2-Bereich ist nicht definiert.', 404);
+  }
+
+  if (!dashboardV2PgUrl()) {
+    return buildDashboardV2Error(
+      area,
+      'PG_UNCONFIGURED',
+      'PostgreSQL ist fuer Dashboard v2 nicht konfiguriert. Es wird kein Sheet- oder Legacy-Fallback genutzt.',
+    );
+  }
+
+  return buildDashboardV2Error(
+    area,
+    'PG_READER_NOT_AVAILABLE',
+    'PostgreSQL ist konfiguriert, aber der Dashboard-v2-PG-Reader ist in diesem Foundation-Slice noch nicht verbunden.',
+  );
 }
 
 function normalizeNumber(value) {
@@ -1193,6 +1276,44 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    const v2Area = [...dashboardV2Areas.entries()]
+      .find(([, config]) => parsed.pathname === config.path);
+    if (v2Area && req.method === 'GET') {
+      const result = await buildDashboardV2Area(v2Area[0]);
+      sendJson(res, result.status, result.body);
+      return;
+    }
+
+    const v2ActionMatch = parsed.pathname.match(/^\/api\/v2\/actions\/([^/]+)\/trigger$/);
+    if (v2ActionMatch && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        auditGuestAccess(viewer, 'v2_action_trigger_denied', {
+          actionId: decodeURIComponent(v2ActionMatch[1]),
+        });
+        sendJson(res, 403, {
+          ok: false,
+          viewer,
+          error: {
+            code: 'READ_ONLY_FORBIDDEN',
+            message: 'Read-Only-Benutzer duerfen keine Dashboard-v2-Aktionen ausloesen.',
+          },
+        });
+        return;
+      }
+
+      sendJson(res, 501, {
+        ok: false,
+        viewer,
+        actionId: decodeURIComponent(v2ActionMatch[1]),
+        error: {
+          code: 'V2_ACTION_NOT_IMPLEMENTED',
+          message: 'Dashboard-v2-Aktionen werden in spaeteren Slices kontrolliert angebunden.',
+        },
+      });
+      return;
+    }
+
     // GET /api/config — gibt aktuelle Einstellungen zurueck (API-Key NIEMALS im Klartext)
     if (parsed.pathname === '/api/config' && req.method === 'GET') {
       const cfg = dashboardConfig();
@@ -1324,7 +1445,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const requestPath = parsed.pathname === '/' ? '/index.html' : parsed.pathname;
+    const requestPath = parsed.pathname === '/'
+      ? '/index.html'
+      : parsed.pathname === '/v2'
+        ? '/v2.html'
+        : parsed.pathname;
     const filePath = path.normalize(path.join(PUBLIC_DIR, requestPath));
     sendFile(res, filePath);
   } catch (error) {
