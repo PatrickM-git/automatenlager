@@ -1,0 +1,324 @@
+{
+  "name": "WF-Monitor",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1000000-0000-0000-0000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1100, -80]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */5 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "a1000000-0000-0000-0000-000000000002",
+      "name": "Schedule Trigger - every 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1100, -200]
+    },
+    {
+      "parameters": {
+        "command": "wsl -d Ubuntu-24.04 docker ps --filter name=homelab --format '{{.Names}}\\t{{.Status}}'"
+      },
+      "id": "a1000000-0000-0000-0000-000000000003",
+      "name": "Execute Command - docker ps",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [-860, -140]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT 1 AS heartbeat"
+      },
+      "id": "a1000000-0000-0000-0000-000000000004",
+      "name": "Postgres - Heartbeat",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [-620, -140],
+      "credentials": {
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:5678/api/v1/executions",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "status", "value": "error" },
+            { "name": "limit", "value": "10" },
+            { "name": "includeData", "value": "false" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-API-KEY", "value": "={{ $env.N8N_API_KEY }}" }
+          ]
+        }
+      },
+      "id": "a1000000-0000-0000-0000-000000000005",
+      "name": "HTTP Request - n8n Recent Errors",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-380, -220]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:5678/api/v1/executions",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "workflowId", "value": "xYQDekAjVZi8mW6a" },
+            { "name": "status", "value": "success" },
+            { "name": "limit", "value": "1" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-API-KEY", "value": "={{ $env.N8N_API_KEY }}" }
+          ]
+        }
+      },
+      "id": "a1000000-0000-0000-0000-000000000006",
+      "name": "HTTP Request - WF5 Last Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-380, -60]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:5678/api/v1/executions",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "workflowId", "value": "AMXktRs6Z28FuzSE" },
+            { "name": "status", "value": "success" },
+            { "name": "limit", "value": "1" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-API-KEY", "value": "={{ $env.N8N_API_KEY }}" }
+          ]
+        }
+      },
+      "id": "a1000000-0000-0000-0000-000000000007",
+      "name": "HTTP Request - WF8 Last Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-380, 100]
+    },
+    {
+      "parameters": {
+        "command": "powershell -Command \"[Math]::Round((Get-Item 'C:\\homelab').PSDrive.Free / 1GB, 2)\""
+      },
+      "id": "a1000000-0000-0000-0000-000000000008",
+      "name": "Execute Command - Disk Free GB",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [-380, 260]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT MAX(created_at) AS last_backup_ok_at FROM automatenlager.warnings WHERE warning_type = 'BACKUP_OK'"
+      },
+      "id": "a1000000-0000-0000-0000-000000000009",
+      "name": "Postgres - Last Backup OK At",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [-380, 420],
+      "credentials": {
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lädt wf-monitor-logic aus dem homelab-Repo\nconst path = require('path');\nconst { buildMonitoringReport } = require(path.join('/mnt/c/Users/patri/Documents/homelab/infra/scripts/wf-monitor-logic'));\n\n// Docker-ps-Output parsen\nconst dockerOutput = $('Execute Command - docker ps').first().json.stdout || '';\nconst allExpected = ['homelab-n8n', 'homelab-postgres', 'homelab-ollama', 'homelab-open-webui', 'homelab-dashboard'];\nconst containers = allExpected.map(name => ({\n  name,\n  up: dockerOutput.includes(name) && dockerOutput.split('\\n').some(line => line.includes(name) && line.toLowerCase().includes('up')),\n}));\n\n// PG-Heartbeat\nconst pgItems = $('Postgres - Heartbeat').all();\nconst postgresReachable = pgItems.length > 0 && pgItems[0].json.heartbeat === 1;\n\n// n8n-Errors seit der letzten Stunde filtern\nconst errorsRaw = $('HTTP Request - n8n Recent Errors').first().json;\nconst executions = (errorsRaw.data || []);\nconst oneHourAgo = new Date(Date.now() - 3600000).toISOString();\nconst workflowErrors = executions\n  .filter(e => e.startedAt >= oneHourAgo)\n  .map(e => ({\n    workflowId: e.workflowData?.id,\n    workflowName: e.workflowData?.name || 'unknown',\n    errorAt: e.startedAt,\n  }));\n\n// Schedule-Lücken\nconst wf5Items = $('HTTP Request - WF5 Last Success').first().json;\nconst wf8Items = $('HTTP Request - WF8 Last Success').first().json;\nconst scheduleLastSuccess = {\n  wf5: (wf5Items.data || [])[0]?.startedAt || null,\n  wf8: (wf8Items.data || [])[0]?.startedAt || null,\n};\n\n// Disk frei\nconst diskOutput = $('Execute Command - Disk Free GB').first().json.stdout || '100';\nconst diskFreeGb = parseFloat(diskOutput.trim()) || 100;\n\n// Letztes Backup OK\nconst backupItems = $('Postgres - Last Backup OK At').all();\nconst lastBackupOkAt = backupItems.length > 0 ? backupItems[0].json.last_backup_ok_at : null;\n\nconst report = buildMonitoringReport({\n  now: new Date().toISOString(),\n  containers,\n  postgresReachable,\n  workflowErrors,\n  scheduleLastSuccess,\n  diskFreeGb,\n  lastBackupOkAt,\n});\n\nreturn [{ json: report }];"
+      },
+      "id": "a1000000-0000-0000-0000-000000000010",
+      "name": "Code - Build Monitoring Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [60, 140]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "if-has-alerts",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "alert",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000011",
+      "name": "IF - Has Alerts",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [300, 140]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "pYrIB2bSQXxayFHq",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "a1000000-0000-0000-0000-000000000012",
+      "name": "WF-PGW - Write Warning Events",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [540, 60]
+    },
+    {
+      "parameters": {
+        "sendTo": "PatrickZinke@gmx.net",
+        "subject": "={{ $('Code - Build Monitoring Report').first().json.mail.subject }}",
+        "emailType": "html",
+        "message": "={{ $('Code - Build Monitoring Report').first().json.mail.html }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000013",
+      "name": "Gmail - Send Alert Mail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [540, 220],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8zhryCRhHAc2OnKA",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code - Warning Events: gibt warningEvents als separate Items zurück\nconst report = $('Code - Build Monitoring Report').first().json;\nconst events = report.warningEvents || [];\nif (events.length === 0) return [];\nreturn events.map(e => ({ json: e }));"
+      },
+      "id": "a1000000-0000-0000-0000-000000000014",
+      "name": "Code - Warning Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [540, -100]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Execute Command - docker ps", "type": "main", "index": 0 }]
+      ]
+    },
+    "Schedule Trigger - every 5 min": {
+      "main": [
+        [{ "node": "Execute Command - docker ps", "type": "main", "index": 0 }]
+      ]
+    },
+    "Execute Command - docker ps": {
+      "main": [
+        [{ "node": "Postgres - Heartbeat", "type": "main", "index": 0 }]
+      ]
+    },
+    "Postgres - Heartbeat": {
+      "main": [
+        [{ "node": "HTTP Request - n8n Recent Errors", "type": "main", "index": 0 }]
+      ],
+      "error": [
+        [{ "node": "HTTP Request - n8n Recent Errors", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Request - n8n Recent Errors": {
+      "main": [
+        [
+          { "node": "HTTP Request - WF5 Last Success", "type": "main", "index": 0 },
+          { "node": "HTTP Request - WF8 Last Success", "type": "main", "index": 0 },
+          { "node": "Execute Command - Disk Free GB", "type": "main", "index": 0 },
+          { "node": "Postgres - Last Backup OK At", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "HTTP Request - WF5 Last Success": {
+      "main": [
+        [{ "node": "Code - Build Monitoring Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Request - WF8 Last Success": {
+      "main": [
+        [{ "node": "Code - Build Monitoring Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Execute Command - Disk Free GB": {
+      "main": [
+        [{ "node": "Code - Build Monitoring Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Postgres - Last Backup OK At": {
+      "main": [
+        [{ "node": "Code - Build Monitoring Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code - Build Monitoring Report": {
+      "main": [
+        [{ "node": "IF - Has Alerts", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF - Has Alerts": {
+      "main": [
+        [
+          { "node": "Code - Warning Events", "type": "main", "index": 0 },
+          { "node": "Gmail - Send Alert Mail", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "Code - Warning Events": {
+      "main": [
+        [{ "node": "WF-PGW - Write Warning Events", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "a1000000-0000-0000-0000-000000000099",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "homelab-mini"
+  },
+  "id": "wf-monitor-placeholder",
+  "tags": []
+}
