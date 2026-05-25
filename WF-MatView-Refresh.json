@@ -1,0 +1,92 @@
+{
+  "name": "WF-MatView-Refresh",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "f99b21fd-4daf-4a80-92a5-111d9fd4a26b",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -520,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 45 4 * * *"
+            }
+          ]
+        }
+      },
+      "id": "473d6539-4329-41ba-b7b4-d4eadf423d2e",
+      "name": "Schedule Trigger - nightly after WF-Val",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -520,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- WF-MatView-Refresh, expected latency < 5 min\nREFRESH MATERIALIZED VIEW CONCURRENTLY automatenlager.mv_db_per_slot_monthly;\nREFRESH MATERIALIZED VIEW CONCURRENTLY automatenlager.mv_db_per_product_monthly;\nREFRESH MATERIALIZED VIEW CONCURRENTLY automatenlager.mv_inventory_value_daily;"
+      },
+      "id": "3a64a093-c2c9-44f5-ad1f-131db2596d08",
+      "name": "Postgres - Refresh Materialized Views",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -220,
+        -20
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Refresh Materialized Views",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger - nightly after WF-Val": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Refresh Materialized Views",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Berlin"
+  },
+  "versionId": "issue-21-matview-refresh-export",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "WFMATVIEWIssue21",
+  "tags": []
+}
