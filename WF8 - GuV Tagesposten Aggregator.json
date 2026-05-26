@@ -232,7 +232,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const batchRunId = 'wf8_' + new Date().toISOString().slice(0, 10);\n\nreturn $input.all()\n  .filter(item => !item.json._empty)\n  .map(item => {\n    const r = item.json;\n    const guvKey = [r.date, r.machine_id, r.product_key].join('_');\n    const kleinunternehmer = String(r.kleinunternehmer_aktiv || '').toUpperCase() === 'TRUE';\n    const art = String(r.produktart || '').toLowerCase();\n    const vatRate = kleinunternehmer ? 0\n      : (art === 'snack' || art.includes('snack') || art === 'riegel' ? 7 : 19);\n    const revenueNet = vatRate === 0\n      ? r.umsatz_brutto\n      : Math.round(r.umsatz_brutto / (1 + vatRate / 100) * 100) / 100;\n\n    return {\n      json: {\n        event_type: 'guv_daily',\n        batch_run_id: batchRunId,\n        data: {\n          guv_key: guvKey,\n          posting_date: r.date,\n          machine_key: String(r.machine_id),\n          mdb_code: r.mdb_code || null,\n          product_key: r.product_key,\n          quantity_sold: r.quantity_sold,\n          revenue_gross: r.umsatz_brutto,\n          revenue_net: revenueNet,\n          cost_of_goods: r.wareneinsatz_brutto,\n          gross_profit: r.guv,\n          source: 'wf8_guv_aggregator'\n        }\n      }\n    };\n  });",
+        "jsCode": "const batchRunId = 'wf8_' + new Date().toISOString().slice(0, 10);\n\nreturn $input.all()\n  .filter(item => !item.json._empty)\n  .map(item => {\n    const r = item.json;\n    const guvKey = [r.date, r.machine_id, r.product_key].join('|');\n    const kleinunternehmer = String(r.kleinunternehmer_aktiv || '').toUpperCase() === 'TRUE';\n    const art = String(r.produktart || '').toLowerCase();\n    const vatRate = kleinunternehmer ? 0\n      : (art === 'snack' || art.includes('snack') || art === 'riegel' ? 7 : 19);\n    const revenueNet = vatRate === 0\n      ? r.umsatz_brutto\n      : Math.round(r.umsatz_brutto / (1 + vatRate / 100) * 100) / 100;\n\n    return {\n      json: {\n        event_type: 'guv_daily',\n        batch_run_id: batchRunId,\n        data: {\n          guv_key: guvKey,\n          posting_date: r.date,\n          machine_key: String(r.machine_id),\n          mdb_code: r.mdb_code || null,\n          product_key: r.product_key,\n          quantity_sold: r.quantity_sold,\n          revenue_gross: r.umsatz_brutto,\n          revenue_net: revenueNet,\n          cost_of_goods: r.wareneinsatz_brutto,\n          gross_profit: r.guv,\n          source: 'wf8_guv_aggregator'\n        }\n      }\n    };\n  });",
         "mode": "runOnceForAllItems"
       },
       "id": "927036d8-5d1e-452c-99cd-ccc7b76c4d41",
@@ -248,7 +248,7 @@
       "parameters": {
         "workflowId": {
           "__rl": true,
-          "value": "pYrIB2bSQXxayFHq",
+          "value": "Sajezv8tJll0CLIv",
           "mode": "id"
         },
         "mode": "each",
@@ -633,7 +633,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const batchRunId = 'wf8_' + new Date().toISOString().slice(0, 10);\n\nreturn $input.all()\n  .filter(item => !item.json._empty)\n  .map(item => {\n    const r = item.json;\n    const guvKey = [r.date, r.machine_id, r.product_key].join('_');\n    const kleinunternehmer = String(r.kleinunternehmer_aktiv || '').toUpperCase() === 'TRUE';\n    const art = String(r.produktart || '').toLowerCase();\n    const vatRate = kleinunternehmer ? 0\n      : (art === 'snack' || art.includes('snack') || art === 'riegel' ? 7 : 19);\n    const revenueNet = vatRate === 0\n      ? r.umsatz_brutto\n      : Math.round(r.umsatz_brutto / (1 + vatRate / 100) * 100) / 100;\n\n    return {\n      json: {\n        event_type: 'guv_daily',\n        batch_run_id: batchRunId,\n        data: {\n          guv_key: guvKey,\n          posting_date: r.date,\n          machine_key: String(r.machine_id),\n          mdb_code: r.mdb_code || null,\n          product_key: r.product_key,\n          quantity_sold: r.quantity_sold,\n          revenue_gross: r.umsatz_brutto,\n          revenue_net: revenueNet,\n          cost_of_goods: r.wareneinsatz_brutto,\n          gross_profit: r.guv,\n          source: 'wf8_guv_aggregator'\n        }\n      }\n    };\n  });",
+          "jsCode": "const batchRunId = 'wf8_' + new Date().toISOString().slice(0, 10);\n\nreturn $input.all()\n  .filter(item => !item.json._empty)\n  .map(item => {\n    const r = item.json;\n    const guvKey = [r.date, r.machine_id, r.product_key].join('|');\n    const kleinunternehmer = String(r.kleinunternehmer_aktiv || '').toUpperCase() === 'TRUE';\n    const art = String(r.produktart || '').toLowerCase();\n    const vatRate = kleinunternehmer ? 0\n      : (art === 'snack' || art.includes('snack') || art === 'riegel' ? 7 : 19);\n    const revenueNet = vatRate === 0\n      ? r.umsatz_brutto\n      : Math.round(r.umsatz_brutto / (1 + vatRate / 100) * 100) / 100;\n\n    return {\n      json: {\n        event_type: 'guv_daily',\n        batch_run_id: batchRunId,\n        data: {\n          guv_key: guvKey,\n          posting_date: r.date,\n          machine_key: String(r.machine_id),\n          mdb_code: r.mdb_code || null,\n          product_key: r.product_key,\n          quantity_sold: r.quantity_sold,\n          revenue_gross: r.umsatz_brutto,\n          revenue_net: revenueNet,\n          cost_of_goods: r.wareneinsatz_brutto,\n          gross_profit: r.guv,\n          source: 'wf8_guv_aggregator'\n        }\n      }\n    };\n  });",
           "mode": "runOnceForAllItems"
         },
         "id": "927036d8-5d1e-452c-99cd-ccc7b76c4d41",
@@ -649,7 +649,7 @@
         "parameters": {
           "workflowId": {
             "__rl": true,
-            "value": "pYrIB2bSQXxayFHq",
+            "value": "Sajezv8tJll0CLIv",
             "mode": "id"
           },
           "mode": "each",
