@@ -289,6 +289,26 @@ test('AC-Name: parseProductRow falls back to product_id string when product_name
   assert.equal(result.byProduct[0].product_name, '42');
 });
 
+test('AC-Name: SKU-coded product_name gets formatted for display (strip prefix, title case)', () => {
+  const rows = [
+    { product_id: 3, product_name: 'SKU_SNICKERS', month: '2026-05-01', revenue_net: '10.00', db_net: '4.00', qty: '5' },
+    { product_id: 4, product_name: 'SKU_7_DAYS_CROISSANT', month: '2026-05-01', revenue_net: '8.00', db_net: '3.00', qty: '4' },
+    { product_id: 5, product_name: 'SKU_KITKAT_CHUNKY', month: '2026-05-01', revenue_net: '6.00', db_net: '2.00', qty: '3' },
+  ];
+  const result = buildEconomicsData({ byProduct: rows, bySlot: [], inventoryValue: [] }, {});
+  assert.equal(result.byProduct.find((r) => r.product_id === 3).product_name, 'Snickers');
+  assert.equal(result.byProduct.find((r) => r.product_id === 4).product_name, '7 Days Croissant');
+  assert.equal(result.byProduct.find((r) => r.product_id === 5).product_name, 'Kitkat Chunky');
+});
+
+test('AC-Name: non-SKU product_name is kept unchanged', () => {
+  const rows = [
+    { product_id: 6, product_name: 'Red Bull', month: '2026-05-01', revenue_net: '10.00', db_net: '4.00', qty: '5' },
+  ];
+  const result = buildEconomicsData({ byProduct: rows, bySlot: [], inventoryValue: [] }, {});
+  assert.equal(result.byProduct[0].product_name, 'Red Bull');
+});
+
 test('AC-Period: buildEconomicsData result includes period with from and to', () => {
   const result = buildEconomicsData(
     { byProduct: [], bySlot: [], inventoryValue: [] },

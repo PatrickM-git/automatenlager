@@ -23,6 +23,18 @@ function isBackfill(row) {
   return row.source === 'historic_backfill';
 }
 
+function formatProductName(name) {
+  if (name == null) return null;
+  if (/^SKU_[A-Z0-9_]+$/.test(name)) {
+    return name
+      .replace(/^SKU_/, '')
+      .replace(/_/g, ' ')
+      .toLowerCase()
+      .replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  }
+  return name;
+}
+
 function currentBerlinMonth() {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Berlin',
@@ -44,7 +56,7 @@ function parseProductRow(row) {
   const db = round2(toNum(row.db_net));
   return {
     product_id: toNum(row.product_id),
-    product_name: row.product_name != null ? String(row.product_name) : String(toNum(row.product_id)),
+    product_name: formatProductName(row.product_name) ?? String(toNum(row.product_id)),
     month: row.month,
     revenue_net: revenue,
     db_net: db,
