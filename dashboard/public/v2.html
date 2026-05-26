@@ -47,10 +47,31 @@
         </section>
 
         <section class="v2-grid" aria-label="Dashboard v2 Datenbereiche">
-          <article id="inventory" class="v2-panel" data-endpoint="/api/v2/inventory-mhd">
-            <p class="v2-eyebrow">Bestand &amp; MHD</p>
-            <h2>Priorisierte Risiken</h2>
-            <div class="v2-panel-state">Noch keine PG-Antwort geladen.</div>
+          <article id="inventory" class="v2-panel v2-panel--inventory" data-endpoint="/api/v2/inventory-mhd">
+            <div class="v2-panel-header">
+              <div>
+                <p class="v2-eyebrow">Bestand &amp; MHD</p>
+                <h2>Priorisierte Risiken</h2>
+              </div>
+              <div class="v2-eco-filters">
+                <label class="v2-filter-label" for="inventoryLocationFilter">Standort</label>
+                <input class="v2-filter-input" id="inventoryLocationFilter" type="text" placeholder="alle" autocomplete="off" spellcheck="false">
+                <label class="v2-filter-label" for="inventoryMachineFilter">Automat</label>
+                <input class="v2-filter-input" id="inventoryMachineFilter" type="text" placeholder="alle" autocomplete="off" spellcheck="false">
+              </div>
+            </div>
+
+            <div id="inventoryState" class="v2-panel-state" aria-live="polite">Noch keine PG-Antwort geladen.</div>
+            <div id="inventoryContent" class="v2-inventory-content" hidden>
+              <div>
+                <p class="v2-eyebrow v2-section-gap">MHD-Risiken</p>
+                <div id="inventoryMhdList" class="v2-inventory-list" aria-label="MHD-Risiken"></div>
+              </div>
+              <div>
+                <p class="v2-eyebrow v2-section-gap">Niedrige Bestände</p>
+                <div id="inventoryLowStockList" class="v2-inventory-list" aria-label="Niedrige Bestände"></div>
+              </div>
+            </div>
           </article>
           <article id="economics" class="v2-panel v2-panel--economics" data-endpoint="/api/v2/economics">
             <div class="v2-panel-header">

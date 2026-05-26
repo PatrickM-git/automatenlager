@@ -11,6 +11,113 @@ async function loadV2Overview() {
   }
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// ── Inventory / Bestand & MHD ────────────────────────────────────────────────
+
+const inventoryState = {
+  location: '',
+  machine: '',
+};
+
+function severityLabel(severity) {
+  if (severity === 'critical' || severity === 'error') return 'kritisch';
+  if (severity === 'warning') return 'Warnung';
+  return 'Info';
+}
+
+function renderInventoryList(el, rows, emptyText, renderRow) {
+  if (!rows || !rows.length) {
+    el.innerHTML = `<div class="v2-inventory-empty">${emptyText}</div>`;
+    return;
+  }
+  el.innerHTML = rows.map(renderRow).join('');
+}
+
+function renderMhdRow(row) {
+  return `
+    <div class="v2-inventory-row v2-inventory-row--${escapeHtml(row.severity)}">
+      <div class="v2-inventory-main">
+        <strong>${escapeHtml(row.product_name)}</strong>
+        <span>${escapeHtml(row.location_name || row.location_id)} · ${escapeHtml(row.machine_name || row.machine_id)} · MDB ${escapeHtml(row.mdb_code)}</span>
+      </div>
+      <div class="v2-inventory-meta">
+        <span class="v2-inventory-date">${escapeHtml(row.mhd_date)}</span>
+        <span class="v2-inventory-pill">${escapeHtml(severityLabel(row.severity))}</span>
+        <span>${escapeHtml(row.remaining_qty)} Stk.</span>
+      </div>
+    </div>`;
+}
+
+function renderLowStockRow(row) {
+  return `
+    <div class="v2-inventory-row">
+      <div class="v2-inventory-main">
+        <strong>${escapeHtml(row.product_name)}</strong>
+        <span>${escapeHtml(row.location_name || row.location_id)} · ${escapeHtml(row.machine_name || row.machine_id)} · MDB ${escapeHtml(row.mdb_code)}</span>
+      </div>
+      <div class="v2-inventory-meta">
+        <span>${escapeHtml(row.current_machine_qty)} / ${escapeHtml(row.target_stock)} im Slot</span>
+        <span class="v2-inventory-pill">${escapeHtml(row.refill_gap)} nachfüllen</span>
+        <span>${escapeHtml(row.urgency_label)}</span>
+      </div>
+    </div>`;
+}
+
+async function loadInventoryMhd() {
+  const stateEl = document.querySelector('#inventoryState');
+  const contentEl = document.querySelector('#inventoryContent');
+  const mhdList = document.querySelector('#inventoryMhdList');
+  const lowStockList = document.querySelector('#inventoryLowStockList');
+  const location = inventoryState.location.trim();
+  const machine = inventoryState.machine.trim();
+  const url = `/api/v2/inventory-mhd?location=${encodeURIComponent(location)}&machine=${encodeURIComponent(machine)}`;
+
+  stateEl.hidden = false;
+  contentEl.hidden = true;
+
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    const payload = await response.json();
+
+    if (!payload.ok || !payload.data) {
+      stateEl.textContent = `${payload.error?.code || 'FEHLER'}: ${payload.error?.message || 'Unbekannter Fehler'}`;
+      return;
+    }
+
+    renderInventoryList(mhdList, payload.data.mhdRisks, 'Keine MHD-Risiken für diesen Filter.', renderMhdRow);
+    renderInventoryList(lowStockList, payload.data.lowStock, 'Keine niedrigen Bestände für diesen Filter.', renderLowStockRow);
+    stateEl.hidden = true;
+    contentEl.hidden = false;
+  } catch (err) {
+    stateEl.textContent = `API nicht erreichbar: ${err.message}`;
+  }
+}
+
+function initInventoryMhd() {
+  const locationInput = document.querySelector('#inventoryLocationFilter');
+  const machineInput = document.querySelector('#inventoryMachineFilter');
+  if (!locationInput || !machineInput) return;
+
+  let debounce;
+  const onChange = () => {
+    clearTimeout(debounce);
+    inventoryState.location = locationInput.value;
+    inventoryState.machine = machineInput.value;
+    debounce = setTimeout(loadInventoryMhd, 300);
+  };
+  locationInput.addEventListener('input', onChange);
+  machineInput.addEventListener('input', onChange);
+  loadInventoryMhd();
+}
+
 // ── Economics / GuV & KPI ────────────────────────────────────────────────────
 
 function currentBerlinMonth() {
@@ -215,4 +322,5 @@ function initEconomics() {
 }
 
 loadV2Overview();
+initInventoryMhd();
 initEconomics();
