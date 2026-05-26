@@ -13,10 +13,27 @@ async function loadV2Overview() {
 
 // ── Economics / GuV & KPI ────────────────────────────────────────────────────
 
+function currentBerlinMonth() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric',
+    month: '2-digit',
+  }).format(new Date()).slice(0, 7);
+}
+
+function formatMonthLabel(yyyyMm) {
+  const [y, m] = yyyyMm.split('-');
+  return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('de-DE', {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
 const ecoState = {
   sortBy: 'revenue_net',
   sortOrder: 'desc',
   machine: '',
+  month: currentBerlinMonth(),
 };
 
 function fmtEur(value) {
@@ -36,18 +53,19 @@ function renderSortIndicators() {
   });
 }
 
-function renderHeroStrip(totals) {
+function renderHeroStrip(totals, period) {
   const hero = document.querySelector('#ecoHero');
   const marginPct = totals.revenue_net > 0
     ? ((totals.db_net / totals.revenue_net) * 100)
     : 0;
   const marginClass = marginPct >= 60 ? 'v2-eco-kpi--positive' : marginPct < 50 ? 'v2-eco-kpi--warn' : '';
+  const periodLabel = period ? formatMonthLabel(period.from) : '';
 
   hero.innerHTML = `
     <div class="v2-eco-kpi">
       <div class="v2-eco-kpi-label">Umsatz netto</div>
       <div class="v2-eco-kpi-value">${fmtEur(totals.revenue_net)}</div>
-      <div class="v2-eco-kpi-sub">${totals.qty} Einheiten</div>
+      <div class="v2-eco-kpi-sub">${periodLabel ? `${periodLabel} · ` : ''}${totals.qty} Einheiten</div>
     </div>
     <div class="v2-eco-kpi">
       <div class="v2-eco-kpi-label">Deckungsbeitrag</div>
@@ -89,7 +107,7 @@ function renderProductTable(rows) {
   }
   tbody.innerHTML = rows.map((r) => `
     <tr>
-      <td>${r.product_id}</td>
+      <td>${r.product_name}</td>
       <td class="v2-kpi-num">${fmtEur(r.revenue_net)}</td>
       <td class="v2-kpi-num">${fmtEur(r.db_net)}</td>
       <td class="v2-kpi-num">${fmtPct(r.margin_pct)}</td>
@@ -121,7 +139,7 @@ async function loadEconomics() {
   contentEl.hidden = true;
 
   const machine = ecoState.machine.trim();
-  const url = `/api/v2/economics?sort=${encodeURIComponent(ecoState.sortBy)}&order=${encodeURIComponent(ecoState.sortOrder)}&machine=${encodeURIComponent(machine)}`;
+  const url = `/api/v2/economics?sort=${encodeURIComponent(ecoState.sortBy)}&order=${encodeURIComponent(ecoState.sortOrder)}&machine=${encodeURIComponent(machine)}&from=${encodeURIComponent(ecoState.month)}&to=${encodeURIComponent(ecoState.month)}`;
 
   try {
     const response = await fetch(url, { cache: 'no-store' });
@@ -132,7 +150,7 @@ async function loadEconomics() {
       return;
     }
 
-    renderHeroStrip(payload.data.totals);
+    renderHeroStrip(payload.data.totals, payload.data.period);
     renderProductTable(payload.data.byProduct);
     renderSlotTable(payload.data.bySlot);
     renderTotalsBar(payload.data.totals, payload.generatedAtDisplay);
@@ -145,7 +163,34 @@ async function loadEconomics() {
   }
 }
 
+function initMonthSelector() {
+  const select = document.querySelector('#ecoMonthSelect');
+  if (!select) return;
+
+  const current = currentBerlinMonth();
+  const [y, m] = current.split('-').map(Number);
+
+  for (let i = 0; i < 12; i++) {
+    let month = m - i;
+    let year = y;
+    while (month <= 0) { month += 12; year -= 1; }
+    const ym = `${year}-${String(month).padStart(2, '0')}`;
+    const opt = document.createElement('option');
+    opt.value = ym;
+    opt.textContent = formatMonthLabel(ym);
+    if (ym === ecoState.month) opt.selected = true;
+    select.appendChild(opt);
+  }
+
+  select.addEventListener('change', () => {
+    ecoState.month = select.value;
+    loadEconomics();
+  });
+}
+
 function initEconomics() {
+  initMonthSelector();
+
   document.querySelectorAll('.v2-sort-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (btn.dataset.sort === ecoState.sortBy) {

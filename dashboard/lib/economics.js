@@ -23,11 +23,28 @@ function isBackfill(row) {
   return row.source === 'historic_backfill';
 }
 
+function currentBerlinMonth() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric',
+    month: '2-digit',
+  }).format(new Date()).slice(0, 7);
+}
+
+function resolvePeriod(query = {}) {
+  const current = currentBerlinMonth();
+  const validMonth = /^\d{4}-\d{2}$/;
+  const from = validMonth.test(query.from || '') ? query.from : current;
+  const to = validMonth.test(query.to || '') ? query.to : current;
+  return { from, to };
+}
+
 function parseProductRow(row) {
   const revenue = round2(toNum(row.revenue_net));
   const db = round2(toNum(row.db_net));
   return {
     product_id: toNum(row.product_id),
+    product_name: row.product_name != null ? String(row.product_name) : String(toNum(row.product_id)),
     month: row.month,
     revenue_net: revenue,
     db_net: db,
@@ -69,6 +86,7 @@ function buildEconomicsData(pgRows, query = {}) {
   const sortBy = query.sort || 'revenue_net';
   const sortOrder = query.order === 'asc' ? 'asc' : 'desc';
   const machineFilter = query.machine || null;
+  const period = resolvePeriod(query);
 
   const byProduct = sortRows(
     (pgRows.byProduct || []).filter((r) => !isBackfill(r)).map(parseProductRow),
@@ -98,6 +116,7 @@ function buildEconomicsData(pgRows, query = {}) {
     bySlot,
     inventoryValue,
     totals,
+    period,
     sortBy,
     sortOrder,
     machineFilter,
@@ -107,6 +126,9 @@ function buildEconomicsData(pgRows, query = {}) {
 async function queryEconomicsPg(pgUrl, query = {}) {
   const { Client } = require('pg');
   const machineFilter = (query.machine || '').trim() || null;
+  const { from, to } = resolvePeriod(query);
+  const dateFrom = `${from}-01`;
+  const dateTo = `${to}-01`;
 
   const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
   await client.connect();
@@ -116,28 +138,54 @@ async function queryEconomicsPg(pgUrl, query = {}) {
     if (machineFilter) {
       const [pr, sr] = await Promise.all([
         client.query(
-          `SELECT product_id,
-                  date_trunc('month', posting_date)::DATE AS month,
-                  SUM(quantity_sold)::int                  AS qty,
-                  SUM(revenue_net)                         AS revenue_net,
-                  SUM(gross_profit)                        AS db_net
-             FROM automatenlager.guv_daily
-            WHERE source != 'historic_backfill'
-              AND machine_id = $1
-            GROUP BY product_id, date_trunc('month', posting_date)::DATE`,
-          [machineFilter],
+          `SELECT g.product_id,
+                  p.name                                     AS product_name,
+                  date_trunc('month', g.posting_date)::DATE  AS month,
+                  SUM(g.quantity_sold)::int                  AS qty,
+                  SUM(g.revenue_net)                         AS revenue_net,
+                  SUM(g.gross_profit)                        AS db_net
+             FROM automatenlager.guv_daily g
+             LEFT JOIN automatenlager.products p ON p.product_id = g.product_id
+            WHERE g.source != 'historic_backfill'
+              AND g.machine_id = $1
+              AND date_trunc('month', g.posting_date) >= $2::date
+              AND date_trunc('month', g.posting_date) <= $3::date
+            GROUP BY g.product_id, p.name, date_trunc('month', g.posting_date)::DATE`,
+          [machineFilter, dateFrom, dateTo],
         ),
         client.query(
-          `SELECT * FROM automatenlager.mv_db_per_slot_monthly WHERE machine_id = $1`,
-          [machineFilter],
+          `SELECT * FROM automatenlager.mv_db_per_slot_monthly
+            WHERE machine_id = $1
+              AND month >= $2::date
+              AND month <= $3::date`,
+          [machineFilter, dateFrom, dateTo],
         ),
       ]);
       productRows = pr.rows;
       slotRows = sr.rows;
     } else {
       const [pr, sr] = await Promise.all([
-        client.query(`SELECT * FROM automatenlager.mv_db_per_product_monthly`),
-        client.query(`SELECT * FROM automatenlager.mv_db_per_slot_monthly`),
+        client.query(
+          `SELECT g.product_id,
+                  p.name                                     AS product_name,
+                  date_trunc('month', g.posting_date)::DATE  AS month,
+                  SUM(g.quantity_sold)::int                  AS qty,
+                  SUM(g.revenue_net)                         AS revenue_net,
+                  SUM(g.gross_profit)                        AS db_net
+             FROM automatenlager.guv_daily g
+             LEFT JOIN automatenlager.products p ON p.product_id = g.product_id
+            WHERE g.source != 'historic_backfill'
+              AND date_trunc('month', g.posting_date) >= $1::date
+              AND date_trunc('month', g.posting_date) <= $2::date
+            GROUP BY g.product_id, p.name, date_trunc('month', g.posting_date)::DATE`,
+          [dateFrom, dateTo],
+        ),
+        client.query(
+          `SELECT * FROM automatenlager.mv_db_per_slot_monthly
+            WHERE month >= $1::date
+              AND month <= $2::date`,
+          [dateFrom, dateTo],
+        ),
       ]);
       productRows = pr.rows;
       slotRows = sr.rows;
@@ -157,4 +205,5 @@ async function queryEconomicsPg(pgUrl, query = {}) {
   }
 }
 
-module.exports = { buildEconomicsData, queryEconomicsPg };
+module.exports = { buildEconomicsData, queryEconomicsPg, resolvePeriod };
+

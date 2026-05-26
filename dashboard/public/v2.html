@@ -59,7 +59,15 @@
                 <h2 class="v2-eco-title">Wirtschaftliche Sicht</h2>
               </div>
               <div class="v2-eco-filters">
-                <label class="v2-filter-label" for="ecoMachineFilter">
+                <label class="v2-filter-label" for="ecoMonthSelect">
+                  <svg class="v2-filter-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <rect x="2" y="3" width="12" height="11" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M5 1v4M11 1v4M2 7h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
+                  Monat
+                </label>
+                <select class="v2-filter-select" id="ecoMonthSelect" aria-label="Zeitraum wählen"></select>
+                <label class="v2-filter-label" for="ecoMachineFilter" style="margin-left:8px">
                   <svg class="v2-filter-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 4h12M5 8h6M7 12h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                   </svg>
@@ -92,7 +100,7 @@
                   <table class="v2-kpi-table" aria-label="Produkt-KPIs">
                     <thead>
                       <tr>
-                        <th class="v2-th-label">Produkt-ID</th>
+                        <th class="v2-th-label">Produkt</th>
                         <th class="v2-th-sort"><button class="v2-sort-btn" data-sort="revenue_net" data-table="product">Umsatz</button></th>
                         <th class="v2-th-sort"><button class="v2-sort-btn" data-sort="db_net" data-table="product">DB netto</button></th>
                         <th class="v2-th-sort"><button class="v2-sort-btn" data-sort="margin_pct" data-table="product">Marge %</button></th>

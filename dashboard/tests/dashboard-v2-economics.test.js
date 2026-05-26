@@ -270,3 +270,77 @@ test('AC-UI: v2.css defines styles for the economics table', () => {
   assert.match(css, /\.v2-kpi-table/, 'v2.css must define .v2-kpi-table');
   assert.match(css, /\.v2-sort-btn/, 'v2.css must define .v2-sort-btn');
 });
+
+// ── Issue #38: Produktnamen, Zeitfilter, Zeitraum-Label ──────────────────────
+
+test('AC-Name: parseProductRow propagates product_name from DB row', () => {
+  const rows = [
+    { product_id: 7, product_name: 'Snickers', month: '2026-05-01', revenue_net: '10.00', db_net: '4.00', qty: '5' },
+  ];
+  const result = buildEconomicsData({ byProduct: rows, bySlot: [], inventoryValue: [] }, {});
+  assert.equal(result.byProduct[0].product_name, 'Snickers');
+});
+
+test('AC-Name: parseProductRow falls back to product_id string when product_name is absent', () => {
+  const rows = [
+    { product_id: 42, month: '2026-05-01', revenue_net: '10.00', db_net: '4.00', qty: '3' },
+  ];
+  const result = buildEconomicsData({ byProduct: rows, bySlot: [], inventoryValue: [] }, {});
+  assert.equal(result.byProduct[0].product_name, '42');
+});
+
+test('AC-Period: buildEconomicsData result includes period with from and to', () => {
+  const result = buildEconomicsData(
+    { byProduct: [], bySlot: [], inventoryValue: [] },
+    { from: '2026-04', to: '2026-05' },
+  );
+  assert.deepEqual(result.period, { from: '2026-04', to: '2026-05' });
+});
+
+test('AC-Period: buildEconomicsData defaults period to current YYYY-MM when query is empty', () => {
+  const result = buildEconomicsData({ byProduct: [], bySlot: [], inventoryValue: [] }, {});
+  assert.ok(result.period, 'period must exist');
+  assert.match(result.period.from, /^\d{4}-\d{2}$/, 'from must be YYYY-MM');
+  assert.match(result.period.to, /^\d{4}-\d{2}$/, 'to must be YYYY-MM');
+  assert.equal(result.period.from, result.period.to, 'default from and to must be the same month');
+});
+
+test('AC-Period: buildEconomicsData ignores invalid from/to and uses current month', () => {
+  const result = buildEconomicsData(
+    { byProduct: [], bySlot: [], inventoryValue: [] },
+    { from: 'not-a-month', to: '' },
+  );
+  assert.match(result.period.from, /^\d{4}-\d{2}$/);
+  assert.match(result.period.to, /^\d{4}-\d{2}$/);
+});
+
+test('AC-UI: v2.html has month selector with id ecoMonthSelect', () => {
+  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
+  assert.match(html, /id="ecoMonthSelect"/, 'missing month selector');
+});
+
+test('AC-UI: v2.html product table header says Produkt not Produkt-ID', () => {
+  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
+  assert.doesNotMatch(html, /Produkt-ID/, 'header must not say Produkt-ID');
+});
+
+test('AC-UI: v2.js URL includes from= and to= params for economics API', () => {
+  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
+  assert.match(js, /from=/, 'v2.js must include from param in URL');
+  assert.match(js, /to=/, 'v2.js must include to param in URL');
+});
+
+test('AC-UI: v2.js renders product_name in product table rows', () => {
+  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
+  assert.match(js, /product_name/, 'v2.js must reference product_name in table rendering');
+});
+
+test('AC-UI: v2.js renders period label in hero strip', () => {
+  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
+  assert.match(js, /period/, 'v2.js must reference period when rendering hero strip');
+});
+
+test('AC-UI: v2.css defines style for month filter select', () => {
+  const css = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.css'), 'utf8');
+  assert.match(css, /v2-filter-select/, 'v2.css must define .v2-filter-select');
+});

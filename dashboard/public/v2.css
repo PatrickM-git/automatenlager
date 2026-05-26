@@ -275,6 +275,30 @@ h2 {
   box-shadow: 0 0 0 3px rgba(122, 31, 92, 0.12);
 }
 
+.v2-filter-select {
+  padding: 6px 28px 6px 12px;
+  border: 1px solid var(--v2-line);
+  border-radius: 20px;
+  background-color: var(--v2-surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237a1f5c' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  color: var(--v2-ink);
+  font-size: 13px;
+  font-family: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  transition: border-color 120ms, box-shadow 120ms;
+  min-width: 110px;
+}
+
+.v2-filter-select:focus {
+  outline: none;
+  border-color: var(--v2-accent);
+  box-shadow: 0 0 0 3px rgba(122, 31, 92, 0.12);
+}
+
 /* ── Skeleton loading ── */
 
 .v2-eco-state {
