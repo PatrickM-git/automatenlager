@@ -46,6 +46,36 @@
           <p>Dieser Einstieg ersetzt das produktive Legacy-Dashboard nicht. Sobald die v2-API Daten liefert, erscheinen hier Prioritäten, Ampeln und zentrale Kennzahlen.</p>
         </section>
 
+        <section id="uploads" class="v2-section v2-uploads" hidden>
+          <div class="v2-uploads-head">
+            <div>
+              <p class="v2-eyebrow">Admin Uploads</p>
+              <h2>Rechnungen und Picklisten direkt uebergeben</h2>
+            </div>
+            <p id="v2UploadMeta" class="v2-panel-state"></p>
+          </div>
+
+          <div class="v2-upload-grid">
+            <form id="invoiceUploadForm" class="v2-upload-card">
+              <p class="v2-upload-label">WF1/WF2</p>
+              <h3>Rechnung hochladen</h3>
+              <p class="v2-upload-copy">PDF, PNG oder JPG. Der Upload wird in den bestehenden Rechnungs-Workflow uebergeben.</p>
+              <input id="invoiceUploadFile" name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" required>
+              <button type="submit">Rechnung senden</button>
+              <p id="invoiceUploadStatus" class="v2-upload-status" role="status" aria-live="polite"></p>
+            </form>
+
+            <form id="picklistUploadForm" class="v2-upload-card">
+              <p class="v2-upload-label">WF9</p>
+              <h3>Pickliste hochladen</h3>
+              <p class="v2-upload-copy">Nur PDF. Der Upload wird in den bestehenden Picklisten-Workflow uebergeben.</p>
+              <input id="picklistUploadFile" name="file" type="file" accept=".pdf,application/pdf" required>
+              <button type="submit">Pickliste senden</button>
+              <p id="picklistUploadStatus" class="v2-upload-status" role="status" aria-live="polite"></p>
+            </form>
+          </div>
+        </section>
+
         <section class="v2-grid" aria-label="Dashboard v2 Datenbereiche">
           <article id="inventory" class="v2-panel v2-panel--inventory" data-endpoint="/api/v2/inventory-mhd">
             <div class="v2-panel-header">

@@ -58,6 +58,26 @@ const dashboardV2Areas = new Map([
   ['monitoring', { path: '/api/v2/monitoring', label: 'Monitoring' }],
 ]);
 
+const DASHBOARD_V2_UPLOAD_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
+const dashboardV2UploadTargets = {
+  invoice: {
+    id: 'invoice',
+    label: 'Rechnung',
+    maxBytes: 10 * 1024 * 1024,
+    allowedMimeTypes: ['application/pdf', 'image/png', 'image/jpeg'],
+    allowedExtensions: ['.pdf', '.png', '.jpg', '.jpeg'],
+    workflowName: /^WF1 - Rechnungseingang automatisch mit Claude$/i,
+  },
+  picklist: {
+    id: 'picklist',
+    label: 'Pickliste',
+    maxBytes: 10 * 1024 * 1024,
+    allowedMimeTypes: ['application/pdf'],
+    allowedExtensions: ['.pdf'],
+    workflowName: /^WF9 - Pickliste verarbeiten$/i,
+  },
+};
+
 function parseEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {};
   const values = {};
@@ -179,6 +199,189 @@ function formatBerlinDateTime(date) {
 
 function dashboardV2PgUrl() {
   return clean(process.env.DASHBOARD_V2_PG_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL);
+}
+
+function collectRawBody(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    req.on('data', (chunk) => {
+      total += chunk.length;
+      if (total > maxBytes) {
+        const error = new Error(`Body groesser als ${maxBytes} Bytes.`);
+        error.code = 'BODY_TOO_LARGE';
+        reject(error);
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function parseMultipartBoundary(contentType) {
+  const match = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType || '');
+  return clean((match && (match[1] || match[2])) || '');
+}
+
+function parseMultipartFormData(bodyBuffer, contentType) {
+  const boundary = parseMultipartBoundary(contentType);
+  if (!boundary) {
+    const error = new Error('Boundary im multipart/form-data Header fehlt.');
+    error.code = 'MULTIPART_BOUNDARY_MISSING';
+    throw error;
+  }
+
+  const delimiter = `--${boundary}`;
+  const text = bodyBuffer.toString('latin1');
+  const segments = text.split(delimiter).slice(1);
+  const fields = {};
+  const files = [];
+
+  for (const segment of segments) {
+    if (segment.startsWith('--')) break;
+
+    let part = segment;
+    if (part.startsWith('\r\n')) part = part.slice(2);
+    if (part.endsWith('\r\n')) part = part.slice(0, -2);
+    if (!part) continue;
+
+    const headerEnd = part.indexOf('\r\n\r\n');
+    if (headerEnd === -1) continue;
+
+    const rawHeaders = part.slice(0, headerEnd);
+    const bodyText = part.slice(headerEnd + 4);
+    const headers = {};
+    for (const line of rawHeaders.split('\r\n')) {
+      const separatorIndex = line.indexOf(':');
+      if (separatorIndex === -1) continue;
+      const key = clean(line.slice(0, separatorIndex).toLowerCase());
+      const value = clean(line.slice(separatorIndex + 1));
+      headers[key] = value;
+    }
+
+    const disposition = headers['content-disposition'] || '';
+    const nameMatch = /name="([^"]+)"/i.exec(disposition);
+    const name = clean((nameMatch && nameMatch[1]) || '');
+    if (!name) continue;
+
+    const fileNameMatch = /filename="([^"]*)"/i.exec(disposition);
+    const fileName = fileNameMatch ? clean(fileNameMatch[1]) : '';
+
+    if (!fileName) {
+      fields[name] = bodyText;
+      continue;
+    }
+
+    const fileBuffer = Buffer.from(bodyText, 'latin1');
+    files.push({
+      fieldName: name,
+      fileName,
+      mimeType: clean(headers['content-type']).toLowerCase(),
+      sizeBytes: fileBuffer.length,
+      data: fileBuffer,
+    });
+  }
+
+  return { fields, files };
+}
+
+function safeFileName(value) {
+  const normalized = clean(value).replace(/\\/g, '/');
+  return path.basename(normalized);
+}
+
+function validateV2Upload(targetConfig, parsedForm, routeTarget) {
+  const formTarget = clean(parsedForm.fields.target).toLowerCase();
+  if (formTarget && formTarget !== routeTarget) {
+    const error = new Error('Der Zieltyp im Formular passt nicht zur Upload-Route.');
+    error.code = 'TARGET_MISMATCH';
+    error.status = 400;
+    throw error;
+  }
+
+  const file = parsedForm.files.find((entry) => entry.fieldName === 'file') || parsedForm.files[0];
+  if (!file) {
+    const error = new Error('Es wurde keine Datei im Feld "file" gesendet.');
+    error.code = 'FILE_MISSING';
+    error.status = 400;
+    throw error;
+  }
+
+  file.fileName = safeFileName(file.fileName);
+  if (!file.fileName) {
+    const error = new Error('Der Dateiname fehlt oder ist ungueltig.');
+    error.code = 'FILE_NAME_INVALID';
+    error.status = 422;
+    throw error;
+  }
+
+  const extension = path.extname(file.fileName).toLowerCase();
+  if (!targetConfig.allowedExtensions.includes(extension)) {
+    const error = new Error(`${targetConfig.label}-Upload akzeptiert diesen Dateinamen nicht.`);
+    error.code = 'FILE_TYPE_NOT_ALLOWED';
+    error.status = 422;
+    throw error;
+  }
+
+  const mimeType = clean(file.mimeType).toLowerCase();
+  if (!targetConfig.allowedMimeTypes.includes(mimeType)) {
+    const error = new Error(`${targetConfig.label}-Upload akzeptiert diesen Content-Type nicht.`);
+    error.code = 'FILE_TYPE_NOT_ALLOWED';
+    error.status = 422;
+    throw error;
+  }
+
+  if (file.sizeBytes <= 0) {
+    const error = new Error('Die Datei ist leer.');
+    error.code = 'FILE_EMPTY';
+    error.status = 422;
+    throw error;
+  }
+
+  if (file.sizeBytes > targetConfig.maxBytes) {
+    const error = new Error(`${targetConfig.label}-Datei ist zu gross (max. ${targetConfig.maxBytes} Bytes).`);
+    error.code = 'FILE_TOO_LARGE';
+    error.status = 413;
+    throw error;
+  }
+
+  return file;
+}
+
+function resolveV2UploadWorkflow(targetConfig, n8n) {
+  const workflow = pickWorkflowForAction(n8n.workflows || [], targetConfig.workflowName);
+  if (!workflow || !workflow.active) return null;
+
+  const webhook = firstProductionWebhook(workflow);
+  if (!webhook?.path) return null;
+  const method = clean(webhook.method || 'POST').toUpperCase();
+  if (method !== 'POST') return null;
+
+  const webhookUrl = `${n8n.baseUrl || dashboardConfig().n8nBaseUrl}/webhook/${encodeURIComponent(webhook.path)}`;
+  return {
+    id: workflow.id,
+    name: workflow.name,
+    webhookPath: webhook.path,
+    method,
+    url: webhookUrl,
+  };
+}
+
+function buildV2UploadCapabilities(viewer) {
+  return {
+    viewer,
+    canUpload: viewer.canTriggerActions,
+    targets: Object.values(dashboardV2UploadTargets).map((target) => ({
+      id: target.id,
+      label: target.label,
+      maxBytes: target.maxBytes,
+      allowedMimeTypes: target.allowedMimeTypes,
+      allowedExtensions: target.allowedExtensions,
+    })),
+  };
 }
 
 function readDashboardV2LastSuccess(area) {
@@ -1385,6 +1588,200 @@ const server = http.createServer(async (req, res) => {
         error: {
           code: 'V2_ACTION_NOT_IMPLEMENTED',
           message: 'Dashboard-v2-Aktionen werden in spaeteren Slices kontrolliert angebunden.',
+        },
+      });
+      return;
+    }
+
+    if (parsed.pathname === '/api/v2/upload-capabilities' && req.method === 'GET') {
+      const viewer = getViewer(req);
+      sendJson(res, 200, {
+        ok: true,
+        ...buildV2UploadCapabilities(viewer),
+      });
+      return;
+    }
+
+    const v2UploadMatch = parsed.pathname.match(/^\/api\/v2\/uploads\/([^/]+)$/);
+    if (v2UploadMatch && req.method === 'POST') {
+      const viewer = getViewer(req);
+      const routeTarget = clean(decodeURIComponent(v2UploadMatch[1])).toLowerCase();
+      const targetConfig = dashboardV2UploadTargets[routeTarget];
+
+      if (!targetConfig) {
+        sendJson(res, 400, {
+          ok: false,
+          viewer,
+          error: {
+            code: 'TARGET_INVALID',
+            message: 'Unbekannter Upload-Zieltyp. Erlaubt sind invoice oder picklist.',
+          },
+        });
+        return;
+      }
+
+      if (!viewer.canTriggerActions) {
+        auditGuestAccess(viewer, 'v2_upload_denied', { target: routeTarget });
+        sendJson(res, 403, {
+          ok: false,
+          viewer,
+          error: {
+            code: 'READ_ONLY_FORBIDDEN',
+            message: 'Read-Only-Benutzer duerfen keine Uploads ausfuehren.',
+          },
+        });
+        return;
+      }
+
+      let rawBody;
+      try {
+        rawBody = await collectRawBody(req, DASHBOARD_V2_UPLOAD_BODY_LIMIT_BYTES);
+      } catch (error) {
+        if (error.code === 'BODY_TOO_LARGE') {
+          sendJson(res, 413, {
+            ok: false,
+            viewer,
+            target: routeTarget,
+            error: {
+              code: 'FILE_TOO_LARGE',
+              message: 'Die Upload-Anfrage ist zu gross.',
+            },
+          });
+          return;
+        }
+        throw error;
+      }
+
+      const contentType = clean(req.headers['content-type']);
+      if (!/^multipart\/form-data/i.test(contentType)) {
+        sendJson(res, 415, {
+          ok: false,
+          viewer,
+          target: routeTarget,
+          error: {
+            code: 'CONTENT_TYPE_INVALID',
+            message: 'Upload erwartet multipart/form-data.',
+          },
+        });
+        return;
+      }
+
+      let parsedForm;
+      let validatedFile;
+      try {
+        parsedForm = parseMultipartFormData(rawBody, contentType);
+        validatedFile = validateV2Upload(targetConfig, parsedForm, routeTarget);
+      } catch (error) {
+        sendJson(res, error.status || 400, {
+          ok: false,
+          viewer,
+          target: routeTarget,
+          error: {
+            code: error.code || 'UPLOAD_INVALID',
+            message: error.message || 'Upload konnte nicht validiert werden.',
+          },
+        });
+        return;
+      }
+
+      let n8n;
+      try {
+        n8n = await fetchN8nWorkflows();
+      } catch (error) {
+        sendJson(res, 502, {
+          ok: false,
+          viewer,
+          target: routeTarget,
+          upload: {
+            fileName: validatedFile.fileName,
+            mimeType: validatedFile.mimeType,
+            sizeBytes: validatedFile.sizeBytes,
+          },
+          error: {
+            code: 'N8N_UNREACHABLE',
+            message: `n8n konnte nicht geladen werden: ${error.message}`,
+          },
+        });
+        return;
+      }
+
+      const workflow = resolveV2UploadWorkflow(targetConfig, n8n);
+      if (!workflow) {
+        sendJson(res, 409, {
+          ok: false,
+          viewer,
+          target: routeTarget,
+          upload: {
+            fileName: validatedFile.fileName,
+            mimeType: validatedFile.mimeType,
+            sizeBytes: validatedFile.sizeBytes,
+          },
+          error: {
+            code: 'WORKFLOW_NOT_READY',
+            message: 'Kein aktiver POST-Webhook fuer den Upload-Workflow gefunden.',
+          },
+        });
+        return;
+      }
+
+      let forwardResponse;
+      let forwardText = '';
+      try {
+        forwardResponse = await fetch(workflow.url, {
+          method: workflow.method,
+          headers: {
+            'Content-Type': req.headers['content-type'],
+            'Content-Length': String(rawBody.length),
+          },
+          body: rawBody,
+        });
+        forwardText = await forwardResponse.text();
+      } catch (error) {
+        sendJson(res, 502, {
+          ok: false,
+          viewer,
+          target: routeTarget,
+          upload: {
+            fileName: validatedFile.fileName,
+            mimeType: validatedFile.mimeType,
+            sizeBytes: validatedFile.sizeBytes,
+          },
+          workflow: {
+            id: workflow.id,
+            name: workflow.name,
+            method: workflow.method,
+            webhookPath: workflow.webhookPath,
+            status: 'failed',
+          },
+          error: {
+            code: 'WORKFLOW_FORWARD_FAILED',
+            message: `Upload konnte nicht an den Workflow uebergeben werden: ${error.message}`,
+          },
+        });
+        return;
+      }
+
+      sendJson(res, forwardResponse.ok ? 200 : 502, {
+        ok: forwardResponse.ok,
+        viewer,
+        target: routeTarget,
+        upload: {
+          fileName: validatedFile.fileName,
+          mimeType: validatedFile.mimeType,
+          sizeBytes: validatedFile.sizeBytes,
+        },
+        workflow: {
+          id: workflow.id,
+          name: workflow.name,
+          method: workflow.method,
+          webhookPath: workflow.webhookPath,
+          status: forwardResponse.ok ? 'accepted' : 'error',
+          responseStatus: forwardResponse.status,
+          responsePreview: clean(forwardText).slice(0, 400),
+        },
+        error: forwardResponse.ok ? null : {
+          code: 'WORKFLOW_REJECTED',
+          message: `Workflow antwortete mit HTTP ${forwardResponse.status}.`,
         },
       });
       return;

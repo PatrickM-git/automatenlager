@@ -213,6 +213,98 @@ function initAssortmentSlots() {
   loadAssortmentSlots();
 }
 
+function setUploadStatus(target, message, state = '') {
+  const statusEl = document.querySelector(`#${target}UploadStatus`);
+  if (!statusEl) return;
+  statusEl.textContent = message || '';
+  if (state) {
+    statusEl.dataset.state = state;
+  } else {
+    delete statusEl.dataset.state;
+  }
+}
+
+function setUploadUiEnabled(enabled) {
+  document.querySelectorAll('#uploads input, #uploads button').forEach((element) => {
+    element.disabled = !enabled;
+  });
+}
+
+async function loadUploadCapabilities() {
+  const section = document.querySelector('#uploads');
+  const meta = document.querySelector('#v2UploadMeta');
+  if (!section || !meta) return;
+
+  section.hidden = true;
+  setUploadUiEnabled(false);
+
+  try {
+    const response = await fetch('/api/v2/upload-capabilities', { cache: 'no-store' });
+    const payload = await response.json();
+    if (!payload.ok || !payload.canUpload) return;
+
+    const invoiceTarget = (payload.targets || []).find((item) => item.id === 'invoice');
+    const picklistTarget = (payload.targets || []).find((item) => item.id === 'picklist');
+    meta.textContent = `Max ${Math.round((invoiceTarget?.maxBytes || 0) / (1024 * 1024))} MB Rechnung, ${Math.round((picklistTarget?.maxBytes || 0) / (1024 * 1024))} MB Pickliste`;
+
+    section.hidden = false;
+    setUploadUiEnabled(true);
+  } catch (error) {
+    meta.textContent = `Upload-Konfiguration nicht erreichbar: ${error.message}`;
+  }
+}
+
+async function submitUpload(target) {
+  const input = document.querySelector(`#${target}UploadFile`);
+  if (!input) return;
+
+  const file = input.files && input.files[0];
+  if (!file) {
+    setUploadStatus(target, 'Bitte zuerst eine Datei waehlen.', 'error');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('target', target);
+  formData.append('file', file, file.name);
+  setUploadStatus(target, 'Upload laeuft ...');
+
+  try {
+    const response = await fetch(`/api/v2/uploads/${encodeURIComponent(target)}`, {
+      method: 'POST',
+      body: formData,
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      setUploadStatus(target, `${payload.error?.code || 'UPLOAD_ERROR'}: ${payload.error?.message || 'Upload fehlgeschlagen.'}`, 'error');
+      return;
+    }
+
+    const wfRef = payload.workflow?.id ? `${payload.workflow.name || payload.workflow.id} (${payload.workflow.id})` : 'Workflow';
+    setUploadStatus(target, `Upload uebergeben an ${wfRef}.`, 'ok');
+    input.value = '';
+  } catch (error) {
+    setUploadStatus(target, `Upload fehlgeschlagen: ${error.message}`, 'error');
+  }
+}
+
+function initUploads() {
+  const invoiceForm = document.querySelector('#invoiceUploadForm');
+  const picklistForm = document.querySelector('#picklistUploadForm');
+  if (!invoiceForm || !picklistForm) return;
+
+  invoiceForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    submitUpload('invoice');
+  });
+  picklistForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    submitUpload('picklist');
+  });
+
+  loadUploadCapabilities();
+}
+
 // ── Economics / GuV & KPI ────────────────────────────────────────────────────
 
 function currentBerlinMonth() {
@@ -417,6 +509,7 @@ function initEconomics() {
 }
 
 loadV2Overview();
+initUploads();
 initInventoryMhd();
 initAssortmentSlots();
 initEconomics();
