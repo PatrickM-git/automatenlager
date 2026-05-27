@@ -1,92 +1,226 @@
 {
-  "name": "WF-MatView-Refresh",
-  "nodes": [
-    {
-      "parameters": {},
-      "id": "f99b21fd-4daf-4a80-92a5-111d9fd4a26b",
-      "name": "Manual Trigger",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [
-        -520,
-        -120
-      ]
-    },
-    {
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "cronExpression",
-              "expression": "0 45 4 * * *"
-            }
-          ]
-        }
-      },
-      "id": "473d6539-4329-41ba-b7b4-d4eadf423d2e",
-      "name": "Schedule Trigger - nightly after WF-Val",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [
-        -520,
-        80
-      ]
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "-- WF-MatView-Refresh, expected latency < 5 min\nREFRESH MATERIALIZED VIEW CONCURRENTLY automatenlager.mv_db_per_slot_monthly;\nREFRESH MATERIALIZED VIEW CONCURRENTLY automatenlager.mv_db_per_product_monthly;\nREFRESH MATERIALIZED VIEW CONCURRENTLY automatenlager.mv_inventory_value_daily;"
-      },
-      "id": "3a64a093-c2c9-44f5-ad1f-131db2596d08",
-      "name": "Postgres - Refresh Materialized Views",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.6,
-      "position": [
-        -220,
-        -20
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "Jept3990Uq8aN3Tr",
-          "name": "PostgreSQL"
-        }
-      }
-    }
-  ],
-  "pinData": {},
-  "connections": {
-    "Manual Trigger": {
-      "main": [
-        [
-          {
-            "node": "Postgres - Refresh Materialized Views",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Schedule Trigger - nightly after WF-Val": {
-      "main": [
-        [
-          {
-            "node": "Postgres - Refresh Materialized Views",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
-  },
-  "active": false,
-  "settings": {
-    "executionOrder": "v1",
-    "timezone": "Europe/Berlin"
-  },
-  "versionId": "issue-21-matview-refresh-export",
-  "meta": {
-    "templateCredsSetupCompleted": true
-  },
-  "id": "WFMATVIEWIssue21",
-  "tags": []
+    "updatedAt":  "2026-05-25T10:31:44.917Z",
+    "createdAt":  "2026-05-25T10:31:44.917Z",
+    "id":  "axeg30n8SVKlCW54",
+    "name":  "WF-MatView-Refresh",
+    "description":  null,
+    "active":  true,
+    "isArchived":  false,
+    "nodes":  [
+                  {
+                      "parameters":  {
+
+                                     },
+                      "id":  "f99b21fd-4daf-4a80-92a5-111d9fd4a26b",
+                      "name":  "Manual Trigger",
+                      "type":  "n8n-nodes-base.manualTrigger",
+                      "typeVersion":  1,
+                      "position":  [
+                                       -520,
+                                       -120
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "rule":  {
+                                                      "interval":  [
+                                                                       {
+                                                                           "field":  "cronExpression",
+                                                                           "expression":  "0 45 4 * * *"
+                                                                       }
+                                                                   ]
+                                                  }
+                                     },
+                      "id":  "473d6539-4329-41ba-b7b4-d4eadf423d2e",
+                      "name":  "Schedule Trigger - nightly after WF-Val",
+                      "type":  "n8n-nodes-base.scheduleTrigger",
+                      "typeVersion":  1.2,
+                      "position":  [
+                                       -520,
+                                       80
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "operation":  "executeQuery",
+                                         "query":  "-- WF-MatView-Refresh, expected latency \u003c 5 min\nREFRESH MATERIALIZED VIEW CONCURRENTLY automatenlager.mv_db_per_slot_monthly;\nREFRESH MATERIALIZED VIEW CONCURRENTLY automatenlager.mv_db_per_product_monthly;\nREFRESH MATERIALIZED VIEW CONCURRENTLY automatenlager.mv_inventory_value_daily;"
+                                     },
+                      "id":  "3a64a093-c2c9-44f5-ad1f-131db2596d08",
+                      "name":  "Postgres - Refresh Materialized Views",
+                      "type":  "n8n-nodes-base.postgres",
+                      "typeVersion":  2.6,
+                      "position":  [
+                                       -220,
+                                       -20
+                                   ],
+                      "credentials":  {
+                                          "postgres":  {
+                                                           "id":  "Jept3990Uq8aN3Tr",
+                                                           "name":  "PostgreSQL"
+                                                       }
+                                      }
+                  }
+              ],
+    "connections":  {
+                        "Manual Trigger":  {
+                                               "main":  [
+                                                            [
+                                                                {
+                                                                    "node":  "Postgres - Refresh Materialized Views",
+                                                                    "type":  "main",
+                                                                    "index":  0
+                                                                }
+                                                            ]
+                                                        ]
+                                           },
+                        "Schedule Trigger - nightly after WF-Val":  {
+                                                                        "main":  [
+                                                                                     [
+                                                                                         {
+                                                                                             "node":  "Postgres - Refresh Materialized Views",
+                                                                                             "type":  "main",
+                                                                                             "index":  0
+                                                                                         }
+                                                                                     ]
+                                                                                 ]
+                                                                    }
+                    },
+    "settings":  {
+                     "executionOrder":  "v1",
+                     "timezone":  "Europe/Berlin"
+                 },
+    "staticData":  {
+                       "node:Schedule Trigger - nightly after WF-Val":  {
+                                                                            "recurrenceRules":  [
+
+                                                                                                ]
+                                                                        }
+                   },
+    "meta":  null,
+    "pinData":  null,
+    "versionId":  "85e68ec1-c346-4160-beb8-ed191c522cd2",
+    "activeVersionId":  "85e68ec1-c346-4160-beb8-ed191c522cd2",
+    "versionCounter":  5,
+    "triggerCount":  1,
+    "shared":  [
+                   {
+                       "updatedAt":  "2026-05-25T10:31:44.917Z",
+                       "createdAt":  "2026-05-25T10:31:44.917Z",
+                       "role":  "workflow:owner",
+                       "workflowId":  "axeg30n8SVKlCW54",
+                       "projectId":  "68wR1Q9zBUk0Gxhv",
+                       "project":  {
+                                       "updatedAt":  "2026-05-19T17:59:53.408Z",
+                                       "createdAt":  "2026-05-19T16:50:04.773Z",
+                                       "id":  "68wR1Q9zBUk0Gxhv",
+                                       "name":  "Patrick Matthes \u003cpatrickmatthes2609@gmail.com\u003e",
+                                       "type":  "personal",
+                                       "icon":  null,
+                                       "description":  null,
+                                       "creatorId":  "dd26b63a-7133-4afa-995a-0d7d72693aee"
+                                   }
+                   }
+               ],
+    "tags":  [
+
+             ],
+    "activeVersion":  {
+                          "updatedAt":  "2026-05-25T10:31:44.917Z",
+                          "createdAt":  "2026-05-25T10:31:44.917Z",
+                          "versionId":  "85e68ec1-c346-4160-beb8-ed191c522cd2",
+                          "workflowId":  "axeg30n8SVKlCW54",
+                          "nodes":  [
+                                        {
+                                            "parameters":  {
+
+                                                           },
+                                            "id":  "f99b21fd-4daf-4a80-92a5-111d9fd4a26b",
+                                            "name":  "Manual Trigger",
+                                            "type":  "n8n-nodes-base.manualTrigger",
+                                            "typeVersion":  1,
+                                            "position":  [
+                                                             -520,
+                                                             -120
+                                                         ]
+                                        },
+                                        {
+                                            "parameters":  {
+                                                               "rule":  {
+                                                                            "interval":  [
+                                                                                             {
+                                                                                                 "field":  "cronExpression",
+                                                                                                 "expression":  "0 45 4 * * *"
+                                                                                             }
+                                                                                         ]
+                                                                        }
+                                                           },
+                                            "id":  "473d6539-4329-41ba-b7b4-d4eadf423d2e",
+                                            "name":  "Schedule Trigger - nightly after WF-Val",
+                                            "type":  "n8n-nodes-base.scheduleTrigger",
+                                            "typeVersion":  1.2,
+                                            "position":  [
+                                                             -520,
+                                                             80
+                                                         ]
+                                        },
+                                        {
+                                            "parameters":  {
+                                                               "operation":  "executeQuery",
+                                                               "query":  "-- WF-MatView-Refresh, expected latency \u003c 5 min\nREFRESH MATERIALIZED VIEW CONCURRENTLY automatenlager.mv_db_per_slot_monthly;\nREFRESH MATERIALIZED VIEW CONCURRENTLY automatenlager.mv_db_per_product_monthly;\nREFRESH MATERIALIZED VIEW CONCURRENTLY automatenlager.mv_inventory_value_daily;"
+                                                           },
+                                            "id":  "3a64a093-c2c9-44f5-ad1f-131db2596d08",
+                                            "name":  "Postgres - Refresh Materialized Views",
+                                            "type":  "n8n-nodes-base.postgres",
+                                            "typeVersion":  2.6,
+                                            "position":  [
+                                                             -220,
+                                                             -20
+                                                         ],
+                                            "credentials":  {
+                                                                "postgres":  {
+                                                                                 "id":  "Jept3990Uq8aN3Tr",
+                                                                                 "name":  "PostgreSQL"
+                                                                             }
+                                                            }
+                                        }
+                                    ],
+                          "connections":  {
+                                              "Manual Trigger":  {
+                                                                     "main":  [
+                                                                                  [
+                                                                                      {
+                                                                                          "node":  "Postgres - Refresh Materialized Views",
+                                                                                          "type":  "main",
+                                                                                          "index":  0
+                                                                                      }
+                                                                                  ]
+                                                                              ]
+                                                                 },
+                                              "Schedule Trigger - nightly after WF-Val":  {
+                                                                                              "main":  [
+                                                                                                           [
+                                                                                                               {
+                                                                                                                   "node":  "Postgres - Refresh Materialized Views",
+                                                                                                                   "type":  "main",
+                                                                                                                   "index":  0
+                                                                                                               }
+                                                                                                           ]
+                                                                                                       ]
+                                                                                          }
+                                          },
+                          "authors":  "Patrick Matthes",
+                          "name":  null,
+                          "description":  null,
+                          "autosaved":  false,
+                          "workflowPublishHistory":  [
+                                                         {
+                                                             "createdAt":  "2026-05-25T10:31:44.981Z",
+                                                             "id":  56,
+                                                             "workflowId":  "axeg30n8SVKlCW54",
+                                                             "versionId":  "85e68ec1-c346-4160-beb8-ed191c522cd2",
+                                                             "event":  "activated",
+                                                             "userId":  "dd26b63a-7133-4afa-995a-0d7d72693aee"
+                                                         }
+                                                     ]
+                      }
 }

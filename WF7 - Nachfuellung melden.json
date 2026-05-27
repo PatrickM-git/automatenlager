@@ -1,1175 +1,1327 @@
 {
-  "updatedAt": "2026-05-21T18:58:57.664Z",
-  "createdAt": "2026-05-21T18:54:45.790Z",
-  "id": "s6uclVVlJHPvJqSd",
-  "name": "WF7 - Nachfuellung melden (Slot-Update ohne Verkauf)",
-  "description": null,
-  "active": true,
-  "isArchived": false,
-  "nodes": [
-    {
-      "id": "e6b79733-0181-481d-be02-0ad0a7d472f2",
-      "name": "Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
-      "position": [
-        0,
-        0
-      ],
-      "parameters": {
-        "httpMethod": "GET",
-        "path": "nachfuellung",
-        "responseMode": "responseNode",
-        "options": {}
-      },
-      "webhookId": "488ccf39-576c-4998-97e7-367fc9a41197"
-    },
-    {
-      "id": "99886f43-aa89-4a7d-b574-64ed13e8931f",
-      "name": "Config - WF6",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [
-        220,
-        0
-      ],
-      "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "gsid",
-              "name": "google_sheet_id",
-              "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-              "type": "string"
-            }
-          ]
-        },
-        "options": {}
-      }
-    },
-    {
-      "id": "f7c434f4-0f4a-4072-bd8a-7e0dd62499a2",
-      "name": "Google Sheets - Produkte lesen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [
-        440,
-        -120
-      ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
-        }
-      },
-      "parameters": {
-        "operation": "read",
-        "documentId": {
-          "__rl": true,
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Produkte",
-          "mode": "name"
-        },
-        "filtersUI": {
-          "values": [
-            {
-              "lookupColumn": "active",
-              "lookupValue": "TRUE"
-            }
-          ]
-        },
-        "options": {
-          "returnFirstMatch": false
-        }
-      }
-    },
-    {
-      "id": "98d18876-3ed2-4032-9334-18d0774156b4",
-      "name": "Google Sheets - Hinweise lesen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [
-        440,
-        120
-      ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
-        }
-      },
-      "parameters": {
-        "operation": "read",
-        "documentId": {
-          "__rl": true,
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Fehler_und_Hinweise",
-          "mode": "name"
-        },
-        "options": {}
-      }
-    },
-    {
-      "id": "3e3e3d3a-66bb-4e8c-8322-8bb02bf4143f",
-      "name": "Merge - Produkte + Hinweise",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
-      "position": [
-        660,
-        0
-      ],
-      "parameters": {
-        "mode": "combine",
-        "combinationMode": "multiplex",
-        "options": {}
-      }
-    },
-    {
-      "id": "2cf34e52-6e79-4a4e-8f9b-773de13a3229",
-      "name": "Code - Nachfuellung verarbeiten",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        880,
-        0
-      ],
-      "parameters": {
-        "jsCode": "\n// WF6 Nachfüllung: Verarbeite Webhook-Parameter und bereite Updates vor.\n// Input: Query-Parameter aus dem Webhook (product_key, qty, notes)\nconst wh = $('Webhook').first()?.json?.query || {};\nconst productKey = String(wh.product_key || '').trim();\nconst notesIn    = String(wh.notes || '').trim();\nconst qtyIn      = wh.qty !== undefined ? Number(wh.qty) : null;\n\nif (!productKey) {\n  throw new Error('Fehlender Parameter: product_key ist Pflicht.');\n}\n\nfunction clean(v) { return String(v ?? '').replace(/\\n/g, ' ').replace(/\\s+/g, ' ').trim(); }\nfunction isActive(v) {\n  return ['TRUE','1','JA','YES','AKTIV','ACTIVE'].includes(clean(v).toUpperCase());\n}\nfunction num(v) {\n  const n = Number(String(v ?? '').replace(',', '.'));\n  return Number.isFinite(n) ? n : null;\n}\n\n// Produkte-Zeilen für diesen product_key\nconst allProdukte   = $('Google Sheets - Produkte lesen').all().map(i => i.json);\nconst allHinweise   = $('Google Sheets - Hinweise lesen').all().map(i => i.json);\nconst matchedSlots  = allProdukte.filter(p =>\n  clean(p.product_key) === productKey && isActive(p.active)\n);\n\nif (!matchedSlots.length) {\n  throw new Error('Kein aktiver Slot für product_key: ' + productKey);\n}\n\nconst now = new Date().toISOString();\nconst productName = clean(\n  matchedSlots[0].internal_product_name ||\n  matchedSlots[0].nayax_product_name ||\n  productKey\n);\n\n// Slot-Updates bauen\nconst slotUpdates = matchedSlots.map(p => {\n  const capacity = num(p.machine_capacity) || 0;\n  const newQty = qtyIn !== null ? Math.min(qtyIn, capacity) : capacity;\n  return {\n    product_slot_id: clean(p.product_slot_id),\n    current_machine_qty: newQty,\n    last_stock_update_source: 'WF6_NACHFUELLUNG',\n    last_stock_update_at: now\n  };\n});\n\n// Hinweise die aufgelöst werden sollen\nconst resolvableTypes = ['EMPTY_BATCH', 'LOW_STOCK', 'INSUFFICIENT_BATCH_STOCK', 'LOW_BATCH'];\nconst toResolve = allHinweise.filter(h => {\n  const resolved = clean(h.resolved).toUpperCase();\n  if (['TRUE','JA','YES','1','ERLEDIGT','RESOLVED'].includes(resolved)) return false;\n  return clean(h.product_key) === productKey && resolvableTypes.includes(clean(h.type));\n}).map(h => ({ created_at: clean(h.created_at), resolved: 'TRUE' }));\n\n// Audit-Eintrag\nconst auditEntry = {\n  created_at: now,\n  type: 'NACHFUELLUNG',\n  severity: 'info',\n  machine_id: clean(matchedSlots[0].machine_id || '457107528'),\n  product_key: productKey,\n  nayax_product_name: productName,\n  message: 'Nachfüllung erfasst für ' + productName +\n           '. Slots aktualisiert: ' + slotUpdates.map(s => s.product_slot_id + '=' + s.current_machine_qty).join(', ') +\n           (notesIn ? '. Bemerkung: ' + notesIn : ''),\n  resolved: 'TRUE'\n};\n\nreturn [{\n  json: {\n    ok: true,\n    productKey,\n    productName,\n    slotUpdates,\n    toResolve,\n    auditEntry,\n    summary: {\n      slots_updated: slotUpdates.length,\n      hints_resolved: toResolve.length\n    }\n  }\n}];\n"
-      }
-    },
-    {
-      "id": "740e1196-99e0-401a-a037-289fd64f7b0c",
-      "name": "Extract - Slot Updates",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1100,
-        -120
-      ],
-      "parameters": {
-        "jsCode": "const d = $input.first().json;\nconst updates = d.slotUpdates || [];\nif (!updates.length) return [];\nreturn updates.map(u => ({ json: u }));"
-      }
-    },
-    {
-      "id": "6b40bc27-d78a-4201-b719-5aace1b5cbaf",
-      "name": "Extract - Hinweise auflösen",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1100,
-        0
-      ],
-      "parameters": {
-        "jsCode": "const d = $input.first().json;\nconst hints = d.toResolve || [];\nif (!hints.length) return [];\nreturn hints.map(h => ({ json: h }));"
-      }
-    },
-    {
-      "id": "2468d652-b333-4133-9955-e75d2931a248",
-      "name": "Extract - Audit",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1100,
-        120
-      ],
-      "parameters": {
-        "jsCode": "const d = $input.first().json;\nreturn [{ json: d.auditEntry }];"
-      }
-    },
-    {
-      "id": "cbaeecf4-6b59-4646-b2b3-6cf31def7f98",
-      "name": "Google Sheets - Slot aktualisieren",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [
-        1320,
-        -120
-      ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
-        }
-      },
-      "parameters": {
-        "operation": "update",
-        "documentId": {
-          "__rl": true,
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Produkte",
-          "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "product_slot_id": "={{ $json.product_slot_id }}",
-            "current_machine_qty": "={{ $json.current_machine_qty }}",
-            "last_stock_update_source": "={{ $json.last_stock_update_source }}",
-            "last_stock_update_at": "={{ $json.last_stock_update_at }}"
-          },
-          "matchingColumns": [
-            "product_slot_id"
-          ],
-          "schema": [
-            {
-              "id": "product_slot_id",
-              "displayName": "product_slot_id",
-              "required": false,
-              "defaultMatch": true,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "current_machine_qty",
-              "displayName": "current_machine_qty",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "number",
-              "canBeUsedToMatch": false
-            },
-            {
-              "id": "last_stock_update_source",
-              "displayName": "last_stock_update_source",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": false
-            },
-            {
-              "id": "last_stock_update_at",
-              "displayName": "last_stock_update_at",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": false
-            }
-          ]
-        },
-        "options": {}
-      }
-    },
-    {
-      "id": "86e7954b-bfc4-43cc-8587-0e064049b3f1",
-      "name": "Google Sheets - Hinweise auflösen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [
-        1320,
-        0
-      ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
-        }
-      },
-      "parameters": {
-        "operation": "update",
-        "documentId": {
-          "__rl": true,
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Fehler_und_Hinweise",
-          "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "created_at": "={{ $json.created_at }}",
-            "resolved": "={{ $json.resolved }}"
-          },
-          "matchingColumns": [
-            "created_at"
-          ],
-          "schema": [
-            {
-              "id": "created_at",
-              "displayName": "created_at",
-              "required": false,
-              "defaultMatch": true,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "resolved",
-              "displayName": "resolved",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": false
-            }
-          ]
-        },
-        "options": {}
-      }
-    },
-    {
-      "id": "0f08710d-6f4d-495c-a775-b9cd5f316579",
-      "name": "Google Sheets - Audit anhängen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [
-        1320,
-        120
-      ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
-        }
-      },
-      "parameters": {
-        "operation": "append",
-        "documentId": {
-          "__rl": true,
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Fehler_und_Hinweise",
-          "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "autoMapInputData"
-        },
-        "options": {}
-      }
-    },
-    {
-      "id": "08ae5cf4-e701-476a-8c2f-2b7d34d992d7",
-      "name": "Response",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        1540,
-        0
-      ],
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify($('Code - Nachfuellung verarbeiten').first().json) }}"
-      }
-    },
-    {
-      "id": "issue20-wf7-lagerchargen-lesen",
-      "name": "Google Sheets - Lagerchargen lesen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [
-        440,
-        120
-      ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
-        }
-      },
-      "parameters": {
-        "operation": "read",
-        "documentId": {
-          "__rl": true,
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Lagerchargen",
-          "mode": "name"
-        },
-        "options": {}
-      }
-    },
-    {
-      "id": "issue20-merge-wf7-pgw-daten",
-      "name": "Merge - WF7 PGW Daten",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
-      "position": [
-        900,
-        220
-      ],
-      "parameters": {
-        "mode": "combine",
-        "combinationMode": "multiplex",
-        "options": {}
-      }
-    },
-    {
-      "id": "issue20-prepare-pgw-wf7-refill-movement",
-      "name": "Prepare PGW - WF7 Refill Movement",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1140,
-        220
-      ],
-      "parameters": {
-        "jsCode": "const result = $(\"Code - Nachfuellung verarbeiten\").first().json;\nconst products = $(\"Google Sheets - Produkte lesen\").all().map((item) => item.json);\nconst batches = $(\"Google Sheets - Lagerchargen lesen\").all().map((item) => item.json);\nconst batchRunId = \"wf7_\" + new Date().toISOString().slice(0, 10);\n\nfunction clean(value) {\n  return String(value ?? \"\").replace(/\\n/g, \" \").replace(/\\s+/g, \" \").trim();\n}\n\nfunction num(value) {\n  const n = Number(String(value ?? \"\").replace(\",\", \".\"));\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction isActive(value) {\n  return [\"TRUE\", \"1\", \"JA\", \"YES\", \"AKTIV\", \"ACTIVE\", \"\"].includes(clean(value).toUpperCase());\n}\n\nfunction sanitize(value) {\n  return clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, \"_\").replace(/^_+|_+$/g, \"\");\n}\n\nfunction batchFor(productKey) {\n  return batches\n    .filter((batch) => clean(batch.product_key) === productKey)\n    .filter((batch) => isActive(batch.status))\n    .filter((batch) => (num(batch.remaining_qty) ?? 0) > 0)\n    .sort((a, b) => clean(a.mhd).localeCompare(clean(b.mhd)) || clean(a.batch_id).localeCompare(clean(b.batch_id)))[0];\n}\n\nreturn (result.slotUpdates || []).flatMap((update) => {\n  const slot = products.find((product) => clean(product.product_slot_id) === clean(update.product_slot_id));\n  if (!slot) return [];\n  const delta = (num(update.current_machine_qty) ?? 0) - (num(slot.current_machine_qty) ?? 0);\n  if (delta <= 0) return [];\n  const batch = batchFor(clean(slot.product_key));\n  if (!batch) return [];\n  const movementKey = [\"MOV\", \"REFILL\", update.product_slot_id, batch.batch_id, new Date().toISOString().slice(0, 10), delta].map(sanitize).join(\"_\");\n  return [{\n    json: {\n      event_type: \"stock_movement\",\n      batch_run_id: batchRunId,\n      data: {\n        movement_key: movementKey,\n        batch_key: clean(batch.batch_id),\n        product_slot_key: clean(update.product_slot_id),\n        movement_type: \"refill\",\n        quantity_delta_total: 0,\n        quantity_delta_slot: delta,\n        reason: clean(result.auditEntry?.message || \"Nachfuellung erfasst\"),\n        source: \"wf7_nachfuellung\",\n        occurred_at: clean(update.last_stock_update_at) || new Date().toISOString(),\n      },\n    },\n  }];\n});"
-      }
-    },
-    {
-      "id": "issue20-wf-pgw-wf7",
-      "name": "WF-PGW - WF7",
-      "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 2,
-      "position": [
-        1380,
-        220
-      ],
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "pYrIB2bSQXxayFHq",
-          "mode": "id"
-        },
-        "mode": "each",
-        "options": {
-          "waitForSubWorkflow": false
-        }
-      }
-    }
-  ],
-  "connections": {
-    "Webhook": {
-      "main": [
-        [
-          {
-            "node": "Config - WF6",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Config - WF6": {
-      "main": [
-        [
-          {
-            "node": "Google Sheets - Produkte lesen",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Google Sheets - Hinweise lesen",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Google Sheets - Lagerchargen lesen",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Google Sheets - Produkte lesen": {
-      "main": [
-        [
-          {
-            "node": "Merge - Produkte + Hinweise",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Google Sheets - Hinweise lesen": {
-      "main": [
-        [
-          {
-            "node": "Merge - Produkte + Hinweise",
-            "type": "main",
-            "index": 1
-          }
-        ]
-      ]
-    },
-    "Merge - Produkte + Hinweise": {
-      "main": [
-        [
-          {
-            "node": "Code - Nachfuellung verarbeiten",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Code - Nachfuellung verarbeiten": {
-      "main": [
-        [
-          {
-            "node": "Extract - Slot Updates",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Extract - Hinweise auflösen",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Extract - Audit",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Merge - WF7 PGW Daten",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Extract - Slot Updates": {
-      "main": [
-        [
-          {
-            "node": "Google Sheets - Slot aktualisieren",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Extract - Hinweise auflösen": {
-      "main": [
-        [
-          {
-            "node": "Google Sheets - Hinweise auflösen",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Extract - Audit": {
-      "main": [
-        [
-          {
-            "node": "Google Sheets - Audit anhängen",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Google Sheets - Slot aktualisieren": {
-      "main": [
-        [
-          {
-            "node": "Response",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Google Sheets - Lagerchargen lesen": {
-      "main": [
-        [
-          {
-            "node": "Merge - WF7 PGW Daten",
-            "type": "main",
-            "index": 1
-          }
-        ]
-      ]
-    },
-    "Merge - WF7 PGW Daten": {
-      "main": [
-        [
-          {
-            "node": "Prepare PGW - WF7 Refill Movement",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Prepare PGW - WF7 Refill Movement": {
-      "main": [
-        [
-          {
-            "node": "WF-PGW - WF7",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
-  },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "staticData": null,
-  "meta": null,
-  "pinData": null,
-  "versionId": "f8adfd84-9352-467f-8944-152862337893",
-  "activeVersionId": "f8adfd84-9352-467f-8944-152862337893",
-  "versionCounter": 9,
-  "triggerCount": 1,
-  "shared": [
-    {
-      "updatedAt": "2026-05-21T18:54:45.790Z",
-      "createdAt": "2026-05-21T18:54:45.790Z",
-      "role": "workflow:owner",
-      "workflowId": "s6uclVVlJHPvJqSd",
-      "projectId": "68wR1Q9zBUk0Gxhv",
-      "project": {
-        "updatedAt": "2026-05-19T17:59:53.408Z",
-        "createdAt": "2026-05-19T16:50:04.773Z",
-        "id": "68wR1Q9zBUk0Gxhv",
-        "name": "Patrick Matthes <patrickmatthes2609@gmail.com>",
-        "type": "personal",
-        "icon": null,
-        "description": null,
-        "creatorId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
-      }
-    }
-  ],
-  "tags": [],
-  "activeVersion": {
-    "updatedAt": "2026-05-21T18:58:57.665Z",
-    "createdAt": "2026-05-21T18:58:57.665Z",
-    "versionId": "f8adfd84-9352-467f-8944-152862337893",
-    "workflowId": "s6uclVVlJHPvJqSd",
-    "nodes": [
-      {
-        "id": "e6b79733-0181-481d-be02-0ad0a7d472f2",
-        "name": "Webhook",
-        "type": "n8n-nodes-base.webhook",
-        "typeVersion": 2,
-        "position": [
-          0,
-          0
-        ],
-        "parameters": {
-          "httpMethod": "GET",
-          "path": "nachfuellung",
-          "responseMode": "responseNode",
-          "options": {}
-        },
-        "webhookId": "488ccf39-576c-4998-97e7-367fc9a41197"
-      },
-      {
-        "id": "99886f43-aa89-4a7d-b574-64ed13e8931f",
-        "name": "Config - WF6",
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.4,
-        "position": [
-          220,
-          0
-        ],
-        "parameters": {
-          "assignments": {
-            "assignments": [
-              {
-                "id": "gsid",
-                "name": "google_sheet_id",
-                "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-                "type": "string"
-              }
-            ]
-          },
-          "options": {}
-        }
-      },
-      {
-        "id": "f7c434f4-0f4a-4072-bd8a-7e0dd62499a2",
-        "name": "Google Sheets - Produkte lesen",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.5,
-        "position": [
-          440,
-          -120
-        ],
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
-          }
-        },
-        "parameters": {
-          "operation": "read",
-          "documentId": {
-            "__rl": true,
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Produkte",
-            "mode": "name"
-          },
-          "filtersUI": {
-            "values": [
-              {
-                "lookupColumn": "active",
-                "lookupValue": "TRUE"
-              }
-            ]
-          },
-          "options": {
-            "returnFirstMatch": false
-          }
-        }
-      },
-      {
-        "id": "98d18876-3ed2-4032-9334-18d0774156b4",
-        "name": "Google Sheets - Hinweise lesen",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.5,
-        "position": [
-          440,
-          120
-        ],
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
-          }
-        },
-        "parameters": {
-          "operation": "read",
-          "documentId": {
-            "__rl": true,
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Fehler_und_Hinweise",
-            "mode": "name"
-          },
-          "options": {}
-        }
-      },
-      {
-        "id": "3e3e3d3a-66bb-4e8c-8322-8bb02bf4143f",
-        "name": "Merge - Produkte + Hinweise",
-        "type": "n8n-nodes-base.merge",
-        "typeVersion": 3,
-        "position": [
-          660,
-          0
-        ],
-        "parameters": {
-          "mode": "combine",
-          "combinationMode": "multiplex",
-          "options": {}
-        }
-      },
-      {
-        "id": "2cf34e52-6e79-4a4e-8f9b-773de13a3229",
-        "name": "Code - Nachfuellung verarbeiten",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          880,
-          0
-        ],
-        "parameters": {
-          "jsCode": "\n// WF6 Nachfüllung: Verarbeite Webhook-Parameter und bereite Updates vor.\n// Input: Query-Parameter aus dem Webhook (product_key, qty, notes)\nconst wh = $('Webhook').first()?.json?.query || {};\nconst productKey = String(wh.product_key || '').trim();\nconst notesIn    = String(wh.notes || '').trim();\nconst qtyIn      = wh.qty !== undefined ? Number(wh.qty) : null;\n\nif (!productKey) {\n  throw new Error('Fehlender Parameter: product_key ist Pflicht.');\n}\n\nfunction clean(v) { return String(v ?? '').replace(/\\n/g, ' ').replace(/\\s+/g, ' ').trim(); }\nfunction isActive(v) {\n  return ['TRUE','1','JA','YES','AKTIV','ACTIVE'].includes(clean(v).toUpperCase());\n}\nfunction num(v) {\n  const n = Number(String(v ?? '').replace(',', '.'));\n  return Number.isFinite(n) ? n : null;\n}\n\n// Produkte-Zeilen für diesen product_key\nconst allProdukte   = $('Google Sheets - Produkte lesen').all().map(i => i.json);\nconst allHinweise   = $('Google Sheets - Hinweise lesen').all().map(i => i.json);\nconst matchedSlots  = allProdukte.filter(p =>\n  clean(p.product_key) === productKey && isActive(p.active)\n);\n\nif (!matchedSlots.length) {\n  throw new Error('Kein aktiver Slot für product_key: ' + productKey);\n}\n\nconst now = new Date().toISOString();\nconst productName = clean(\n  matchedSlots[0].internal_product_name ||\n  matchedSlots[0].nayax_product_name ||\n  productKey\n);\n\n// Slot-Updates bauen\nconst slotUpdates = matchedSlots.map(p => {\n  const capacity = num(p.machine_capacity) || 0;\n  const newQty = qtyIn !== null ? Math.min(qtyIn, capacity) : capacity;\n  return {\n    product_slot_id: clean(p.product_slot_id),\n    current_machine_qty: newQty,\n    last_stock_update_source: 'WF6_NACHFUELLUNG',\n    last_stock_update_at: now\n  };\n});\n\n// Hinweise die aufgelöst werden sollen\nconst resolvableTypes = ['EMPTY_BATCH', 'LOW_STOCK', 'INSUFFICIENT_BATCH_STOCK', 'LOW_BATCH'];\nconst toResolve = allHinweise.filter(h => {\n  const resolved = clean(h.resolved).toUpperCase();\n  if (['TRUE','JA','YES','1','ERLEDIGT','RESOLVED'].includes(resolved)) return false;\n  return clean(h.product_key) === productKey && resolvableTypes.includes(clean(h.type));\n}).map(h => ({ created_at: clean(h.created_at), resolved: 'TRUE' }));\n\n// Audit-Eintrag\nconst auditEntry = {\n  created_at: now,\n  type: 'NACHFUELLUNG',\n  severity: 'info',\n  machine_id: clean(matchedSlots[0].machine_id || '457107528'),\n  product_key: productKey,\n  nayax_product_name: productName,\n  message: 'Nachfüllung erfasst für ' + productName +\n           '. Slots aktualisiert: ' + slotUpdates.map(s => s.product_slot_id + '=' + s.current_machine_qty).join(', ') +\n           (notesIn ? '. Bemerkung: ' + notesIn : ''),\n  resolved: 'TRUE'\n};\n\nreturn [{\n  json: {\n    ok: true,\n    productKey,\n    productName,\n    slotUpdates,\n    toResolve,\n    auditEntry,\n    summary: {\n      slots_updated: slotUpdates.length,\n      hints_resolved: toResolve.length\n    }\n  }\n}];\n"
-        }
-      },
-      {
-        "id": "740e1196-99e0-401a-a037-289fd64f7b0c",
-        "name": "Extract - Slot Updates",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          1100,
-          -120
-        ],
-        "parameters": {
-          "jsCode": "const d = $input.first().json;\nconst updates = d.slotUpdates || [];\nif (!updates.length) return [];\nreturn updates.map(u => ({ json: u }));"
-        }
-      },
-      {
-        "id": "6b40bc27-d78a-4201-b719-5aace1b5cbaf",
-        "name": "Extract - Hinweise auflösen",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          1100,
-          0
-        ],
-        "parameters": {
-          "jsCode": "const d = $input.first().json;\nconst hints = d.toResolve || [];\nif (!hints.length) return [];\nreturn hints.map(h => ({ json: h }));"
-        }
-      },
-      {
-        "id": "2468d652-b333-4133-9955-e75d2931a248",
-        "name": "Extract - Audit",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          1100,
-          120
-        ],
-        "parameters": {
-          "jsCode": "const d = $input.first().json;\nreturn [{ json: d.auditEntry }];"
-        }
-      },
-      {
-        "id": "cbaeecf4-6b59-4646-b2b3-6cf31def7f98",
-        "name": "Google Sheets - Slot aktualisieren",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.5,
-        "position": [
-          1320,
-          -120
-        ],
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
-          }
-        },
-        "parameters": {
-          "operation": "update",
-          "documentId": {
-            "__rl": true,
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Produkte",
-            "mode": "name"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "product_slot_id": "={{ $json.product_slot_id }}",
-              "current_machine_qty": "={{ $json.current_machine_qty }}",
-              "last_stock_update_source": "={{ $json.last_stock_update_source }}",
-              "last_stock_update_at": "={{ $json.last_stock_update_at }}"
-            },
-            "matchingColumns": [
-              "product_slot_id"
-            ],
-            "schema": [
-              {
-                "id": "product_slot_id",
-                "displayName": "product_slot_id",
-                "required": false,
-                "defaultMatch": true,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "current_machine_qty",
-                "displayName": "current_machine_qty",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "number",
-                "canBeUsedToMatch": false
-              },
-              {
-                "id": "last_stock_update_source",
-                "displayName": "last_stock_update_source",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": false
-              },
-              {
-                "id": "last_stock_update_at",
-                "displayName": "last_stock_update_at",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": false
-              }
-            ]
-          },
-          "options": {}
-        }
-      },
-      {
-        "id": "86e7954b-bfc4-43cc-8587-0e064049b3f1",
-        "name": "Google Sheets - Hinweise auflösen",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.5,
-        "position": [
-          1320,
-          0
-        ],
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
-          }
-        },
-        "parameters": {
-          "operation": "update",
-          "documentId": {
-            "__rl": true,
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Fehler_und_Hinweise",
-            "mode": "name"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "created_at": "={{ $json.created_at }}",
-              "resolved": "={{ $json.resolved }}"
-            },
-            "matchingColumns": [
-              "created_at"
-            ],
-            "schema": [
-              {
-                "id": "created_at",
-                "displayName": "created_at",
-                "required": false,
-                "defaultMatch": true,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "resolved",
-                "displayName": "resolved",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": false
-              }
-            ]
-          },
-          "options": {}
-        }
-      },
-      {
-        "id": "0f08710d-6f4d-495c-a775-b9cd5f316579",
-        "name": "Google Sheets - Audit anhängen",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.5,
-        "position": [
-          1320,
-          120
-        ],
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
-          }
-        },
-        "parameters": {
-          "operation": "append",
-          "documentId": {
-            "__rl": true,
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Fehler_und_Hinweise",
-            "mode": "name"
-          },
-          "columns": {
-            "mappingMode": "autoMapInputData"
-          },
-          "options": {}
-        }
-      },
-      {
-        "id": "08ae5cf4-e701-476a-8c2f-2b7d34d992d7",
-        "name": "Response",
-        "type": "n8n-nodes-base.respondToWebhook",
-        "typeVersion": 1.1,
-        "position": [
-          1540,
-          0
-        ],
-        "parameters": {
-          "respondWith": "json",
-          "responseBody": "={{ JSON.stringify($('Code - Nachfuellung verarbeiten').first().json) }}"
-        }
-      }
-    ],
-    "connections": {
-      "Webhook": {
-        "main": [
-          [
-            {
-              "node": "Config - WF6",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Config - WF6": {
-        "main": [
-          [
-            {
-              "node": "Google Sheets - Produkte lesen",
-              "type": "main",
-              "index": 0
-            },
-            {
-              "node": "Google Sheets - Hinweise lesen",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Google Sheets - Produkte lesen": {
-        "main": [
-          [
-            {
-              "node": "Merge - Produkte + Hinweise",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Google Sheets - Hinweise lesen": {
-        "main": [
-          [
-            {
-              "node": "Merge - Produkte + Hinweise",
-              "type": "main",
-              "index": 1
-            }
-          ]
-        ]
-      },
-      "Merge - Produkte + Hinweise": {
-        "main": [
-          [
-            {
-              "node": "Code - Nachfuellung verarbeiten",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Code - Nachfuellung verarbeiten": {
-        "main": [
-          [
-            {
-              "node": "Extract - Slot Updates",
-              "type": "main",
-              "index": 0
-            },
-            {
-              "node": "Extract - Hinweise auflösen",
-              "type": "main",
-              "index": 0
-            },
-            {
-              "node": "Extract - Audit",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Extract - Slot Updates": {
-        "main": [
-          [
-            {
-              "node": "Google Sheets - Slot aktualisieren",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Extract - Hinweise auflösen": {
-        "main": [
-          [
-            {
-              "node": "Google Sheets - Hinweise auflösen",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Extract - Audit": {
-        "main": [
-          [
-            {
-              "node": "Google Sheets - Audit anhängen",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Google Sheets - Slot aktualisieren": {
-        "main": [
-          [
-            {
-              "node": "Response",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      }
-    },
-    "authors": "Patrick Matthes",
-    "name": null,
-    "description": null,
-    "autosaved": false,
-    "workflowPublishHistory": [
-      {
-        "createdAt": "2026-05-21T18:58:57.696Z",
-        "id": 7,
-        "workflowId": "s6uclVVlJHPvJqSd",
-        "versionId": "f8adfd84-9352-467f-8944-152862337893",
-        "event": "deactivated",
-        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
-      },
-      {
-        "createdAt": "2026-05-21T18:58:57.712Z",
-        "id": 8,
-        "workflowId": "s6uclVVlJHPvJqSd",
-        "versionId": "f8adfd84-9352-467f-8944-152862337893",
-        "event": "activated",
-        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
-      }
-    ]
-  }
+    "updatedAt":  "2026-05-25T14:36:35.150Z",
+    "createdAt":  "2026-05-25T14:36:35.150Z",
+    "id":  "0oRIiVFr5Q7FF6ow",
+    "name":  "WF7 - Nachfuellung melden (Slot-Update ohne Verkauf)",
+    "description":  null,
+    "active":  true,
+    "isArchived":  false,
+    "nodes":  [
+                  {
+                      "id":  "e6b79733-0181-481d-be02-0ad0a7d472f2",
+                      "name":  "Webhook",
+                      "type":  "n8n-nodes-base.webhook",
+                      "typeVersion":  2,
+                      "position":  [
+                                       0,
+                                       0
+                                   ],
+                      "parameters":  {
+                                         "httpMethod":  "GET",
+                                         "path":  "nachfuellung",
+                                         "responseMode":  "responseNode",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "webhookId":  "488ccf39-576c-4998-97e7-367fc9a41197"
+                  },
+                  {
+                      "id":  "99886f43-aa89-4a7d-b574-64ed13e8931f",
+                      "name":  "Config - WF6",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       220,
+                                       0
+                                   ],
+                      "parameters":  {
+                                         "assignments":  {
+                                                             "assignments":  [
+                                                                                 {
+                                                                                     "id":  "gsid",
+                                                                                     "name":  "google_sheet_id",
+                                                                                     "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                                                     "type":  "string"
+                                                                                 }
+                                                                             ]
+                                                         },
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "f7c434f4-0f4a-4072-bd8a-7e0dd62499a2",
+                      "name":  "Google Sheets - Produkte lesen",
+                      "type":  "n8n-nodes-base.googleSheets",
+                      "typeVersion":  4.5,
+                      "position":  [
+                                       440,
+                                       -120
+                                   ],
+                      "credentials":  {
+                                          "googleSheetsOAuth2Api":  {
+                                                                        "id":  "6GG86fWHw536Rk36",
+                                                                        "name":  "Google Sheets API"
+                                                                    }
+                                      },
+                      "parameters":  {
+                                         "operation":  "read",
+                                         "documentId":  {
+                                                            "__rl":  true,
+                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                            "mode":  "id"
+                                                        },
+                                         "sheetName":  {
+                                                           "__rl":  true,
+                                                           "value":  "Produkte",
+                                                           "mode":  "name"
+                                                       },
+                                         "filtersUI":  {
+                                                           "values":  [
+                                                                          {
+                                                                              "lookupColumn":  "active",
+                                                                              "lookupValue":  "TRUE"
+                                                                          }
+                                                                      ]
+                                                       },
+                                         "options":  {
+                                                         "returnFirstMatch":  false
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "98d18876-3ed2-4032-9334-18d0774156b4",
+                      "name":  "Google Sheets - Hinweise lesen",
+                      "type":  "n8n-nodes-base.googleSheets",
+                      "typeVersion":  4.5,
+                      "position":  [
+                                       440,
+                                       120
+                                   ],
+                      "credentials":  {
+                                          "googleSheetsOAuth2Api":  {
+                                                                        "id":  "6GG86fWHw536Rk36",
+                                                                        "name":  "Google Sheets API"
+                                                                    }
+                                      },
+                      "parameters":  {
+                                         "operation":  "read",
+                                         "documentId":  {
+                                                            "__rl":  true,
+                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                            "mode":  "id"
+                                                        },
+                                         "sheetName":  {
+                                                           "__rl":  true,
+                                                           "value":  "Fehler_und_Hinweise",
+                                                           "mode":  "name"
+                                                       },
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "3e3e3d3a-66bb-4e8c-8322-8bb02bf4143f",
+                      "name":  "Merge - Produkte + Hinweise",
+                      "type":  "n8n-nodes-base.merge",
+                      "typeVersion":  3,
+                      "position":  [
+                                       660,
+                                       0
+                                   ],
+                      "parameters":  {
+                                         "mode":  "combine",
+                                         "combinationMode":  "multiplex",
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "2cf34e52-6e79-4a4e-8f9b-773de13a3229",
+                      "name":  "Code - Nachfuellung verarbeiten",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       880,
+                                       0
+                                   ],
+                      "parameters":  {
+                                         "jsCode":  "\n// WF6 Nachf�llung: Verarbeite Webhook-Parameter und bereite Updates vor.\n// Input: Query-Parameter aus dem Webhook (product_key, qty, notes)\nconst wh = $(\u0027Webhook\u0027).first()?.json?.query || {};\nconst productKey = String(wh.product_key || \u0027\u0027).trim();\nconst notesIn    = String(wh.notes || \u0027\u0027).trim();\nconst qtyIn      = wh.qty !== undefined ? Number(wh.qty) : null;\n\nif (!productKey) {\n  throw new Error(\u0027Fehlender Parameter: product_key ist Pflicht.\u0027);\n}\n\nfunction clean(v) { return String(v ?? \u0027\u0027).replace(/\\n/g, \u0027 \u0027).replace(/\\s+/g, \u0027 \u0027).trim(); }\nfunction isActive(v) {\n  return [\u0027TRUE\u0027,\u00271\u0027,\u0027JA\u0027,\u0027YES\u0027,\u0027AKTIV\u0027,\u0027ACTIVE\u0027].includes(clean(v).toUpperCase());\n}\nfunction num(v) {\n  const n = Number(String(v ?? \u0027\u0027).replace(\u0027,\u0027, \u0027.\u0027));\n  return Number.isFinite(n) ? n : null;\n}\n\n// Produkte-Zeilen f�r diesen product_key\nconst allProdukte   = $(\u0027Google Sheets - Produkte lesen\u0027).all().map(i =\u003e i.json);\nconst allHinweise   = $(\u0027Google Sheets - Hinweise lesen\u0027).all().map(i =\u003e i.json);\nconst matchedSlots  = allProdukte.filter(p =\u003e\n  clean(p.product_key) === productKey \u0026\u0026 isActive(p.active)\n);\n\nif (!matchedSlots.length) {\n  throw new Error(\u0027Kein aktiver Slot f�r product_key: \u0027 + productKey);\n}\n\nconst now = new Date().toISOString();\nconst productName = clean(\n  matchedSlots[0].internal_product_name ||\n  matchedSlots[0].nayax_product_name ||\n  productKey\n);\n\n// Slot-Updates bauen\nconst slotUpdates = matchedSlots.map(p =\u003e {\n  const capacity = num(p.machine_capacity) || 0;\n  const newQty = qtyIn !== null ? Math.min(qtyIn, capacity) : capacity;\n  return {\n    product_slot_id: clean(p.product_slot_id),\n    current_machine_qty: newQty,\n    last_stock_update_source: \u0027WF6_NACHFUELLUNG\u0027,\n    last_stock_update_at: now\n  };\n});\n\n// Hinweise die aufgel�st werden sollen\nconst resolvableTypes = [\u0027EMPTY_BATCH\u0027, \u0027LOW_STOCK\u0027, \u0027INSUFFICIENT_BATCH_STOCK\u0027, \u0027LOW_BATCH\u0027];\nconst toResolve = allHinweise.filter(h =\u003e {\n  const resolved = clean(h.resolved).toUpperCase();\n  if ([\u0027TRUE\u0027,\u0027JA\u0027,\u0027YES\u0027,\u00271\u0027,\u0027ERLEDIGT\u0027,\u0027RESOLVED\u0027].includes(resolved)) return false;\n  return clean(h.product_key) === productKey \u0026\u0026 resolvableTypes.includes(clean(h.type));\n}).map(h =\u003e ({ created_at: clean(h.created_at), resolved: \u0027TRUE\u0027 }));\n\n// Audit-Eintrag\nconst auditEntry = {\n  created_at: now,\n  type: \u0027NACHFUELLUNG\u0027,\n  severity: \u0027info\u0027,\n  machine_id: clean(matchedSlots[0].machine_id || \u0027457107528\u0027),\n  product_key: productKey,\n  nayax_product_name: productName,\n  message: \u0027Nachf�llung erfasst f�r \u0027 + productName +\n           \u0027. Slots aktualisiert: \u0027 + slotUpdates.map(s =\u003e s.product_slot_id + \u0027=\u0027 + s.current_machine_qty).join(\u0027, \u0027) +\n           (notesIn ? \u0027. Bemerkung: \u0027 + notesIn : \u0027\u0027),\n  resolved: \u0027TRUE\u0027\n};\n\nreturn [{\n  json: {\n    ok: true,\n    productKey,\n    productName,\n    slotUpdates,\n    toResolve,\n    auditEntry,\n    summary: {\n      slots_updated: slotUpdates.length,\n      hints_resolved: toResolve.length\n    }\n  }\n}];\n"
+                                     }
+                  },
+                  {
+                      "id":  "740e1196-99e0-401a-a037-289fd64f7b0c",
+                      "name":  "Extract - Slot Updates",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       1100,
+                                       -120
+                                   ],
+                      "parameters":  {
+                                         "jsCode":  "const d = $input.first().json;\nconst updates = d.slotUpdates || [];\nif (!updates.length) return [];\nreturn updates.map(u =\u003e ({ json: u }));"
+                                     }
+                  },
+                  {
+                      "id":  "6b40bc27-d78a-4201-b719-5aace1b5cbaf",
+                      "name":  "Extract - Hinweise aufl�sen",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       1100,
+                                       0
+                                   ],
+                      "parameters":  {
+                                         "jsCode":  "const d = $input.first().json;\nconst hints = d.toResolve || [];\nif (!hints.length) return [];\nreturn hints.map(h =\u003e ({ json: h }));"
+                                     }
+                  },
+                  {
+                      "id":  "2468d652-b333-4133-9955-e75d2931a248",
+                      "name":  "Extract - Audit",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       1100,
+                                       120
+                                   ],
+                      "parameters":  {
+                                         "jsCode":  "const d = $input.first().json;\nreturn [{ json: d.auditEntry }];"
+                                     }
+                  },
+                  {
+                      "id":  "cbaeecf4-6b59-4646-b2b3-6cf31def7f98",
+                      "name":  "Google Sheets - Slot aktualisieren",
+                      "type":  "n8n-nodes-base.googleSheets",
+                      "typeVersion":  4.5,
+                      "position":  [
+                                       1320,
+                                       -120
+                                   ],
+                      "credentials":  {
+                                          "googleSheetsOAuth2Api":  {
+                                                                        "id":  "6GG86fWHw536Rk36",
+                                                                        "name":  "Google Sheets API"
+                                                                    }
+                                      },
+                      "parameters":  {
+                                         "operation":  "update",
+                                         "documentId":  {
+                                                            "__rl":  true,
+                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                            "mode":  "id"
+                                                        },
+                                         "sheetName":  {
+                                                           "__rl":  true,
+                                                           "value":  "Produkte",
+                                                           "mode":  "name"
+                                                       },
+                                         "columns":  {
+                                                         "mappingMode":  "defineBelow",
+                                                         "value":  {
+                                                                       "product_slot_id":  "={{ $json.product_slot_id }}",
+                                                                       "current_machine_qty":  "={{ $json.current_machine_qty }}",
+                                                                       "last_stock_update_source":  "={{ $json.last_stock_update_source }}",
+                                                                       "last_stock_update_at":  "={{ $json.last_stock_update_at }}"
+                                                                   },
+                                                         "matchingColumns":  [
+                                                                                 "product_slot_id"
+                                                                             ],
+                                                         "schema":  [
+                                                                        {
+                                                                            "id":  "product_slot_id",
+                                                                            "displayName":  "product_slot_id",
+                                                                            "required":  false,
+                                                                            "defaultMatch":  true,
+                                                                            "display":  true,
+                                                                            "type":  "string",
+                                                                            "canBeUsedToMatch":  true
+                                                                        },
+                                                                        {
+                                                                            "id":  "current_machine_qty",
+                                                                            "displayName":  "current_machine_qty",
+                                                                            "required":  false,
+                                                                            "defaultMatch":  false,
+                                                                            "display":  true,
+                                                                            "type":  "number",
+                                                                            "canBeUsedToMatch":  false
+                                                                        },
+                                                                        {
+                                                                            "id":  "last_stock_update_source",
+                                                                            "displayName":  "last_stock_update_source",
+                                                                            "required":  false,
+                                                                            "defaultMatch":  false,
+                                                                            "display":  true,
+                                                                            "type":  "string",
+                                                                            "canBeUsedToMatch":  false
+                                                                        },
+                                                                        {
+                                                                            "id":  "last_stock_update_at",
+                                                                            "displayName":  "last_stock_update_at",
+                                                                            "required":  false,
+                                                                            "defaultMatch":  false,
+                                                                            "display":  true,
+                                                                            "type":  "string",
+                                                                            "canBeUsedToMatch":  false
+                                                                        }
+                                                                    ]
+                                                     },
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "86e7954b-bfc4-43cc-8587-0e064049b3f1",
+                      "name":  "Google Sheets - Hinweise aufl�sen",
+                      "type":  "n8n-nodes-base.googleSheets",
+                      "typeVersion":  4.5,
+                      "position":  [
+                                       1320,
+                                       0
+                                   ],
+                      "credentials":  {
+                                          "googleSheetsOAuth2Api":  {
+                                                                        "id":  "6GG86fWHw536Rk36",
+                                                                        "name":  "Google Sheets API"
+                                                                    }
+                                      },
+                      "parameters":  {
+                                         "operation":  "update",
+                                         "documentId":  {
+                                                            "__rl":  true,
+                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                            "mode":  "id"
+                                                        },
+                                         "sheetName":  {
+                                                           "__rl":  true,
+                                                           "value":  "Fehler_und_Hinweise",
+                                                           "mode":  "name"
+                                                       },
+                                         "columns":  {
+                                                         "mappingMode":  "defineBelow",
+                                                         "value":  {
+                                                                       "created_at":  "={{ $json.created_at }}",
+                                                                       "resolved":  "={{ $json.resolved }}"
+                                                                   },
+                                                         "matchingColumns":  [
+                                                                                 "created_at"
+                                                                             ],
+                                                         "schema":  [
+                                                                        {
+                                                                            "id":  "created_at",
+                                                                            "displayName":  "created_at",
+                                                                            "required":  false,
+                                                                            "defaultMatch":  true,
+                                                                            "display":  true,
+                                                                            "type":  "string",
+                                                                            "canBeUsedToMatch":  true
+                                                                        },
+                                                                        {
+                                                                            "id":  "resolved",
+                                                                            "displayName":  "resolved",
+                                                                            "required":  false,
+                                                                            "defaultMatch":  false,
+                                                                            "display":  true,
+                                                                            "type":  "string",
+                                                                            "canBeUsedToMatch":  false
+                                                                        }
+                                                                    ]
+                                                     },
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "0f08710d-6f4d-495c-a775-b9cd5f316579",
+                      "name":  "Google Sheets - Audit anh�ngen",
+                      "type":  "n8n-nodes-base.googleSheets",
+                      "typeVersion":  4.5,
+                      "position":  [
+                                       1320,
+                                       120
+                                   ],
+                      "credentials":  {
+                                          "googleSheetsOAuth2Api":  {
+                                                                        "id":  "6GG86fWHw536Rk36",
+                                                                        "name":  "Google Sheets API"
+                                                                    }
+                                      },
+                      "parameters":  {
+                                         "operation":  "append",
+                                         "documentId":  {
+                                                            "__rl":  true,
+                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                            "mode":  "id"
+                                                        },
+                                         "sheetName":  {
+                                                           "__rl":  true,
+                                                           "value":  "Fehler_und_Hinweise",
+                                                           "mode":  "name"
+                                                       },
+                                         "columns":  {
+                                                         "mappingMode":  "autoMapInputData"
+                                                     },
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "08ae5cf4-e701-476a-8c2f-2b7d34d992d7",
+                      "name":  "Response",
+                      "type":  "n8n-nodes-base.respondToWebhook",
+                      "typeVersion":  1.1,
+                      "position":  [
+                                       1540,
+                                       0
+                                   ],
+                      "parameters":  {
+                                         "respondWith":  "json",
+                                         "responseBody":  "={{ JSON.stringify($(\u0027Code - Nachfuellung verarbeiten\u0027).first().json) }}"
+                                     }
+                  },
+                  {
+                      "id":  "issue20-wf7-lagerchargen-lesen",
+                      "name":  "Google Sheets - Lagerchargen lesen",
+                      "type":  "n8n-nodes-base.googleSheets",
+                      "typeVersion":  4.5,
+                      "position":  [
+                                       440,
+                                       120
+                                   ],
+                      "credentials":  {
+                                          "googleSheetsOAuth2Api":  {
+                                                                        "id":  "6GG86fWHw536Rk36",
+                                                                        "name":  "Google Sheets API"
+                                                                    }
+                                      },
+                      "parameters":  {
+                                         "operation":  "read",
+                                         "documentId":  {
+                                                            "__rl":  true,
+                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                            "mode":  "id"
+                                                        },
+                                         "sheetName":  {
+                                                           "__rl":  true,
+                                                           "value":  "Lagerchargen",
+                                                           "mode":  "name"
+                                                       },
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "issue20-merge-wf7-pgw-daten",
+                      "name":  "Merge - WF7 PGW Daten",
+                      "type":  "n8n-nodes-base.merge",
+                      "typeVersion":  3,
+                      "position":  [
+                                       900,
+                                       220
+                                   ],
+                      "parameters":  {
+                                         "mode":  "combine",
+                                         "combinationMode":  "multiplex",
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "issue20-prepare-pgw-wf7-refill-movement",
+                      "name":  "Prepare PGW - WF7 Refill Movement",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       1140,
+                                       220
+                                   ],
+                      "parameters":  {
+                                         "jsCode":  "const result = $(\"Code - Nachfuellung verarbeiten\").first().json;\nconst products = $(\"Google Sheets - Produkte lesen\").all().map((item) =\u003e item.json);\nconst batches = $(\"Google Sheets - Lagerchargen lesen\").all().map((item) =\u003e item.json);\nconst batchRunId = \"wf7_\" + new Date().toISOString().slice(0, 10);\n\nfunction clean(value) {\n  return String(value ?? \"\").replace(/\\n/g, \" \").replace(/\\s+/g, \" \").trim();\n}\n\nfunction num(value) {\n  const n = Number(String(value ?? \"\").replace(\",\", \".\"));\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction isActive(value) {\n  return [\"TRUE\", \"1\", \"JA\", \"YES\", \"AKTIV\", \"ACTIVE\", \"\"].includes(clean(value).toUpperCase());\n}\n\nfunction sanitize(value) {\n  return clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, \"_\").replace(/^_+|_+$/g, \"\");\n}\n\nfunction batchFor(productKey) {\n  return batches\n    .filter((batch) =\u003e clean(batch.product_key) === productKey)\n    .filter((batch) =\u003e isActive(batch.status))\n    .filter((batch) =\u003e (num(batch.remaining_qty) ?? 0) \u003e 0)\n    .sort((a, b) =\u003e clean(a.mhd).localeCompare(clean(b.mhd)) || clean(a.batch_id).localeCompare(clean(b.batch_id)))[0];\n}\n\nreturn (result.slotUpdates || []).flatMap((update) =\u003e {\n  const slot = products.find((product) =\u003e clean(product.product_slot_id) === clean(update.product_slot_id));\n  if (!slot) return [];\n  const delta = (num(update.current_machine_qty) ?? 0) - (num(slot.current_machine_qty) ?? 0);\n  if (delta \u003c= 0) return [];\n  const batch = batchFor(clean(slot.product_key));\n  if (!batch) return [];\n  const movementKey = [\"MOV\", \"REFILL\", update.product_slot_id, batch.batch_id, new Date().toISOString().slice(0, 10), delta].map(sanitize).join(\"_\");\n  return [{\n    json: {\n      event_type: \"stock_movement\",\n      batch_run_id: batchRunId,\n      data: {\n        movement_key: movementKey,\n        batch_key: clean(batch.batch_id),\n        product_slot_key: clean(update.product_slot_id),\n        movement_type: \"refill\",\n        quantity_delta_total: 0,\n        quantity_delta_slot: delta,\n        reason: clean(result.auditEntry?.message || \"Nachfuellung erfasst\"),\n        source: \"wf7_nachfuellung\",\n        occurred_at: clean(update.last_stock_update_at) || new Date().toISOString(),\n      },\n    },\n  }];\n});"
+                                     }
+                  },
+                  {
+                      "id":  "issue20-wf-pgw-wf7",
+                      "name":  "WF-PGW - WF7",
+                      "type":  "n8n-nodes-base.executeWorkflow",
+                      "typeVersion":  2,
+                      "position":  [
+                                       1380,
+                                       220
+                                   ],
+                      "parameters":  {
+                                         "workflowId":  {
+                                                            "__rl":  true,
+                                                            "value":  "Sajezv8tJll0CLIv",
+                                                            "mode":  "id"
+                                                        },
+                                         "mode":  "each",
+                                         "options":  {
+                                                         "waitForSubWorkflow":  false
+                                                     }
+                                     }
+                  }
+              ],
+    "connections":  {
+                        "Webhook":  {
+                                        "main":  [
+                                                     [
+                                                         {
+                                                             "node":  "Config - WF6",
+                                                             "type":  "main",
+                                                             "index":  0
+                                                         }
+                                                     ]
+                                                 ]
+                                    },
+                        "Config - WF6":  {
+                                             "main":  [
+                                                          [
+                                                              {
+                                                                  "node":  "Google Sheets - Produkte lesen",
+                                                                  "type":  "main",
+                                                                  "index":  0
+                                                              },
+                                                              {
+                                                                  "node":  "Google Sheets - Hinweise lesen",
+                                                                  "type":  "main",
+                                                                  "index":  0
+                                                              },
+                                                              {
+                                                                  "node":  "Google Sheets - Lagerchargen lesen",
+                                                                  "type":  "main",
+                                                                  "index":  0
+                                                              }
+                                                          ]
+                                                      ]
+                                         },
+                        "Google Sheets - Produkte lesen":  {
+                                                               "main":  [
+                                                                            [
+                                                                                {
+                                                                                    "node":  "Merge - Produkte + Hinweise",
+                                                                                    "type":  "main",
+                                                                                    "index":  0
+                                                                                }
+                                                                            ]
+                                                                        ]
+                                                           },
+                        "Google Sheets - Hinweise lesen":  {
+                                                               "main":  [
+                                                                            [
+                                                                                {
+                                                                                    "node":  "Merge - Produkte + Hinweise",
+                                                                                    "type":  "main",
+                                                                                    "index":  1
+                                                                                }
+                                                                            ]
+                                                                        ]
+                                                           },
+                        "Merge - Produkte + Hinweise":  {
+                                                            "main":  [
+                                                                         [
+                                                                             {
+                                                                                 "node":  "Code - Nachfuellung verarbeiten",
+                                                                                 "type":  "main",
+                                                                                 "index":  0
+                                                                             }
+                                                                         ]
+                                                                     ]
+                                                        },
+                        "Code - Nachfuellung verarbeiten":  {
+                                                                "main":  [
+                                                                             [
+                                                                                 {
+                                                                                     "node":  "Extract - Slot Updates",
+                                                                                     "type":  "main",
+                                                                                     "index":  0
+                                                                                 },
+                                                                                 {
+                                                                                     "node":  "Extract - Hinweise aufl�sen",
+                                                                                     "type":  "main",
+                                                                                     "index":  0
+                                                                                 },
+                                                                                 {
+                                                                                     "node":  "Extract - Audit",
+                                                                                     "type":  "main",
+                                                                                     "index":  0
+                                                                                 },
+                                                                                 {
+                                                                                     "node":  "Merge - WF7 PGW Daten",
+                                                                                     "type":  "main",
+                                                                                     "index":  0
+                                                                                 }
+                                                                             ]
+                                                                         ]
+                                                            },
+                        "Extract - Slot Updates":  {
+                                                       "main":  [
+                                                                    [
+                                                                        {
+                                                                            "node":  "Google Sheets - Slot aktualisieren",
+                                                                            "type":  "main",
+                                                                            "index":  0
+                                                                        }
+                                                                    ]
+                                                                ]
+                                                   },
+                        "Extract - Hinweise aufl�sen":  {
+                                                            "main":  [
+                                                                         [
+                                                                             {
+                                                                                 "node":  "Google Sheets - Hinweise aufl�sen",
+                                                                                 "type":  "main",
+                                                                                 "index":  0
+                                                                             }
+                                                                         ]
+                                                                     ]
+                                                        },
+                        "Extract - Audit":  {
+                                                "main":  [
+                                                             [
+                                                                 {
+                                                                     "node":  "Google Sheets - Audit anh�ngen",
+                                                                     "type":  "main",
+                                                                     "index":  0
+                                                                 }
+                                                             ]
+                                                         ]
+                                            },
+                        "Google Sheets - Slot aktualisieren":  {
+                                                                   "main":  [
+                                                                                [
+                                                                                    {
+                                                                                        "node":  "Response",
+                                                                                        "type":  "main",
+                                                                                        "index":  0
+                                                                                    }
+                                                                                ]
+                                                                            ]
+                                                               },
+                        "Google Sheets - Lagerchargen lesen":  {
+                                                                   "main":  [
+                                                                                [
+                                                                                    {
+                                                                                        "node":  "Merge - WF7 PGW Daten",
+                                                                                        "type":  "main",
+                                                                                        "index":  1
+                                                                                    }
+                                                                                ]
+                                                                            ]
+                                                               },
+                        "Merge - WF7 PGW Daten":  {
+                                                      "main":  [
+                                                                   [
+                                                                       {
+                                                                           "node":  "Prepare PGW - WF7 Refill Movement",
+                                                                           "type":  "main",
+                                                                           "index":  0
+                                                                       }
+                                                                   ]
+                                                               ]
+                                                  },
+                        "Prepare PGW - WF7 Refill Movement":  {
+                                                                  "main":  [
+                                                                               [
+                                                                                   {
+                                                                                       "node":  "WF-PGW - WF7",
+                                                                                       "type":  "main",
+                                                                                       "index":  0
+                                                                                   }
+                                                                               ]
+                                                                           ]
+                                                              }
+                    },
+    "settings":  {
+                     "executionOrder":  "v1"
+                 },
+    "staticData":  null,
+    "meta":  null,
+    "pinData":  null,
+    "versionId":  "ffd124d8-40f9-4dfe-bf69-3fb0cb9862c6",
+    "activeVersionId":  "ffd124d8-40f9-4dfe-bf69-3fb0cb9862c6",
+    "versionCounter":  4,
+    "triggerCount":  1,
+    "shared":  [
+                   {
+                       "updatedAt":  "2026-05-25T14:36:35.150Z",
+                       "createdAt":  "2026-05-25T14:36:35.150Z",
+                       "role":  "workflow:owner",
+                       "workflowId":  "0oRIiVFr5Q7FF6ow",
+                       "projectId":  "68wR1Q9zBUk0Gxhv",
+                       "project":  {
+                                       "updatedAt":  "2026-05-19T17:59:53.408Z",
+                                       "createdAt":  "2026-05-19T16:50:04.773Z",
+                                       "id":  "68wR1Q9zBUk0Gxhv",
+                                       "name":  "Patrick Matthes \u003cpatrickmatthes2609@gmail.com\u003e",
+                                       "type":  "personal",
+                                       "icon":  null,
+                                       "description":  null,
+                                       "creatorId":  "dd26b63a-7133-4afa-995a-0d7d72693aee"
+                                   }
+                   }
+               ],
+    "tags":  [
+
+             ],
+    "activeVersion":  {
+                          "updatedAt":  "2026-05-25T14:36:35.150Z",
+                          "createdAt":  "2026-05-25T14:36:35.150Z",
+                          "versionId":  "ffd124d8-40f9-4dfe-bf69-3fb0cb9862c6",
+                          "workflowId":  "0oRIiVFr5Q7FF6ow",
+                          "nodes":  [
+                                        {
+                                            "id":  "e6b79733-0181-481d-be02-0ad0a7d472f2",
+                                            "name":  "Webhook",
+                                            "type":  "n8n-nodes-base.webhook",
+                                            "typeVersion":  2,
+                                            "position":  [
+                                                             0,
+                                                             0
+                                                         ],
+                                            "parameters":  {
+                                                               "httpMethod":  "GET",
+                                                               "path":  "nachfuellung",
+                                                               "responseMode":  "responseNode",
+                                                               "options":  {
+
+                                                                           }
+                                                           },
+                                            "webhookId":  "488ccf39-576c-4998-97e7-367fc9a41197"
+                                        },
+                                        {
+                                            "id":  "99886f43-aa89-4a7d-b574-64ed13e8931f",
+                                            "name":  "Config - WF6",
+                                            "type":  "n8n-nodes-base.set",
+                                            "typeVersion":  3.4,
+                                            "position":  [
+                                                             220,
+                                                             0
+                                                         ],
+                                            "parameters":  {
+                                                               "assignments":  {
+                                                                                   "assignments":  [
+                                                                                                       {
+                                                                                                           "id":  "gsid",
+                                                                                                           "name":  "google_sheet_id",
+                                                                                                           "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                                                                           "type":  "string"
+                                                                                                       }
+                                                                                                   ]
+                                                                               },
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "f7c434f4-0f4a-4072-bd8a-7e0dd62499a2",
+                                            "name":  "Google Sheets - Produkte lesen",
+                                            "type":  "n8n-nodes-base.googleSheets",
+                                            "typeVersion":  4.5,
+                                            "position":  [
+                                                             440,
+                                                             -120
+                                                         ],
+                                            "credentials":  {
+                                                                "googleSheetsOAuth2Api":  {
+                                                                                              "id":  "6GG86fWHw536Rk36",
+                                                                                              "name":  "Google Sheets API"
+                                                                                          }
+                                                            },
+                                            "parameters":  {
+                                                               "operation":  "read",
+                                                               "documentId":  {
+                                                                                  "__rl":  true,
+                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                                                  "mode":  "id"
+                                                                              },
+                                                               "sheetName":  {
+                                                                                 "__rl":  true,
+                                                                                 "value":  "Produkte",
+                                                                                 "mode":  "name"
+                                                                             },
+                                                               "filtersUI":  {
+                                                                                 "values":  [
+                                                                                                {
+                                                                                                    "lookupColumn":  "active",
+                                                                                                    "lookupValue":  "TRUE"
+                                                                                                }
+                                                                                            ]
+                                                                             },
+                                                               "options":  {
+                                                                               "returnFirstMatch":  false
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "98d18876-3ed2-4032-9334-18d0774156b4",
+                                            "name":  "Google Sheets - Hinweise lesen",
+                                            "type":  "n8n-nodes-base.googleSheets",
+                                            "typeVersion":  4.5,
+                                            "position":  [
+                                                             440,
+                                                             120
+                                                         ],
+                                            "credentials":  {
+                                                                "googleSheetsOAuth2Api":  {
+                                                                                              "id":  "6GG86fWHw536Rk36",
+                                                                                              "name":  "Google Sheets API"
+                                                                                          }
+                                                            },
+                                            "parameters":  {
+                                                               "operation":  "read",
+                                                               "documentId":  {
+                                                                                  "__rl":  true,
+                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                                                  "mode":  "id"
+                                                                              },
+                                                               "sheetName":  {
+                                                                                 "__rl":  true,
+                                                                                 "value":  "Fehler_und_Hinweise",
+                                                                                 "mode":  "name"
+                                                                             },
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "3e3e3d3a-66bb-4e8c-8322-8bb02bf4143f",
+                                            "name":  "Merge - Produkte + Hinweise",
+                                            "type":  "n8n-nodes-base.merge",
+                                            "typeVersion":  3,
+                                            "position":  [
+                                                             660,
+                                                             0
+                                                         ],
+                                            "parameters":  {
+                                                               "mode":  "combine",
+                                                               "combinationMode":  "multiplex",
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "2cf34e52-6e79-4a4e-8f9b-773de13a3229",
+                                            "name":  "Code - Nachfuellung verarbeiten",
+                                            "type":  "n8n-nodes-base.code",
+                                            "typeVersion":  2,
+                                            "position":  [
+                                                             880,
+                                                             0
+                                                         ],
+                                            "parameters":  {
+                                                               "jsCode":  "\n// WF6 Nachf�llung: Verarbeite Webhook-Parameter und bereite Updates vor.\n// Input: Query-Parameter aus dem Webhook (product_key, qty, notes)\nconst wh = $(\u0027Webhook\u0027).first()?.json?.query || {};\nconst productKey = String(wh.product_key || \u0027\u0027).trim();\nconst notesIn    = String(wh.notes || \u0027\u0027).trim();\nconst qtyIn      = wh.qty !== undefined ? Number(wh.qty) : null;\n\nif (!productKey) {\n  throw new Error(\u0027Fehlender Parameter: product_key ist Pflicht.\u0027);\n}\n\nfunction clean(v) { return String(v ?? \u0027\u0027).replace(/\\n/g, \u0027 \u0027).replace(/\\s+/g, \u0027 \u0027).trim(); }\nfunction isActive(v) {\n  return [\u0027TRUE\u0027,\u00271\u0027,\u0027JA\u0027,\u0027YES\u0027,\u0027AKTIV\u0027,\u0027ACTIVE\u0027].includes(clean(v).toUpperCase());\n}\nfunction num(v) {\n  const n = Number(String(v ?? \u0027\u0027).replace(\u0027,\u0027, \u0027.\u0027));\n  return Number.isFinite(n) ? n : null;\n}\n\n// Produkte-Zeilen f�r diesen product_key\nconst allProdukte   = $(\u0027Google Sheets - Produkte lesen\u0027).all().map(i =\u003e i.json);\nconst allHinweise   = $(\u0027Google Sheets - Hinweise lesen\u0027).all().map(i =\u003e i.json);\nconst matchedSlots  = allProdukte.filter(p =\u003e\n  clean(p.product_key) === productKey \u0026\u0026 isActive(p.active)\n);\n\nif (!matchedSlots.length) {\n  throw new Error(\u0027Kein aktiver Slot f�r product_key: \u0027 + productKey);\n}\n\nconst now = new Date().toISOString();\nconst productName = clean(\n  matchedSlots[0].internal_product_name ||\n  matchedSlots[0].nayax_product_name ||\n  productKey\n);\n\n// Slot-Updates bauen\nconst slotUpdates = matchedSlots.map(p =\u003e {\n  const capacity = num(p.machine_capacity) || 0;\n  const newQty = qtyIn !== null ? Math.min(qtyIn, capacity) : capacity;\n  return {\n    product_slot_id: clean(p.product_slot_id),\n    current_machine_qty: newQty,\n    last_stock_update_source: \u0027WF6_NACHFUELLUNG\u0027,\n    last_stock_update_at: now\n  };\n});\n\n// Hinweise die aufgel�st werden sollen\nconst resolvableTypes = [\u0027EMPTY_BATCH\u0027, \u0027LOW_STOCK\u0027, \u0027INSUFFICIENT_BATCH_STOCK\u0027, \u0027LOW_BATCH\u0027];\nconst toResolve = allHinweise.filter(h =\u003e {\n  const resolved = clean(h.resolved).toUpperCase();\n  if ([\u0027TRUE\u0027,\u0027JA\u0027,\u0027YES\u0027,\u00271\u0027,\u0027ERLEDIGT\u0027,\u0027RESOLVED\u0027].includes(resolved)) return false;\n  return clean(h.product_key) === productKey \u0026\u0026 resolvableTypes.includes(clean(h.type));\n}).map(h =\u003e ({ created_at: clean(h.created_at), resolved: \u0027TRUE\u0027 }));\n\n// Audit-Eintrag\nconst auditEntry = {\n  created_at: now,\n  type: \u0027NACHFUELLUNG\u0027,\n  severity: \u0027info\u0027,\n  machine_id: clean(matchedSlots[0].machine_id || \u0027457107528\u0027),\n  product_key: productKey,\n  nayax_product_name: productName,\n  message: \u0027Nachf�llung erfasst f�r \u0027 + productName +\n           \u0027. Slots aktualisiert: \u0027 + slotUpdates.map(s =\u003e s.product_slot_id + \u0027=\u0027 + s.current_machine_qty).join(\u0027, \u0027) +\n           (notesIn ? \u0027. Bemerkung: \u0027 + notesIn : \u0027\u0027),\n  resolved: \u0027TRUE\u0027\n};\n\nreturn [{\n  json: {\n    ok: true,\n    productKey,\n    productName,\n    slotUpdates,\n    toResolve,\n    auditEntry,\n    summary: {\n      slots_updated: slotUpdates.length,\n      hints_resolved: toResolve.length\n    }\n  }\n}];\n"
+                                                           }
+                                        },
+                                        {
+                                            "id":  "740e1196-99e0-401a-a037-289fd64f7b0c",
+                                            "name":  "Extract - Slot Updates",
+                                            "type":  "n8n-nodes-base.code",
+                                            "typeVersion":  2,
+                                            "position":  [
+                                                             1100,
+                                                             -120
+                                                         ],
+                                            "parameters":  {
+                                                               "jsCode":  "const d = $input.first().json;\nconst updates = d.slotUpdates || [];\nif (!updates.length) return [];\nreturn updates.map(u =\u003e ({ json: u }));"
+                                                           }
+                                        },
+                                        {
+                                            "id":  "6b40bc27-d78a-4201-b719-5aace1b5cbaf",
+                                            "name":  "Extract - Hinweise aufl�sen",
+                                            "type":  "n8n-nodes-base.code",
+                                            "typeVersion":  2,
+                                            "position":  [
+                                                             1100,
+                                                             0
+                                                         ],
+                                            "parameters":  {
+                                                               "jsCode":  "const d = $input.first().json;\nconst hints = d.toResolve || [];\nif (!hints.length) return [];\nreturn hints.map(h =\u003e ({ json: h }));"
+                                                           }
+                                        },
+                                        {
+                                            "id":  "2468d652-b333-4133-9955-e75d2931a248",
+                                            "name":  "Extract - Audit",
+                                            "type":  "n8n-nodes-base.code",
+                                            "typeVersion":  2,
+                                            "position":  [
+                                                             1100,
+                                                             120
+                                                         ],
+                                            "parameters":  {
+                                                               "jsCode":  "const d = $input.first().json;\nreturn [{ json: d.auditEntry }];"
+                                                           }
+                                        },
+                                        {
+                                            "id":  "cbaeecf4-6b59-4646-b2b3-6cf31def7f98",
+                                            "name":  "Google Sheets - Slot aktualisieren",
+                                            "type":  "n8n-nodes-base.googleSheets",
+                                            "typeVersion":  4.5,
+                                            "position":  [
+                                                             1320,
+                                                             -120
+                                                         ],
+                                            "credentials":  {
+                                                                "googleSheetsOAuth2Api":  {
+                                                                                              "id":  "6GG86fWHw536Rk36",
+                                                                                              "name":  "Google Sheets API"
+                                                                                          }
+                                                            },
+                                            "parameters":  {
+                                                               "operation":  "update",
+                                                               "documentId":  {
+                                                                                  "__rl":  true,
+                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                                                  "mode":  "id"
+                                                                              },
+                                                               "sheetName":  {
+                                                                                 "__rl":  true,
+                                                                                 "value":  "Produkte",
+                                                                                 "mode":  "name"
+                                                                             },
+                                                               "columns":  {
+                                                                               "mappingMode":  "defineBelow",
+                                                                               "value":  {
+                                                                                             "product_slot_id":  "={{ $json.product_slot_id }}",
+                                                                                             "current_machine_qty":  "={{ $json.current_machine_qty }}",
+                                                                                             "last_stock_update_source":  "={{ $json.last_stock_update_source }}",
+                                                                                             "last_stock_update_at":  "={{ $json.last_stock_update_at }}"
+                                                                                         },
+                                                                               "matchingColumns":  [
+                                                                                                       "product_slot_id"
+                                                                                                   ],
+                                                                               "schema":  [
+                                                                                              {
+                                                                                                  "id":  "product_slot_id",
+                                                                                                  "displayName":  "product_slot_id",
+                                                                                                  "required":  false,
+                                                                                                  "defaultMatch":  true,
+                                                                                                  "display":  true,
+                                                                                                  "type":  "string",
+                                                                                                  "canBeUsedToMatch":  true
+                                                                                              },
+                                                                                              {
+                                                                                                  "id":  "current_machine_qty",
+                                                                                                  "displayName":  "current_machine_qty",
+                                                                                                  "required":  false,
+                                                                                                  "defaultMatch":  false,
+                                                                                                  "display":  true,
+                                                                                                  "type":  "number",
+                                                                                                  "canBeUsedToMatch":  false
+                                                                                              },
+                                                                                              {
+                                                                                                  "id":  "last_stock_update_source",
+                                                                                                  "displayName":  "last_stock_update_source",
+                                                                                                  "required":  false,
+                                                                                                  "defaultMatch":  false,
+                                                                                                  "display":  true,
+                                                                                                  "type":  "string",
+                                                                                                  "canBeUsedToMatch":  false
+                                                                                              },
+                                                                                              {
+                                                                                                  "id":  "last_stock_update_at",
+                                                                                                  "displayName":  "last_stock_update_at",
+                                                                                                  "required":  false,
+                                                                                                  "defaultMatch":  false,
+                                                                                                  "display":  true,
+                                                                                                  "type":  "string",
+                                                                                                  "canBeUsedToMatch":  false
+                                                                                              }
+                                                                                          ]
+                                                                           },
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "86e7954b-bfc4-43cc-8587-0e064049b3f1",
+                                            "name":  "Google Sheets - Hinweise aufl�sen",
+                                            "type":  "n8n-nodes-base.googleSheets",
+                                            "typeVersion":  4.5,
+                                            "position":  [
+                                                             1320,
+                                                             0
+                                                         ],
+                                            "credentials":  {
+                                                                "googleSheetsOAuth2Api":  {
+                                                                                              "id":  "6GG86fWHw536Rk36",
+                                                                                              "name":  "Google Sheets API"
+                                                                                          }
+                                                            },
+                                            "parameters":  {
+                                                               "operation":  "update",
+                                                               "documentId":  {
+                                                                                  "__rl":  true,
+                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                                                  "mode":  "id"
+                                                                              },
+                                                               "sheetName":  {
+                                                                                 "__rl":  true,
+                                                                                 "value":  "Fehler_und_Hinweise",
+                                                                                 "mode":  "name"
+                                                                             },
+                                                               "columns":  {
+                                                                               "mappingMode":  "defineBelow",
+                                                                               "value":  {
+                                                                                             "created_at":  "={{ $json.created_at }}",
+                                                                                             "resolved":  "={{ $json.resolved }}"
+                                                                                         },
+                                                                               "matchingColumns":  [
+                                                                                                       "created_at"
+                                                                                                   ],
+                                                                               "schema":  [
+                                                                                              {
+                                                                                                  "id":  "created_at",
+                                                                                                  "displayName":  "created_at",
+                                                                                                  "required":  false,
+                                                                                                  "defaultMatch":  true,
+                                                                                                  "display":  true,
+                                                                                                  "type":  "string",
+                                                                                                  "canBeUsedToMatch":  true
+                                                                                              },
+                                                                                              {
+                                                                                                  "id":  "resolved",
+                                                                                                  "displayName":  "resolved",
+                                                                                                  "required":  false,
+                                                                                                  "defaultMatch":  false,
+                                                                                                  "display":  true,
+                                                                                                  "type":  "string",
+                                                                                                  "canBeUsedToMatch":  false
+                                                                                              }
+                                                                                          ]
+                                                                           },
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "0f08710d-6f4d-495c-a775-b9cd5f316579",
+                                            "name":  "Google Sheets - Audit anh�ngen",
+                                            "type":  "n8n-nodes-base.googleSheets",
+                                            "typeVersion":  4.5,
+                                            "position":  [
+                                                             1320,
+                                                             120
+                                                         ],
+                                            "credentials":  {
+                                                                "googleSheetsOAuth2Api":  {
+                                                                                              "id":  "6GG86fWHw536Rk36",
+                                                                                              "name":  "Google Sheets API"
+                                                                                          }
+                                                            },
+                                            "parameters":  {
+                                                               "operation":  "append",
+                                                               "documentId":  {
+                                                                                  "__rl":  true,
+                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                                                  "mode":  "id"
+                                                                              },
+                                                               "sheetName":  {
+                                                                                 "__rl":  true,
+                                                                                 "value":  "Fehler_und_Hinweise",
+                                                                                 "mode":  "name"
+                                                                             },
+                                                               "columns":  {
+                                                                               "mappingMode":  "autoMapInputData"
+                                                                           },
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "08ae5cf4-e701-476a-8c2f-2b7d34d992d7",
+                                            "name":  "Response",
+                                            "type":  "n8n-nodes-base.respondToWebhook",
+                                            "typeVersion":  1.1,
+                                            "position":  [
+                                                             1540,
+                                                             0
+                                                         ],
+                                            "parameters":  {
+                                                               "respondWith":  "json",
+                                                               "responseBody":  "={{ JSON.stringify($(\u0027Code - Nachfuellung verarbeiten\u0027).first().json) }}"
+                                                           }
+                                        },
+                                        {
+                                            "id":  "issue20-wf7-lagerchargen-lesen",
+                                            "name":  "Google Sheets - Lagerchargen lesen",
+                                            "type":  "n8n-nodes-base.googleSheets",
+                                            "typeVersion":  4.5,
+                                            "position":  [
+                                                             440,
+                                                             120
+                                                         ],
+                                            "credentials":  {
+                                                                "googleSheetsOAuth2Api":  {
+                                                                                              "id":  "6GG86fWHw536Rk36",
+                                                                                              "name":  "Google Sheets API"
+                                                                                          }
+                                                            },
+                                            "parameters":  {
+                                                               "operation":  "read",
+                                                               "documentId":  {
+                                                                                  "__rl":  true,
+                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                                                  "mode":  "id"
+                                                                              },
+                                                               "sheetName":  {
+                                                                                 "__rl":  true,
+                                                                                 "value":  "Lagerchargen",
+                                                                                 "mode":  "name"
+                                                                             },
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "issue20-merge-wf7-pgw-daten",
+                                            "name":  "Merge - WF7 PGW Daten",
+                                            "type":  "n8n-nodes-base.merge",
+                                            "typeVersion":  3,
+                                            "position":  [
+                                                             900,
+                                                             220
+                                                         ],
+                                            "parameters":  {
+                                                               "mode":  "combine",
+                                                               "combinationMode":  "multiplex",
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "issue20-prepare-pgw-wf7-refill-movement",
+                                            "name":  "Prepare PGW - WF7 Refill Movement",
+                                            "type":  "n8n-nodes-base.code",
+                                            "typeVersion":  2,
+                                            "position":  [
+                                                             1140,
+                                                             220
+                                                         ],
+                                            "parameters":  {
+                                                               "jsCode":  "const result = $(\"Code - Nachfuellung verarbeiten\").first().json;\nconst products = $(\"Google Sheets - Produkte lesen\").all().map((item) =\u003e item.json);\nconst batches = $(\"Google Sheets - Lagerchargen lesen\").all().map((item) =\u003e item.json);\nconst batchRunId = \"wf7_\" + new Date().toISOString().slice(0, 10);\n\nfunction clean(value) {\n  return String(value ?? \"\").replace(/\\n/g, \" \").replace(/\\s+/g, \" \").trim();\n}\n\nfunction num(value) {\n  const n = Number(String(value ?? \"\").replace(\",\", \".\"));\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction isActive(value) {\n  return [\"TRUE\", \"1\", \"JA\", \"YES\", \"AKTIV\", \"ACTIVE\", \"\"].includes(clean(value).toUpperCase());\n}\n\nfunction sanitize(value) {\n  return clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, \"_\").replace(/^_+|_+$/g, \"\");\n}\n\nfunction batchFor(productKey) {\n  return batches\n    .filter((batch) =\u003e clean(batch.product_key) === productKey)\n    .filter((batch) =\u003e isActive(batch.status))\n    .filter((batch) =\u003e (num(batch.remaining_qty) ?? 0) \u003e 0)\n    .sort((a, b) =\u003e clean(a.mhd).localeCompare(clean(b.mhd)) || clean(a.batch_id).localeCompare(clean(b.batch_id)))[0];\n}\n\nreturn (result.slotUpdates || []).flatMap((update) =\u003e {\n  const slot = products.find((product) =\u003e clean(product.product_slot_id) === clean(update.product_slot_id));\n  if (!slot) return [];\n  const delta = (num(update.current_machine_qty) ?? 0) - (num(slot.current_machine_qty) ?? 0);\n  if (delta \u003c= 0) return [];\n  const batch = batchFor(clean(slot.product_key));\n  if (!batch) return [];\n  const movementKey = [\"MOV\", \"REFILL\", update.product_slot_id, batch.batch_id, new Date().toISOString().slice(0, 10), delta].map(sanitize).join(\"_\");\n  return [{\n    json: {\n      event_type: \"stock_movement\",\n      batch_run_id: batchRunId,\n      data: {\n        movement_key: movementKey,\n        batch_key: clean(batch.batch_id),\n        product_slot_key: clean(update.product_slot_id),\n        movement_type: \"refill\",\n        quantity_delta_total: 0,\n        quantity_delta_slot: delta,\n        reason: clean(result.auditEntry?.message || \"Nachfuellung erfasst\"),\n        source: \"wf7_nachfuellung\",\n        occurred_at: clean(update.last_stock_update_at) || new Date().toISOString(),\n      },\n    },\n  }];\n});"
+                                                           }
+                                        },
+                                        {
+                                            "id":  "issue20-wf-pgw-wf7",
+                                            "name":  "WF-PGW - WF7",
+                                            "type":  "n8n-nodes-base.executeWorkflow",
+                                            "typeVersion":  2,
+                                            "position":  [
+                                                             1380,
+                                                             220
+                                                         ],
+                                            "parameters":  {
+                                                               "workflowId":  {
+                                                                                  "__rl":  true,
+                                                                                  "value":  "Sajezv8tJll0CLIv",
+                                                                                  "mode":  "id"
+                                                                              },
+                                                               "mode":  "each",
+                                                               "options":  {
+                                                                               "waitForSubWorkflow":  false
+                                                                           }
+                                                           }
+                                        }
+                                    ],
+                          "connections":  {
+                                              "Webhook":  {
+                                                              "main":  [
+                                                                           [
+                                                                               {
+                                                                                   "node":  "Config - WF6",
+                                                                                   "type":  "main",
+                                                                                   "index":  0
+                                                                               }
+                                                                           ]
+                                                                       ]
+                                                          },
+                                              "Config - WF6":  {
+                                                                   "main":  [
+                                                                                [
+                                                                                    {
+                                                                                        "node":  "Google Sheets - Produkte lesen",
+                                                                                        "type":  "main",
+                                                                                        "index":  0
+                                                                                    },
+                                                                                    {
+                                                                                        "node":  "Google Sheets - Hinweise lesen",
+                                                                                        "type":  "main",
+                                                                                        "index":  0
+                                                                                    },
+                                                                                    {
+                                                                                        "node":  "Google Sheets - Lagerchargen lesen",
+                                                                                        "type":  "main",
+                                                                                        "index":  0
+                                                                                    }
+                                                                                ]
+                                                                            ]
+                                                               },
+                                              "Google Sheets - Produkte lesen":  {
+                                                                                     "main":  [
+                                                                                                  [
+                                                                                                      {
+                                                                                                          "node":  "Merge - Produkte + Hinweise",
+                                                                                                          "type":  "main",
+                                                                                                          "index":  0
+                                                                                                      }
+                                                                                                  ]
+                                                                                              ]
+                                                                                 },
+                                              "Google Sheets - Hinweise lesen":  {
+                                                                                     "main":  [
+                                                                                                  [
+                                                                                                      {
+                                                                                                          "node":  "Merge - Produkte + Hinweise",
+                                                                                                          "type":  "main",
+                                                                                                          "index":  1
+                                                                                                      }
+                                                                                                  ]
+                                                                                              ]
+                                                                                 },
+                                              "Merge - Produkte + Hinweise":  {
+                                                                                  "main":  [
+                                                                                               [
+                                                                                                   {
+                                                                                                       "node":  "Code - Nachfuellung verarbeiten",
+                                                                                                       "type":  "main",
+                                                                                                       "index":  0
+                                                                                                   }
+                                                                                               ]
+                                                                                           ]
+                                                                              },
+                                              "Code - Nachfuellung verarbeiten":  {
+                                                                                      "main":  [
+                                                                                                   [
+                                                                                                       {
+                                                                                                           "node":  "Extract - Slot Updates",
+                                                                                                           "type":  "main",
+                                                                                                           "index":  0
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "node":  "Extract - Hinweise aufl�sen",
+                                                                                                           "type":  "main",
+                                                                                                           "index":  0
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "node":  "Extract - Audit",
+                                                                                                           "type":  "main",
+                                                                                                           "index":  0
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "node":  "Merge - WF7 PGW Daten",
+                                                                                                           "type":  "main",
+                                                                                                           "index":  0
+                                                                                                       }
+                                                                                                   ]
+                                                                                               ]
+                                                                                  },
+                                              "Extract - Slot Updates":  {
+                                                                             "main":  [
+                                                                                          [
+                                                                                              {
+                                                                                                  "node":  "Google Sheets - Slot aktualisieren",
+                                                                                                  "type":  "main",
+                                                                                                  "index":  0
+                                                                                              }
+                                                                                          ]
+                                                                                      ]
+                                                                         },
+                                              "Extract - Hinweise aufl�sen":  {
+                                                                                  "main":  [
+                                                                                               [
+                                                                                                   {
+                                                                                                       "node":  "Google Sheets - Hinweise aufl�sen",
+                                                                                                       "type":  "main",
+                                                                                                       "index":  0
+                                                                                                   }
+                                                                                               ]
+                                                                                           ]
+                                                                              },
+                                              "Extract - Audit":  {
+                                                                      "main":  [
+                                                                                   [
+                                                                                       {
+                                                                                           "node":  "Google Sheets - Audit anh�ngen",
+                                                                                           "type":  "main",
+                                                                                           "index":  0
+                                                                                       }
+                                                                                   ]
+                                                                               ]
+                                                                  },
+                                              "Google Sheets - Slot aktualisieren":  {
+                                                                                         "main":  [
+                                                                                                      [
+                                                                                                          {
+                                                                                                              "node":  "Response",
+                                                                                                              "type":  "main",
+                                                                                                              "index":  0
+                                                                                                          }
+                                                                                                      ]
+                                                                                                  ]
+                                                                                     },
+                                              "Google Sheets - Lagerchargen lesen":  {
+                                                                                         "main":  [
+                                                                                                      [
+                                                                                                          {
+                                                                                                              "node":  "Merge - WF7 PGW Daten",
+                                                                                                              "type":  "main",
+                                                                                                              "index":  1
+                                                                                                          }
+                                                                                                      ]
+                                                                                                  ]
+                                                                                     },
+                                              "Merge - WF7 PGW Daten":  {
+                                                                            "main":  [
+                                                                                         [
+                                                                                             {
+                                                                                                 "node":  "Prepare PGW - WF7 Refill Movement",
+                                                                                                 "type":  "main",
+                                                                                                 "index":  0
+                                                                                             }
+                                                                                         ]
+                                                                                     ]
+                                                                        },
+                                              "Prepare PGW - WF7 Refill Movement":  {
+                                                                                        "main":  [
+                                                                                                     [
+                                                                                                         {
+                                                                                                             "node":  "WF-PGW - WF7",
+                                                                                                             "type":  "main",
+                                                                                                             "index":  0
+                                                                                                         }
+                                                                                                     ]
+                                                                                                 ]
+                                                                                    }
+                                          },
+                          "authors":  "Patrick Matthes",
+                          "name":  null,
+                          "description":  null,
+                          "autosaved":  false,
+                          "workflowPublishHistory":  [
+                                                         {
+                                                             "createdAt":  "2026-05-25T14:37:24.388Z",
+                                                             "id":  78,
+                                                             "workflowId":  "0oRIiVFr5Q7FF6ow",
+                                                             "versionId":  "ffd124d8-40f9-4dfe-bf69-3fb0cb9862c6",
+                                                             "event":  "activated",
+                                                             "userId":  "dd26b63a-7133-4afa-995a-0d7d72693aee"
+                                                         }
+                                                     ]
+                      }
 }

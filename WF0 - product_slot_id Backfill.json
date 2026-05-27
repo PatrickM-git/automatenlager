@@ -78,8 +78,8 @@
       "executeOnce": true,
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       }
     },
@@ -179,8 +179,8 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "5XfHt3SzjHCj8B5H",
-          "name": "Sheets Automatenlager"
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
         }
       }
     }

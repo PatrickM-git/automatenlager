@@ -124,17 +124,18 @@ Read-Only guest access:
 
 ## Current Next Step
 
-**Session 17 abgeschlossen (2026-05-23) — Mai-GuV repariert:**
-- Nayax Mai 2026, `Verarbeitete_Transaktionen` und `GuV_Tagesposten` sind live auf **207,80 EUR** abgeglichen.
-- Fehlende Verkäufe vom 08.05.2026 wurden nachgetragen; zwei bestehende 0/leer-Umsatz-Zeilen wurden korrigiert.
-- `GuV_Tagesposten` Mai wurde aus `Verarbeitete_Transaktionen` neu aufgebaut.
-- WF8 auf HP Mini (`AMXktRs6Z28FuzSE`) ist aktiv und wieder im sicheren Append-Modus mit Existing-Key-Skip.
+**Session 22 abgeschlossen (2026-05-27) - Umsatz-/Workflow-Reparatur auf HP Mini:**
+- WF3 (`wbOhFKXQqBpJWB1w`) schreibt wieder neue Nayax-Verkaeufe nach `Verarbeitete_Transaktionen`.
+- WF8 (`gyM9rnvUMfnv4x3G`) aggregiert wieder nach `GuV_Tagesposten`; Sheet-Zugriff nutzt `sheetName.mode=name`, leere Laeufe geben `return []` zurueck.
+- WF1/WF2/WF3 verwenden aktuelle Credentials und ASCII-sichere Unicode-RegExes fuer deutsche Umlaute.
+- Legacy Dashboard Mai 2026: `umsatz_brutto=238,40`, `wareneinsatz_brutto=134,83`, `guv=103,57`, `quantity_sold=182`.
+- Tests: Dashboard 72/72 gruen; Homelab Workflow-/GuV-/Monitor-Tests 29/29 gruen.
 
 **Naechste Schritte:**
-1. Issue #11 Read-Only-Gastzugriff lokal und im Browser pruefen.
-2. Danach Dashboard auf Mini deployen und `DASHBOARD_ADMIN_LOGIN` setzen.
-3. Tailscale-ACL laut `homelab/docs/runbooks/guest-access.md` erst mit echtem Gast-Login aktivieren.
-4. Dashboard-Zeitraum Mai/Gesamt weiter im Blick behalten: Mai-Umsatz muss 207,80 EUR zeigen.
+1. Nach User-Freigabe committen und pushen.
+2. Naechsten regulaeren WF8-Lauf um 02:00 Uhr beobachten: keine Duplikate, keine `_empty`-Zeilen.
+3. Beim naechsten echten Rechnungseingang WF1/WF2 produktiv beobachten.
+4. Alte Arbeitskopie `C:/Users/patri/Documents/automatenlager` archivieren oder entfernen, damit keine alten IDs mehr als Quelle verwechselt werden.
 
 ## WF7 Nachfuellung Webhook
 

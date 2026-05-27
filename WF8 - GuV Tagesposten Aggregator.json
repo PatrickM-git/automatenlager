@@ -1,777 +1,849 @@
 {
-  "updatedAt": "2026-05-24T14:30:33.552Z",
-  "createdAt": "2026-05-21T18:40:42.518Z",
-  "id": "AMXktRs6Z28FuzSE",
-  "name": "WF8 - GuV Tagesposten Aggregator",
-  "description": null,
-  "active": true,
-  "isArchived": false,
-  "nodes": [
-    {
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "triggerAtHour": 2
-            }
-          ]
-        }
-      },
-      "id": "35b5c4db-6f49-4ae0-b203-00872b1364c9",
-      "name": "Cron - Taeglich 02:00",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.3,
-      "position": [
-        0,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "documentId": {
-          "__rl": true,
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-          "mode": "list",
-          "cachedResultName": "Automatenlager",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Verarbeitete_Transaktionen",
-          "mode": "id",
-          "cachedResultName": "Verarbeitete_Transaktionen"
-        },
-        "options": {}
-      },
-      "id": "f1e26403-8991-4d95-8f19-c580044fb151",
-      "name": "Read - Verarbeitete_Transaktionen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
-      "position": [
-        224,
-        0
-      ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "documentId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
-        },
-        "sheetName": {
-          "__rl": true,
-          "mode": "name",
-          "value": "Lagerchargen"
-        },
-        "options": {}
-      },
-      "id": "ffbd4c31-7944-4e95-84ce-398799a47efd",
-      "name": "Read - Lagerchargen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
-      "position": [
-        448,
-        0
-      ],
-      "executeOnce": true,
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "documentId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
-        },
-        "sheetName": {
-          "__rl": true,
-          "mode": "name",
-          "value": "Produkte"
-        },
-        "options": {}
-      },
-      "id": "eb11257a-2d65-4086-aef4-af28b819f035",
-      "name": "Read - Produkte",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
-      "position": [
-        672,
-        0
-      ],
-      "executeOnce": true,
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "documentId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
-        },
-        "sheetName": {
-          "__rl": true,
-          "mode": "name",
-          "value": "GuV_Konfiguration"
-        },
-        "options": {}
-      },
-      "id": "9847a7bb-83a4-481b-8bc5-f43405ae3505",
-      "name": "Read - GuV_Konfiguration",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
-      "position": [
-        896,
-        0
-      ],
-      "executeOnce": true,
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "documentId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
-        },
-        "sheetName": {
-          "__rl": true,
-          "mode": "name",
-          "value": "GuV_Tagesposten"
-        },
-        "options": {}
-      },
-      "id": "7e6d3694-d36d-4fce-9af1-a30e9077acf5",
-      "name": "Read - GuV_Tagesposten (vorhanden)",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
-      "position": [
-        1120,
-        0
-      ],
-      "executeOnce": true,
-      "alwaysOutputData": true,
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const transactions = $items('Read - Verarbeitete_Transaktionen').map(i => i.json);\nconst batches      = $items('Read - Lagerchargen').map(i => i.json);\nconst products     = $items('Read - Produkte').map(i => i.json);\nconst config       = $items('Read - GuV_Konfiguration').map(i => i.json)[0] || {};\nconst existingGuV  = $items('Read - GuV_Tagesposten (vorhanden)').map(i => i.json);\n\nfunction clean(v) { return String(v == null ? '' : v).trim(); }\nfunction num(v)   { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0; }\nfunction r2(n)    { return Number.isFinite(n) ? Math.round(n * 100)   / 100   : 0; }\nfunction r4(n)    { return Number.isFinite(n) ? Math.round(n * 10000) / 10000 : 0; }\n\nconst kleinunternehmerAktiv = clean(config.kleinunternehmer_aktiv).toUpperCase() === 'TRUE';\nconst mwstSnack    = num(config.mwst_snack)    || 7;\nconst mwstGetraenk = num(config.mwst_getraenk) || 19;\n\nfunction mwstVonProduktart(art) {\n  const a = clean(art).toLowerCase();\n  if (a === 'snack' || a.includes('snack') || a === 'riegel') return mwstSnack;\n  if (a === 'getraenk' || a.includes('getraenk') || a.includes('drink')) return mwstGetraenk;\n  return mwstGetraenk;\n}\n\nconst batchMap = new Map();\nfor (const b of batches) {\n  const id = clean(b.batch_id);\n  if (id) batchMap.set(id, b);\n}\n\nconst productMap = new Map();\nfor (const p of products) {\n  const k = clean(p.product_key);\n  if (k) productMap.set(k, p);\n}\n\nfunction aggKey(date, machineId, productKey) { return date + '|' + machineId + '|' + productKey; }\nconst existingKeys = new Set();\nfor (const r of existingGuV) {\n  const d = clean(r.date), m = clean(r.machine_id), p = clean(r.product_key);\n  if (d && m && p) existingKeys.add(aggKey(d, m, p));\n}\n\nfunction deriveDate(tx) {\n  const ts = clean(tx.settlement_datetime_gmt || tx.sale_date || tx.timestamp || tx.processed_at);\n  if (!ts) return '';\n  const m = ts.match(/^(\\d{4}-\\d{2}-\\d{2})/);\n  if (!m) return '';\n  if (m[1].startsWith('2001-')) return ''; // Sentinel-Wert\n  return m[1];\n}\n\nconst aggregates = new Map();\nlet skippedStatus = 0, skippedNoPrice = 0, skippedExisting = 0, skippedInvalid = 0, processed = 0;\n\nfor (const tx of transactions) {\n  const status = clean(tx.status).toUpperCase();\n  if (status && status !== 'OK') { skippedStatus++; continue; }\n\n  const date      = deriveDate(tx);\n  const machineId  = clean(tx.machine_id);\n  const productKey = clean(tx.product_key);\n  if (!date || !machineId || !productKey) { skippedInvalid++; continue; }\n\n  const vkBrutto = num(tx.vk_preis_brutto) || num((productMap.get(productKey) || {}).sale_price_eur);\n  const qty      = num(tx.quantity || tx.qty || 1) || 1;\n  const umsatzBr = num(tx.umsatz_brutto) > 0 ? num(tx.umsatz_brutto) : qty * vkBrutto;\n  if (vkBrutto <= 0 && umsatzBr <= 0) { skippedNoPrice++; continue; }\n\n  const key = aggKey(date, machineId, productKey);\n  if (existingKeys.has(key)) { skippedExisting++; continue; }\n\n  const batchIds = clean(tx.batch_id_abgebucht).split(',').map(s => s.trim()).filter(Boolean);\n  let ekBrutto = 0;\n  let mwstEinkauf = 0;\n  if (batchIds.length > 0) {\n    const firstBatch = batchMap.get(batchIds[0]);\n    if (firstBatch) {\n      ekBrutto    = num(firstBatch.unit_cost);\n      mwstEinkauf = num(firstBatch.mwst_satz);\n    }\n  }\n\n  const product    = productMap.get(productKey) || {};\n  const produktart = clean(product.produktart);\n  if (!mwstEinkauf || mwstEinkauf <= 0) mwstEinkauf = mwstVonProduktart(produktart);\n\n  const ekNetto  = mwstEinkauf > 0 ? ekBrutto / (1 + mwstEinkauf / 100) : ekBrutto;\n  const warenein = qty * ekBrutto;\n\n  if (!aggregates.has(key)) {\n    aggregates.set(key, {\n      date, machine_id: machineId, product_key: productKey,\n      mdb_code: clean(tx.mdb_code_extracted || tx.mdb_code),\n      product_slot_id: clean(tx.product_slot_id),\n      nayax_product_name: clean(tx.nayax_product_name || tx.product_name),\n      produktart,\n      qty_sum: 0, umsatz_sum: 0, warenein_sum: 0,\n      vk_weighted: 0, ek_brutto_weighted: 0, ek_netto_weighted: 0, mwst_weighted: 0,\n      batch_missing: false,\n    });\n  }\n  const a = aggregates.get(key);\n  a.qty_sum            += qty;\n  a.umsatz_sum         += umsatzBr;\n  a.warenein_sum       += warenein;\n  a.vk_weighted        += vkBrutto * qty;\n  a.ek_brutto_weighted += ekBrutto * qty;\n  a.ek_netto_weighted  += ekNetto  * qty;\n  a.mwst_weighted      += mwstEinkauf * qty;\n  if (batchIds.length === 0 || ekBrutto === 0) a.batch_missing = true;\n  processed++;\n}\n\nconst now = new Date().toISOString();\nconst out = [];\nfor (const a of aggregates.values()) {\n  const q = a.qty_sum || 1;\n  out.push({\n    json: {\n      date:                  a.date,\n      machine_id:            a.machine_id,\n      mdb_code:              a.mdb_code,\n      product_slot_id:       a.product_slot_id,\n      product_key:           a.product_key,\n      nayax_product_name:    a.nayax_product_name,\n      produktart:            a.produktart,\n      quantity_sold:         a.qty_sum,\n      vk_preis_brutto:       r4(a.vk_weighted / q),\n      umsatz_brutto:         r2(a.umsatz_sum),\n      ek_preis_netto:        r4(a.ek_netto_weighted / q),\n      mwst_satz_einkauf:     r2(a.mwst_weighted / q),\n      ek_preis_brutto:       r4(a.ek_brutto_weighted / q),\n      wareneinsatz_brutto:   r2(a.warenein_sum),\n      guv:                   r2(a.umsatz_sum - a.warenein_sum),\n      kleinunternehmer_aktiv: kleinunternehmerAktiv ? 'TRUE' : 'FALSE',\n      aggregiert_am:         now + (a.batch_missing ? ' [EK-Daten fehlen]' : ''),\n    }\n  });\n}\n\nif (out.length === 0) {\n  return [{ json: { _info: 'Keine neuen Aggregationen', processed, skippedStatus, skippedNoPrice, skippedExisting, skippedInvalid, _empty: true } }];\n}\nreturn out;"
-      },
-      "id": "7d53fafe-d426-48a0-baa0-69831dac1445",
-      "name": "Code - GuV aggregieren",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1344,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "operation": "append",
-        "documentId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
-        },
-        "sheetName": {
-          "__rl": true,
-          "mode": "name",
-          "value": "GuV_Tagesposten"
-        },
-        "columns": {
-          "mappingMode": "autoMapInputData",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        },
-        "options": {}
-      },
-      "id": "3a753900-d198-44f1-bd33-4a5f04e0bfb8",
-      "name": "Append - GuV_Tagesposten",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
-      "position": [
-        1568,
-        0
-      ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const batchRunId = 'wf8_' + new Date().toISOString().slice(0, 10);\n\nreturn $input.all()\n  .filter(item => !item.json._empty)\n  .map(item => {\n    const r = item.json;\n    const guvKey = [r.date, r.machine_id, r.product_key].join('|');\n    const kleinunternehmer = String(r.kleinunternehmer_aktiv || '').toUpperCase() === 'TRUE';\n    const art = String(r.produktart || '').toLowerCase();\n    const vatRate = kleinunternehmer ? 0\n      : (art === 'snack' || art.includes('snack') || art === 'riegel' ? 7 : 19);\n    const revenueNet = vatRate === 0\n      ? r.umsatz_brutto\n      : Math.round(r.umsatz_brutto / (1 + vatRate / 100) * 100) / 100;\n\n    return {\n      json: {\n        event_type: 'guv_daily',\n        batch_run_id: batchRunId,\n        data: {\n          guv_key: guvKey,\n          posting_date: r.date,\n          machine_key: String(r.machine_id),\n          mdb_code: r.mdb_code || null,\n          product_key: r.product_key,\n          quantity_sold: r.quantity_sold,\n          revenue_gross: r.umsatz_brutto,\n          revenue_net: revenueNet,\n          cost_of_goods: r.wareneinsatz_brutto,\n          gross_profit: r.guv,\n          source: 'wf8_guv_aggregator'\n        }\n      }\n    };\n  });",
-        "mode": "runOnceForAllItems"
-      },
-      "id": "927036d8-5d1e-452c-99cd-ccc7b76c4d41",
-      "name": "Prepare PGW - guv_daily",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1792,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "Sajezv8tJll0CLIv",
-          "mode": "id"
-        },
-        "mode": "each",
-        "options": {
-          "waitForSubWorkflow": false
-        }
-      },
-      "id": "5de6c14a-33ee-4a6f-916f-c430c8f968a4",
-      "name": "WF-PGW - guv_daily",
-      "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 1.2,
-      "position": [
-        2016,
-        0
-      ]
-    }
-  ],
-  "connections": {
-    "Cron - Taeglich 02:00": {
-      "main": [
-        [
-          {
-            "node": "Read - Verarbeitete_Transaktionen",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Read - Verarbeitete_Transaktionen": {
-      "main": [
-        [
-          {
-            "node": "Read - Lagerchargen",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Read - Lagerchargen": {
-      "main": [
-        [
-          {
-            "node": "Read - Produkte",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Read - Produkte": {
-      "main": [
-        [
-          {
-            "node": "Read - GuV_Konfiguration",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Read - GuV_Konfiguration": {
-      "main": [
-        [
-          {
-            "node": "Read - GuV_Tagesposten (vorhanden)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Read - GuV_Tagesposten (vorhanden)": {
-      "main": [
-        [
-          {
-            "node": "Code - GuV aggregieren",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Code - GuV aggregieren": {
-      "main": [
-        [
-          {
-            "node": "Append - GuV_Tagesposten",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Append - GuV_Tagesposten": {
-      "main": [
-        [
-          {
-            "node": "Prepare PGW - guv_daily",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Prepare PGW - guv_daily": {
-      "main": [
-        [
-          {
-            "node": "WF-PGW - guv_daily",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
-  },
-  "settings": {
-    "executionOrder": "v1",
-    "binaryMode": "separate"
-  },
-  "staticData": {
-    "node:Cron - Taeglich 02:00": {
-      "recurrenceRules": []
-    }
-  },
-  "meta": null,
-  "pinData": {},
-  "versionId": "a60f36f2-19f3-45cf-84c0-5b7d5fe1a6b6",
-  "activeVersionId": "a60f36f2-19f3-45cf-84c0-5b7d5fe1a6b6",
-  "versionCounter": 56,
-  "triggerCount": 1,
-  "shared": [
-    {
-      "updatedAt": "2026-05-21T18:40:42.518Z",
-      "createdAt": "2026-05-21T18:40:42.518Z",
-      "role": "workflow:owner",
-      "workflowId": "AMXktRs6Z28FuzSE",
-      "projectId": "68wR1Q9zBUk0Gxhv",
-      "project": {
-        "updatedAt": "2026-05-19T17:59:53.408Z",
-        "createdAt": "2026-05-19T16:50:04.773Z",
-        "id": "68wR1Q9zBUk0Gxhv",
-        "name": "Patrick Matthes <patrickmatthes2609@gmail.com>",
-        "type": "personal",
-        "icon": null,
-        "description": null,
-        "creatorId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
-      }
-    }
-  ],
-  "tags": [],
-  "activeVersion": {
-    "updatedAt": "2026-05-24T14:30:33.554Z",
-    "createdAt": "2026-05-24T14:30:33.554Z",
-    "versionId": "a60f36f2-19f3-45cf-84c0-5b7d5fe1a6b6",
-    "workflowId": "AMXktRs6Z28FuzSE",
-    "nodes": [
-      {
-        "parameters": {
-          "rule": {
-            "interval": [
-              {
-                "triggerAtHour": 2
-              }
-            ]
-          }
-        },
-        "id": "35b5c4db-6f49-4ae0-b203-00872b1364c9",
-        "name": "Cron - Taeglich 02:00",
-        "type": "n8n-nodes-base.scheduleTrigger",
-        "typeVersion": 1.3,
-        "position": [
-          0,
-          0
-        ]
-      },
-      {
-        "parameters": {
-          "documentId": {
-            "__rl": true,
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-            "mode": "list",
-            "cachedResultName": "Automatenlager",
-            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Verarbeitete_Transaktionen",
-            "mode": "id",
-            "cachedResultName": "Verarbeitete_Transaktionen"
-          },
-          "options": {}
-        },
-        "id": "f1e26403-8991-4d95-8f19-c580044fb151",
-        "name": "Read - Verarbeitete_Transaktionen",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.7,
-        "position": [
-          224,
-          0
-        ],
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
-          }
-        }
-      },
-      {
-        "parameters": {
-          "documentId": {
-            "__rl": true,
-            "mode": "id",
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
-          },
-          "sheetName": {
-            "__rl": true,
-            "mode": "name",
-            "value": "Lagerchargen"
-          },
-          "options": {}
-        },
-        "id": "ffbd4c31-7944-4e95-84ce-398799a47efd",
-        "name": "Read - Lagerchargen",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.7,
-        "position": [
-          448,
-          0
-        ],
-        "executeOnce": true,
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
-          }
-        }
-      },
-      {
-        "parameters": {
-          "documentId": {
-            "__rl": true,
-            "mode": "id",
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
-          },
-          "sheetName": {
-            "__rl": true,
-            "mode": "name",
-            "value": "Produkte"
-          },
-          "options": {}
-        },
-        "id": "eb11257a-2d65-4086-aef4-af28b819f035",
-        "name": "Read - Produkte",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.7,
-        "position": [
-          672,
-          0
-        ],
-        "executeOnce": true,
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
-          }
-        }
-      },
-      {
-        "parameters": {
-          "documentId": {
-            "__rl": true,
-            "mode": "id",
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
-          },
-          "sheetName": {
-            "__rl": true,
-            "mode": "name",
-            "value": "GuV_Konfiguration"
-          },
-          "options": {}
-        },
-        "id": "9847a7bb-83a4-481b-8bc5-f43405ae3505",
-        "name": "Read - GuV_Konfiguration",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.7,
-        "position": [
-          896,
-          0
-        ],
-        "executeOnce": true,
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
-          }
-        }
-      },
-      {
-        "parameters": {
-          "documentId": {
-            "__rl": true,
-            "mode": "id",
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
-          },
-          "sheetName": {
-            "__rl": true,
-            "mode": "name",
-            "value": "GuV_Tagesposten"
-          },
-          "options": {}
-        },
-        "id": "7e6d3694-d36d-4fce-9af1-a30e9077acf5",
-        "name": "Read - GuV_Tagesposten (vorhanden)",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.7,
-        "position": [
-          1120,
-          0
-        ],
-        "executeOnce": true,
-        "alwaysOutputData": true,
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
-          }
-        }
-      },
-      {
-        "parameters": {
-          "jsCode": "const transactions = $items('Read - Verarbeitete_Transaktionen').map(i => i.json);\nconst batches      = $items('Read - Lagerchargen').map(i => i.json);\nconst products     = $items('Read - Produkte').map(i => i.json);\nconst config       = $items('Read - GuV_Konfiguration').map(i => i.json)[0] || {};\nconst existingGuV  = $items('Read - GuV_Tagesposten (vorhanden)').map(i => i.json);\n\nfunction clean(v) { return String(v == null ? '' : v).trim(); }\nfunction num(v)   { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0; }\nfunction r2(n)    { return Number.isFinite(n) ? Math.round(n * 100)   / 100   : 0; }\nfunction r4(n)    { return Number.isFinite(n) ? Math.round(n * 10000) / 10000 : 0; }\n\nconst kleinunternehmerAktiv = clean(config.kleinunternehmer_aktiv).toUpperCase() === 'TRUE';\nconst mwstSnack    = num(config.mwst_snack)    || 7;\nconst mwstGetraenk = num(config.mwst_getraenk) || 19;\n\nfunction mwstVonProduktart(art) {\n  const a = clean(art).toLowerCase();\n  if (a === 'snack' || a.includes('snack') || a === 'riegel') return mwstSnack;\n  if (a === 'getraenk' || a.includes('getraenk') || a.includes('drink')) return mwstGetraenk;\n  return mwstGetraenk;\n}\n\nconst batchMap = new Map();\nfor (const b of batches) {\n  const id = clean(b.batch_id);\n  if (id) batchMap.set(id, b);\n}\n\nconst productMap = new Map();\nfor (const p of products) {\n  const k = clean(p.product_key);\n  if (k) productMap.set(k, p);\n}\n\nfunction aggKey(date, machineId, productKey) { return date + '|' + machineId + '|' + productKey; }\nconst existingKeys = new Set();\nfor (const r of existingGuV) {\n  const d = clean(r.date), m = clean(r.machine_id), p = clean(r.product_key);\n  if (d && m && p) existingKeys.add(aggKey(d, m, p));\n}\n\nfunction deriveDate(tx) {\n  const ts = clean(tx.settlement_datetime_gmt || tx.sale_date || tx.timestamp || tx.processed_at);\n  if (!ts) return '';\n  const m = ts.match(/^(\\d{4}-\\d{2}-\\d{2})/);\n  if (!m) return '';\n  if (m[1].startsWith('2001-')) return ''; // Sentinel-Wert\n  return m[1];\n}\n\nconst aggregates = new Map();\nlet skippedStatus = 0, skippedNoPrice = 0, skippedExisting = 0, skippedInvalid = 0, processed = 0;\n\nfor (const tx of transactions) {\n  const status = clean(tx.status).toUpperCase();\n  if (status && status !== 'OK') { skippedStatus++; continue; }\n\n  const date      = deriveDate(tx);\n  const machineId  = clean(tx.machine_id);\n  const productKey = clean(tx.product_key);\n  if (!date || !machineId || !productKey) { skippedInvalid++; continue; }\n\n  const vkBrutto = num(tx.vk_preis_brutto) || num((productMap.get(productKey) || {}).sale_price_eur);\n  const qty      = num(tx.quantity || tx.qty || 1) || 1;\n  const umsatzBr = num(tx.umsatz_brutto) > 0 ? num(tx.umsatz_brutto) : qty * vkBrutto;\n  if (vkBrutto <= 0 && umsatzBr <= 0) { skippedNoPrice++; continue; }\n\n  const key = aggKey(date, machineId, productKey);\n  if (existingKeys.has(key)) { skippedExisting++; continue; }\n\n  const batchIds = clean(tx.batch_id_abgebucht).split(',').map(s => s.trim()).filter(Boolean);\n  let ekBrutto = 0;\n  let mwstEinkauf = 0;\n  if (batchIds.length > 0) {\n    const firstBatch = batchMap.get(batchIds[0]);\n    if (firstBatch) {\n      ekBrutto    = num(firstBatch.unit_cost);\n      mwstEinkauf = num(firstBatch.mwst_satz);\n    }\n  }\n\n  const product    = productMap.get(productKey) || {};\n  const produktart = clean(product.produktart);\n  if (!mwstEinkauf || mwstEinkauf <= 0) mwstEinkauf = mwstVonProduktart(produktart);\n\n  const ekNetto  = mwstEinkauf > 0 ? ekBrutto / (1 + mwstEinkauf / 100) : ekBrutto;\n  const warenein = qty * ekBrutto;\n\n  if (!aggregates.has(key)) {\n    aggregates.set(key, {\n      date, machine_id: machineId, product_key: productKey,\n      mdb_code: clean(tx.mdb_code_extracted || tx.mdb_code),\n      product_slot_id: clean(tx.product_slot_id),\n      nayax_product_name: clean(tx.nayax_product_name || tx.product_name),\n      produktart,\n      qty_sum: 0, umsatz_sum: 0, warenein_sum: 0,\n      vk_weighted: 0, ek_brutto_weighted: 0, ek_netto_weighted: 0, mwst_weighted: 0,\n      batch_missing: false,\n    });\n  }\n  const a = aggregates.get(key);\n  a.qty_sum            += qty;\n  a.umsatz_sum         += umsatzBr;\n  a.warenein_sum       += warenein;\n  a.vk_weighted        += vkBrutto * qty;\n  a.ek_brutto_weighted += ekBrutto * qty;\n  a.ek_netto_weighted  += ekNetto  * qty;\n  a.mwst_weighted      += mwstEinkauf * qty;\n  if (batchIds.length === 0 || ekBrutto === 0) a.batch_missing = true;\n  processed++;\n}\n\nconst now = new Date().toISOString();\nconst out = [];\nfor (const a of aggregates.values()) {\n  const q = a.qty_sum || 1;\n  out.push({\n    json: {\n      date:                  a.date,\n      machine_id:            a.machine_id,\n      mdb_code:              a.mdb_code,\n      product_slot_id:       a.product_slot_id,\n      product_key:           a.product_key,\n      nayax_product_name:    a.nayax_product_name,\n      produktart:            a.produktart,\n      quantity_sold:         a.qty_sum,\n      vk_preis_brutto:       r4(a.vk_weighted / q),\n      umsatz_brutto:         r2(a.umsatz_sum),\n      ek_preis_netto:        r4(a.ek_netto_weighted / q),\n      mwst_satz_einkauf:     r2(a.mwst_weighted / q),\n      ek_preis_brutto:       r4(a.ek_brutto_weighted / q),\n      wareneinsatz_brutto:   r2(a.warenein_sum),\n      guv:                   r2(a.umsatz_sum - a.warenein_sum),\n      kleinunternehmer_aktiv: kleinunternehmerAktiv ? 'TRUE' : 'FALSE',\n      aggregiert_am:         now + (a.batch_missing ? ' [EK-Daten fehlen]' : ''),\n    }\n  });\n}\n\nif (out.length === 0) {\n  return [{ json: { _info: 'Keine neuen Aggregationen', processed, skippedStatus, skippedNoPrice, skippedExisting, skippedInvalid, _empty: true } }];\n}\nreturn out;"
-        },
-        "id": "7d53fafe-d426-48a0-baa0-69831dac1445",
-        "name": "Code - GuV aggregieren",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          1344,
-          0
-        ]
-      },
-      {
-        "parameters": {
-          "operation": "append",
-          "documentId": {
-            "__rl": true,
-            "mode": "id",
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
-          },
-          "sheetName": {
-            "__rl": true,
-            "mode": "name",
-            "value": "GuV_Tagesposten"
-          },
-          "columns": {
-            "mappingMode": "autoMapInputData",
-            "value": {},
-            "matchingColumns": [],
-            "schema": [],
-            "attemptToConvertTypes": false,
-            "convertFieldsToString": false
-          },
-          "options": {}
-        },
-        "id": "3a753900-d198-44f1-bd33-4a5f04e0bfb8",
-        "name": "Append - GuV_Tagesposten",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.7,
-        "position": [
-          1568,
-          0
-        ],
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
-          }
-        }
-      },
-      {
-        "parameters": {
-          "jsCode": "const batchRunId = 'wf8_' + new Date().toISOString().slice(0, 10);\n\nreturn $input.all()\n  .filter(item => !item.json._empty)\n  .map(item => {\n    const r = item.json;\n    const guvKey = [r.date, r.machine_id, r.product_key].join('|');\n    const kleinunternehmer = String(r.kleinunternehmer_aktiv || '').toUpperCase() === 'TRUE';\n    const art = String(r.produktart || '').toLowerCase();\n    const vatRate = kleinunternehmer ? 0\n      : (art === 'snack' || art.includes('snack') || art === 'riegel' ? 7 : 19);\n    const revenueNet = vatRate === 0\n      ? r.umsatz_brutto\n      : Math.round(r.umsatz_brutto / (1 + vatRate / 100) * 100) / 100;\n\n    return {\n      json: {\n        event_type: 'guv_daily',\n        batch_run_id: batchRunId,\n        data: {\n          guv_key: guvKey,\n          posting_date: r.date,\n          machine_key: String(r.machine_id),\n          mdb_code: r.mdb_code || null,\n          product_key: r.product_key,\n          quantity_sold: r.quantity_sold,\n          revenue_gross: r.umsatz_brutto,\n          revenue_net: revenueNet,\n          cost_of_goods: r.wareneinsatz_brutto,\n          gross_profit: r.guv,\n          source: 'wf8_guv_aggregator'\n        }\n      }\n    };\n  });",
-          "mode": "runOnceForAllItems"
-        },
-        "id": "927036d8-5d1e-452c-99cd-ccc7b76c4d41",
-        "name": "Prepare PGW - guv_daily",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          1792,
-          0
-        ]
-      },
-      {
-        "parameters": {
-          "workflowId": {
-            "__rl": true,
-            "value": "Sajezv8tJll0CLIv",
-            "mode": "id"
-          },
-          "mode": "each",
-          "options": {
-            "waitForSubWorkflow": false
-          }
-        },
-        "id": "5de6c14a-33ee-4a6f-916f-c430c8f968a4",
-        "name": "WF-PGW - guv_daily",
-        "type": "n8n-nodes-base.executeWorkflow",
-        "typeVersion": 1.2,
-        "position": [
-          2016,
-          0
-        ]
-      }
-    ],
-    "connections": {
-      "Cron - Taeglich 02:00": {
-        "main": [
-          [
-            {
-              "node": "Read - Verarbeitete_Transaktionen",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Read - Verarbeitete_Transaktionen": {
-        "main": [
-          [
-            {
-              "node": "Read - Lagerchargen",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Read - Lagerchargen": {
-        "main": [
-          [
-            {
-              "node": "Read - Produkte",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Read - Produkte": {
-        "main": [
-          [
-            {
-              "node": "Read - GuV_Konfiguration",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Read - GuV_Konfiguration": {
-        "main": [
-          [
-            {
-              "node": "Read - GuV_Tagesposten (vorhanden)",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Read - GuV_Tagesposten (vorhanden)": {
-        "main": [
-          [
-            {
-              "node": "Code - GuV aggregieren",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Code - GuV aggregieren": {
-        "main": [
-          [
-            {
-              "node": "Append - GuV_Tagesposten",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Append - GuV_Tagesposten": {
-        "main": [
-          [
-            {
-              "node": "Prepare PGW - guv_daily",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Prepare PGW - guv_daily": {
-        "main": [
-          [
-            {
-              "node": "WF-PGW - guv_daily",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      }
-    },
-    "authors": "Patrick Matthes",
-    "name": null,
-    "description": null,
-    "autosaved": false,
-    "workflowPublishHistory": []
-  }
+    "updatedAt":  "2026-05-27T14:51:05.268Z",
+    "createdAt":  "2026-05-25T14:37:24.002Z",
+    "id":  "gyM9rnvUMfnv4x3G",
+    "name":  "WF8 - GuV Tagesposten Aggregator",
+    "description":  null,
+    "active":  true,
+    "isArchived":  false,
+    "nodes":  [
+                  {
+                      "parameters":  {
+                                         "rule":  {
+                                                      "interval":  [
+                                                                       {
+                                                                           "triggerAtHour":  2
+                                                                       }
+                                                                   ]
+                                                  }
+                                     },
+                      "id":  "35b5c4db-6f49-4ae0-b203-00872b1364c9",
+                      "name":  "Cron - Taeglich 02:00",
+                      "type":  "n8n-nodes-base.scheduleTrigger",
+                      "typeVersion":  1.3,
+                      "position":  [
+                                       0,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "documentId":  {
+                                                            "__rl":  true,
+                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                            "mode":  "list",
+                                                            "cachedResultName":  "Automatenlager",
+                                                            "cachedResultUrl":  "https://docs.google.com/spreadsheets/d/12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+                                                        },
+                                         "sheetName":  {
+                                                           "__rl":  true,
+                                                           "value":  "Verarbeitete_Transaktionen",
+                                                           "mode":  "name",
+                                                           "cachedResultName":  "Verarbeitete_Transaktionen"
+                                                       },
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "f1e26403-8991-4d95-8f19-c580044fb151",
+                      "name":  "Read - Verarbeitete_Transaktionen",
+                      "type":  "n8n-nodes-base.googleSheets",
+                      "typeVersion":  4.7,
+                      "position":  [
+                                       224,
+                                       0
+                                   ],
+                      "credentials":  {
+                                          "googleSheetsOAuth2Api":  {
+                                                                        "id":  "6GG86fWHw536Rk36",
+                                                                        "name":  "Google Sheets API"
+                                                                    }
+                                      }
+                  },
+                  {
+                      "parameters":  {
+                                         "documentId":  {
+                                                            "__rl":  true,
+                                                            "mode":  "id",
+                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+                                                        },
+                                         "sheetName":  {
+                                                           "__rl":  true,
+                                                           "mode":  "name",
+                                                           "value":  "Lagerchargen"
+                                                       },
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "ffbd4c31-7944-4e95-84ce-398799a47efd",
+                      "name":  "Read - Lagerchargen",
+                      "type":  "n8n-nodes-base.googleSheets",
+                      "typeVersion":  4.7,
+                      "position":  [
+                                       448,
+                                       0
+                                   ],
+                      "executeOnce":  true,
+                      "credentials":  {
+                                          "googleSheetsOAuth2Api":  {
+                                                                        "id":  "6GG86fWHw536Rk36",
+                                                                        "name":  "Google Sheets API"
+                                                                    }
+                                      }
+                  },
+                  {
+                      "parameters":  {
+                                         "documentId":  {
+                                                            "__rl":  true,
+                                                            "mode":  "id",
+                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+                                                        },
+                                         "sheetName":  {
+                                                           "__rl":  true,
+                                                           "mode":  "name",
+                                                           "value":  "Produkte"
+                                                       },
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "eb11257a-2d65-4086-aef4-af28b819f035",
+                      "name":  "Read - Produkte",
+                      "type":  "n8n-nodes-base.googleSheets",
+                      "typeVersion":  4.7,
+                      "position":  [
+                                       672,
+                                       0
+                                   ],
+                      "executeOnce":  true,
+                      "credentials":  {
+                                          "googleSheetsOAuth2Api":  {
+                                                                        "id":  "6GG86fWHw536Rk36",
+                                                                        "name":  "Google Sheets API"
+                                                                    }
+                                      }
+                  },
+                  {
+                      "parameters":  {
+                                         "documentId":  {
+                                                            "__rl":  true,
+                                                            "mode":  "id",
+                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+                                                        },
+                                         "sheetName":  {
+                                                           "__rl":  true,
+                                                           "mode":  "name",
+                                                           "value":  "GuV_Konfiguration"
+                                                       },
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "9847a7bb-83a4-481b-8bc5-f43405ae3505",
+                      "name":  "Read - GuV_Konfiguration",
+                      "type":  "n8n-nodes-base.googleSheets",
+                      "typeVersion":  4.7,
+                      "position":  [
+                                       896,
+                                       0
+                                   ],
+                      "executeOnce":  true,
+                      "credentials":  {
+                                          "googleSheetsOAuth2Api":  {
+                                                                        "id":  "6GG86fWHw536Rk36",
+                                                                        "name":  "Google Sheets API"
+                                                                    }
+                                      }
+                  },
+                  {
+                      "parameters":  {
+                                         "documentId":  {
+                                                            "__rl":  true,
+                                                            "mode":  "id",
+                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+                                                        },
+                                         "sheetName":  {
+                                                           "__rl":  true,
+                                                           "mode":  "name",
+                                                           "value":  "GuV_Tagesposten"
+                                                       },
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "7e6d3694-d36d-4fce-9af1-a30e9077acf5",
+                      "name":  "Read - GuV_Tagesposten (vorhanden)",
+                      "type":  "n8n-nodes-base.googleSheets",
+                      "typeVersion":  4.7,
+                      "position":  [
+                                       1120,
+                                       0
+                                   ],
+                      "executeOnce":  true,
+                      "alwaysOutputData":  true,
+                      "credentials":  {
+                                          "googleSheetsOAuth2Api":  {
+                                                                        "id":  "6GG86fWHw536Rk36",
+                                                                        "name":  "Google Sheets API"
+                                                                    }
+                                      }
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "const transactions = $items(\u0027Read - Verarbeitete_Transaktionen\u0027).map(i =\u003e i.json);\nconst batches      = $items(\u0027Read - Lagerchargen\u0027).map(i =\u003e i.json);\nconst products     = $items(\u0027Read - Produkte\u0027).map(i =\u003e i.json);\nconst config       = $items(\u0027Read - GuV_Konfiguration\u0027).map(i =\u003e i.json)[0] || {};\nconst existingGuV  = $items(\u0027Read - GuV_Tagesposten (vorhanden)\u0027).map(i =\u003e i.json);\n\nfunction clean(v) { return String(v == null ? \u0027\u0027 : v).trim(); }\nfunction num(v)   { const n = Number(String(v ?? \u0027\u0027).replace(\u0027,\u0027, \u0027.\u0027)); return Number.isFinite(n) ? n : 0; }\nfunction r2(n)    { return Number.isFinite(n) ? Math.round(n * 100)   / 100   : 0; }\nfunction r4(n)    { return Number.isFinite(n) ? Math.round(n * 10000) / 10000 : 0; }\n\nconst kleinunternehmerAktiv = clean(config.kleinunternehmer_aktiv).toUpperCase() === \u0027TRUE\u0027;\nconst mwstSnack    = num(config.mwst_snack)    || 7;\nconst mwstGetraenk = num(config.mwst_getraenk) || 19;\n\nfunction mwstVonProduktart(art) {\n  const a = clean(art).toLowerCase();\n  if (a === \u0027snack\u0027 || a.includes(\u0027snack\u0027) || a === \u0027riegel\u0027) return mwstSnack;\n  if (a === \u0027getraenk\u0027 || a.includes(\u0027getraenk\u0027) || a.includes(\u0027drink\u0027)) return mwstGetraenk;\n  return mwstGetraenk;\n}\n\nconst batchMap = new Map();\nfor (const b of batches) {\n  const id = clean(b.batch_id);\n  if (id) batchMap.set(id, b);\n}\n\nconst productMap = new Map();\nfor (const p of products) {\n  const k = clean(p.product_key);\n  if (k) productMap.set(k, p);\n}\n\nfunction aggKey(date, machineId, productKey) { return date + \u0027|\u0027 + machineId + \u0027|\u0027 + productKey; }\nconst existingKeys = new Set();\nfor (const r of existingGuV) {\n  const d = clean(r.date), m = clean(r.machine_id), p = clean(r.product_key);\n  if (d \u0026\u0026 m \u0026\u0026 p) existingKeys.add(aggKey(d, m, p));\n}\n\nfunction deriveDate(tx) {\n  const ts = clean(tx.settlement_datetime_gmt || tx.sale_date || tx.timestamp || tx.processed_at);\n  if (!ts) return \u0027\u0027;\n  const m = ts.match(/^(\\d{4}-\\d{2}-\\d{2})/);\n  if (!m) return \u0027\u0027;\n  if (m[1].startsWith(\u00272001-\u0027)) return \u0027\u0027; // Sentinel-Wert\n  return m[1];\n}\n\nconst aggregates = new Map();\nlet skippedStatus = 0, skippedNoPrice = 0, skippedExisting = 0, skippedInvalid = 0, processed = 0;\n\nfor (const tx of transactions) {\n  const status = clean(tx.status).toUpperCase();\n  if (status \u0026\u0026 status !== \u0027OK\u0027) { skippedStatus++; continue; }\n\n  const date      = deriveDate(tx);\n  const machineId  = clean(tx.machine_id);\n  const productKey = clean(tx.product_key);\n  if (!date || !machineId || !productKey) { skippedInvalid++; continue; }\n\n  const vkBrutto = num(tx.vk_preis_brutto) || num((productMap.get(productKey) || {}).sale_price_eur);\n  const qty      = num(tx.quantity || tx.qty || 1) || 1;\n  const umsatzBr = num(tx.umsatz_brutto) \u003e 0 ? num(tx.umsatz_brutto) : qty * vkBrutto;\n  if (vkBrutto \u003c= 0 \u0026\u0026 umsatzBr \u003c= 0) { skippedNoPrice++; continue; }\n\n  const key = aggKey(date, machineId, productKey);\n  if (existingKeys.has(key)) { skippedExisting++; continue; }\n\n  const batchIds = clean(tx.batch_id_abgebucht).split(\u0027,\u0027).map(s =\u003e s.trim()).filter(Boolean);\n  let ekBrutto = 0;\n  let mwstEinkauf = 0;\n  if (batchIds.length \u003e 0) {\n    const firstBatch = batchMap.get(batchIds[0]);\n    if (firstBatch) {\n      ekBrutto    = num(firstBatch.unit_cost);\n      mwstEinkauf = num(firstBatch.mwst_satz);\n    }\n  }\n\n  const product    = productMap.get(productKey) || {};\n  const produktart = clean(product.produktart);\n  if (!mwstEinkauf || mwstEinkauf \u003c= 0) mwstEinkauf = mwstVonProduktart(produktart);\n\n  const ekNetto  = mwstEinkauf \u003e 0 ? ekBrutto / (1 + mwstEinkauf / 100) : ekBrutto;\n  const warenein = qty * ekBrutto;\n\n  if (!aggregates.has(key)) {\n    aggregates.set(key, {\n      date, machine_id: machineId, product_key: productKey,\n      mdb_code: clean(tx.mdb_code_extracted || tx.mdb_code),\n      product_slot_id: clean(tx.product_slot_id),\n      nayax_product_name: clean(tx.nayax_product_name || tx.product_name),\n      produktart,\n      qty_sum: 0, umsatz_sum: 0, warenein_sum: 0,\n      vk_weighted: 0, ek_brutto_weighted: 0, ek_netto_weighted: 0, mwst_weighted: 0,\n      batch_missing: false,\n    });\n  }\n  const a = aggregates.get(key);\n  a.qty_sum            += qty;\n  a.umsatz_sum         += umsatzBr;\n  a.warenein_sum       += warenein;\n  a.vk_weighted        += vkBrutto * qty;\n  a.ek_brutto_weighted += ekBrutto * qty;\n  a.ek_netto_weighted  += ekNetto  * qty;\n  a.mwst_weighted      += mwstEinkauf * qty;\n  if (batchIds.length === 0 || ekBrutto === 0) a.batch_missing = true;\n  processed++;\n}\n\nconst now = new Date().toISOString();\nconst out = [];\nfor (const a of aggregates.values()) {\n  const q = a.qty_sum || 1;\n  out.push({\n    json: {\n      date:                  a.date,\n      machine_id:            a.machine_id,\n      mdb_code:              a.mdb_code,\n      product_slot_id:       a.product_slot_id,\n      product_key:           a.product_key,\n      nayax_product_name:    a.nayax_product_name,\n      produktart:            a.produktart,\n      quantity_sold:         a.qty_sum,\n      vk_preis_brutto:       r4(a.vk_weighted / q),\n      umsatz_brutto:         r2(a.umsatz_sum),\n      ek_preis_netto:        r4(a.ek_netto_weighted / q),\n      mwst_satz_einkauf:     r2(a.mwst_weighted / q),\n      ek_preis_brutto:       r4(a.ek_brutto_weighted / q),\n      wareneinsatz_brutto:   r2(a.warenein_sum),\n      guv:                   r2(a.umsatz_sum - a.warenein_sum),\n      kleinunternehmer_aktiv: kleinunternehmerAktiv ? \u0027TRUE\u0027 : \u0027FALSE\u0027,\n      aggregiert_am:         now + (a.batch_missing ? \u0027 [EK-Daten fehlen]\u0027 : \u0027\u0027),\n    }\n  });\n}\n\nif (out.length === 0) {\n  return [];\n}\nreturn out;"
+                                     },
+                      "id":  "7d53fafe-d426-48a0-baa0-69831dac1445",
+                      "name":  "Code - GuV aggregieren",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       1344,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "operation":  "append",
+                                         "documentId":  {
+                                                            "__rl":  true,
+                                                            "mode":  "id",
+                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+                                                        },
+                                         "sheetName":  {
+                                                           "__rl":  true,
+                                                           "mode":  "name",
+                                                           "value":  "GuV_Tagesposten"
+                                                       },
+                                         "columns":  {
+                                                         "mappingMode":  "autoMapInputData",
+                                                         "value":  {
+
+                                                                   },
+                                                         "matchingColumns":  [
+
+                                                                             ],
+                                                         "schema":  [
+
+                                                                    ],
+                                                         "attemptToConvertTypes":  false,
+                                                         "convertFieldsToString":  false
+                                                     },
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "3a753900-d198-44f1-bd33-4a5f04e0bfb8",
+                      "name":  "Append - GuV_Tagesposten",
+                      "type":  "n8n-nodes-base.googleSheets",
+                      "typeVersion":  4.7,
+                      "position":  [
+                                       1568,
+                                       0
+                                   ],
+                      "credentials":  {
+                                          "googleSheetsOAuth2Api":  {
+                                                                        "id":  "6GG86fWHw536Rk36",
+                                                                        "name":  "Google Sheets API"
+                                                                    }
+                                      }
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "const batchRunId = \u0027wf8_\u0027 + new Date().toISOString().slice(0, 10);\n\nreturn $input.all()\n  .filter(item =\u003e !item.json._empty)\n  .map(item =\u003e {\n    const r = item.json;\n    const guvKey = [r.date, r.machine_id, r.product_key].join(\u0027|\u0027);\n    const kleinunternehmer = String(r.kleinunternehmer_aktiv || \u0027\u0027).toUpperCase() === \u0027TRUE\u0027;\n    const art = String(r.produktart || \u0027\u0027).toLowerCase();\n    const vatRate = kleinunternehmer ? 0\n      : (art === \u0027snack\u0027 || art.includes(\u0027snack\u0027) || art === \u0027riegel\u0027 ? 7 : 19);\n    const revenueNet = vatRate === 0\n      ? r.umsatz_brutto\n      : Math.round(r.umsatz_brutto / (1 + vatRate / 100) * 100) / 100;\n\n    return {\n      json: {\n        event_type: \u0027guv_daily\u0027,\n        batch_run_id: batchRunId,\n        data: {\n          guv_key: guvKey,\n          posting_date: r.date,\n          machine_key: String(r.machine_id),\n          mdb_code: r.mdb_code || null,\n          product_key: r.product_key,\n          quantity_sold: r.quantity_sold,\n          revenue_gross: r.umsatz_brutto,\n          revenue_net: revenueNet,\n          cost_of_goods: r.wareneinsatz_brutto,\n          gross_profit: r.guv,\n          source: \u0027wf8_guv_aggregator\u0027\n        }\n      }\n    };\n  });",
+                                         "mode":  "runOnceForAllItems"
+                                     },
+                      "id":  "927036d8-5d1e-452c-99cd-ccc7b76c4d41",
+                      "name":  "Prepare PGW - guv_daily",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       1792,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "workflowId":  {
+                                                            "__rl":  true,
+                                                            "value":  "Sajezv8tJll0CLIv",
+                                                            "mode":  "id"
+                                                        },
+                                         "mode":  "each",
+                                         "options":  {
+                                                         "waitForSubWorkflow":  false
+                                                     }
+                                     },
+                      "id":  "5de6c14a-33ee-4a6f-916f-c430c8f968a4",
+                      "name":  "WF-PGW - guv_daily",
+                      "type":  "n8n-nodes-base.executeWorkflow",
+                      "typeVersion":  1.2,
+                      "position":  [
+                                       2016,
+                                       0
+                                   ]
+                  }
+              ],
+    "connections":  {
+                        "Cron - Taeglich 02:00":  {
+                                                      "main":  [
+                                                                   [
+                                                                       {
+                                                                           "node":  "Read - Verarbeitete_Transaktionen",
+                                                                           "type":  "main",
+                                                                           "index":  0
+                                                                       }
+                                                                   ]
+                                                               ]
+                                                  },
+                        "Read - Verarbeitete_Transaktionen":  {
+                                                                  "main":  [
+                                                                               [
+                                                                                   {
+                                                                                       "node":  "Read - Lagerchargen",
+                                                                                       "type":  "main",
+                                                                                       "index":  0
+                                                                                   }
+                                                                               ]
+                                                                           ]
+                                                              },
+                        "Read - Lagerchargen":  {
+                                                    "main":  [
+                                                                 [
+                                                                     {
+                                                                         "node":  "Read - Produkte",
+                                                                         "type":  "main",
+                                                                         "index":  0
+                                                                     }
+                                                                 ]
+                                                             ]
+                                                },
+                        "Read - Produkte":  {
+                                                "main":  [
+                                                             [
+                                                                 {
+                                                                     "node":  "Read - GuV_Konfiguration",
+                                                                     "type":  "main",
+                                                                     "index":  0
+                                                                 }
+                                                             ]
+                                                         ]
+                                            },
+                        "Read - GuV_Konfiguration":  {
+                                                         "main":  [
+                                                                      [
+                                                                          {
+                                                                              "node":  "Read - GuV_Tagesposten (vorhanden)",
+                                                                              "type":  "main",
+                                                                              "index":  0
+                                                                          }
+                                                                      ]
+                                                                  ]
+                                                     },
+                        "Read - GuV_Tagesposten (vorhanden)":  {
+                                                                   "main":  [
+                                                                                [
+                                                                                    {
+                                                                                        "node":  "Code - GuV aggregieren",
+                                                                                        "type":  "main",
+                                                                                        "index":  0
+                                                                                    }
+                                                                                ]
+                                                                            ]
+                                                               },
+                        "Code - GuV aggregieren":  {
+                                                       "main":  [
+                                                                    [
+                                                                        {
+                                                                            "node":  "Append - GuV_Tagesposten",
+                                                                            "type":  "main",
+                                                                            "index":  0
+                                                                        }
+                                                                    ]
+                                                                ]
+                                                   },
+                        "Append - GuV_Tagesposten":  {
+                                                         "main":  [
+                                                                      [
+                                                                          {
+                                                                              "node":  "Prepare PGW - guv_daily",
+                                                                              "type":  "main",
+                                                                              "index":  0
+                                                                          }
+                                                                      ]
+                                                                  ]
+                                                     },
+                        "Prepare PGW - guv_daily":  {
+                                                        "main":  [
+                                                                     [
+                                                                         {
+                                                                             "node":  "WF-PGW - guv_daily",
+                                                                             "type":  "main",
+                                                                             "index":  0
+                                                                         }
+                                                                     ]
+                                                                 ]
+                                                    }
+                    },
+    "settings":  {
+                     "executionOrder":  "v1"
+                 },
+    "staticData":  {
+                       "node:Cron - Taeglich 02:00":  {
+                                                          "recurrenceRules":  [
+
+                                                                              ]
+                                                      }
+                   },
+    "meta":  null,
+    "pinData":  null,
+    "versionId":  "10a68541-9e1d-465e-8c35-bea8b62f5017",
+    "activeVersionId":  "10a68541-9e1d-465e-8c35-bea8b62f5017",
+    "versionCounter":  25,
+    "triggerCount":  1,
+    "shared":  [
+                   {
+                       "updatedAt":  "2026-05-25T14:37:24.002Z",
+                       "createdAt":  "2026-05-25T14:37:24.002Z",
+                       "role":  "workflow:owner",
+                       "workflowId":  "gyM9rnvUMfnv4x3G",
+                       "projectId":  "68wR1Q9zBUk0Gxhv",
+                       "project":  {
+                                       "updatedAt":  "2026-05-19T17:59:53.408Z",
+                                       "createdAt":  "2026-05-19T16:50:04.773Z",
+                                       "id":  "68wR1Q9zBUk0Gxhv",
+                                       "name":  "Patrick Matthes \u003cpatrickmatthes2609@gmail.com\u003e",
+                                       "type":  "personal",
+                                       "icon":  null,
+                                       "description":  null,
+                                       "creatorId":  "dd26b63a-7133-4afa-995a-0d7d72693aee"
+                                   }
+                   }
+               ],
+    "tags":  [
+
+             ],
+    "activeVersion":  {
+                          "updatedAt":  "2026-05-27T14:51:05.269Z",
+                          "createdAt":  "2026-05-27T14:51:05.269Z",
+                          "versionId":  "10a68541-9e1d-465e-8c35-bea8b62f5017",
+                          "workflowId":  "gyM9rnvUMfnv4x3G",
+                          "nodes":  [
+                                        {
+                                            "parameters":  {
+                                                               "rule":  {
+                                                                            "interval":  [
+                                                                                             {
+                                                                                                 "triggerAtHour":  2
+                                                                                             }
+                                                                                         ]
+                                                                        }
+                                                           },
+                                            "id":  "35b5c4db-6f49-4ae0-b203-00872b1364c9",
+                                            "name":  "Cron - Taeglich 02:00",
+                                            "type":  "n8n-nodes-base.scheduleTrigger",
+                                            "typeVersion":  1.3,
+                                            "position":  [
+                                                             0,
+                                                             0
+                                                         ]
+                                        },
+                                        {
+                                            "parameters":  {
+                                                               "documentId":  {
+                                                                                  "__rl":  true,
+                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                                                                                  "mode":  "list",
+                                                                                  "cachedResultName":  "Automatenlager",
+                                                                                  "cachedResultUrl":  "https://docs.google.com/spreadsheets/d/12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+                                                                              },
+                                                               "sheetName":  {
+                                                                                 "__rl":  true,
+                                                                                 "value":  "Verarbeitete_Transaktionen",
+                                                                                 "mode":  "name",
+                                                                                 "cachedResultName":  "Verarbeitete_Transaktionen"
+                                                                             },
+                                                               "options":  {
+
+                                                                           }
+                                                           },
+                                            "id":  "f1e26403-8991-4d95-8f19-c580044fb151",
+                                            "name":  "Read - Verarbeitete_Transaktionen",
+                                            "type":  "n8n-nodes-base.googleSheets",
+                                            "typeVersion":  4.7,
+                                            "position":  [
+                                                             224,
+                                                             0
+                                                         ],
+                                            "credentials":  {
+                                                                "googleSheetsOAuth2Api":  {
+                                                                                              "id":  "6GG86fWHw536Rk36",
+                                                                                              "name":  "Google Sheets API"
+                                                                                          }
+                                                            }
+                                        },
+                                        {
+                                            "parameters":  {
+                                                               "documentId":  {
+                                                                                  "__rl":  true,
+                                                                                  "mode":  "id",
+                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+                                                                              },
+                                                               "sheetName":  {
+                                                                                 "__rl":  true,
+                                                                                 "mode":  "name",
+                                                                                 "value":  "Lagerchargen"
+                                                                             },
+                                                               "options":  {
+
+                                                                           }
+                                                           },
+                                            "id":  "ffbd4c31-7944-4e95-84ce-398799a47efd",
+                                            "name":  "Read - Lagerchargen",
+                                            "type":  "n8n-nodes-base.googleSheets",
+                                            "typeVersion":  4.7,
+                                            "position":  [
+                                                             448,
+                                                             0
+                                                         ],
+                                            "executeOnce":  true,
+                                            "credentials":  {
+                                                                "googleSheetsOAuth2Api":  {
+                                                                                              "id":  "6GG86fWHw536Rk36",
+                                                                                              "name":  "Google Sheets API"
+                                                                                          }
+                                                            }
+                                        },
+                                        {
+                                            "parameters":  {
+                                                               "documentId":  {
+                                                                                  "__rl":  true,
+                                                                                  "mode":  "id",
+                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+                                                                              },
+                                                               "sheetName":  {
+                                                                                 "__rl":  true,
+                                                                                 "mode":  "name",
+                                                                                 "value":  "Produkte"
+                                                                             },
+                                                               "options":  {
+
+                                                                           }
+                                                           },
+                                            "id":  "eb11257a-2d65-4086-aef4-af28b819f035",
+                                            "name":  "Read - Produkte",
+                                            "type":  "n8n-nodes-base.googleSheets",
+                                            "typeVersion":  4.7,
+                                            "position":  [
+                                                             672,
+                                                             0
+                                                         ],
+                                            "executeOnce":  true,
+                                            "credentials":  {
+                                                                "googleSheetsOAuth2Api":  {
+                                                                                              "id":  "6GG86fWHw536Rk36",
+                                                                                              "name":  "Google Sheets API"
+                                                                                          }
+                                                            }
+                                        },
+                                        {
+                                            "parameters":  {
+                                                               "documentId":  {
+                                                                                  "__rl":  true,
+                                                                                  "mode":  "id",
+                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+                                                                              },
+                                                               "sheetName":  {
+                                                                                 "__rl":  true,
+                                                                                 "mode":  "name",
+                                                                                 "value":  "GuV_Konfiguration"
+                                                                             },
+                                                               "options":  {
+
+                                                                           }
+                                                           },
+                                            "id":  "9847a7bb-83a4-481b-8bc5-f43405ae3505",
+                                            "name":  "Read - GuV_Konfiguration",
+                                            "type":  "n8n-nodes-base.googleSheets",
+                                            "typeVersion":  4.7,
+                                            "position":  [
+                                                             896,
+                                                             0
+                                                         ],
+                                            "executeOnce":  true,
+                                            "credentials":  {
+                                                                "googleSheetsOAuth2Api":  {
+                                                                                              "id":  "6GG86fWHw536Rk36",
+                                                                                              "name":  "Google Sheets API"
+                                                                                          }
+                                                            }
+                                        },
+                                        {
+                                            "parameters":  {
+                                                               "documentId":  {
+                                                                                  "__rl":  true,
+                                                                                  "mode":  "id",
+                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+                                                                              },
+                                                               "sheetName":  {
+                                                                                 "__rl":  true,
+                                                                                 "mode":  "name",
+                                                                                 "value":  "GuV_Tagesposten"
+                                                                             },
+                                                               "options":  {
+
+                                                                           }
+                                                           },
+                                            "id":  "7e6d3694-d36d-4fce-9af1-a30e9077acf5",
+                                            "name":  "Read - GuV_Tagesposten (vorhanden)",
+                                            "type":  "n8n-nodes-base.googleSheets",
+                                            "typeVersion":  4.7,
+                                            "position":  [
+                                                             1120,
+                                                             0
+                                                         ],
+                                            "executeOnce":  true,
+                                            "alwaysOutputData":  true,
+                                            "credentials":  {
+                                                                "googleSheetsOAuth2Api":  {
+                                                                                              "id":  "6GG86fWHw536Rk36",
+                                                                                              "name":  "Google Sheets API"
+                                                                                          }
+                                                            }
+                                        },
+                                        {
+                                            "parameters":  {
+                                                               "jsCode":  "const transactions = $items(\u0027Read - Verarbeitete_Transaktionen\u0027).map(i =\u003e i.json);\nconst batches      = $items(\u0027Read - Lagerchargen\u0027).map(i =\u003e i.json);\nconst products     = $items(\u0027Read - Produkte\u0027).map(i =\u003e i.json);\nconst config       = $items(\u0027Read - GuV_Konfiguration\u0027).map(i =\u003e i.json)[0] || {};\nconst existingGuV  = $items(\u0027Read - GuV_Tagesposten (vorhanden)\u0027).map(i =\u003e i.json);\n\nfunction clean(v) { return String(v == null ? \u0027\u0027 : v).trim(); }\nfunction num(v)   { const n = Number(String(v ?? \u0027\u0027).replace(\u0027,\u0027, \u0027.\u0027)); return Number.isFinite(n) ? n : 0; }\nfunction r2(n)    { return Number.isFinite(n) ? Math.round(n * 100)   / 100   : 0; }\nfunction r4(n)    { return Number.isFinite(n) ? Math.round(n * 10000) / 10000 : 0; }\n\nconst kleinunternehmerAktiv = clean(config.kleinunternehmer_aktiv).toUpperCase() === \u0027TRUE\u0027;\nconst mwstSnack    = num(config.mwst_snack)    || 7;\nconst mwstGetraenk = num(config.mwst_getraenk) || 19;\n\nfunction mwstVonProduktart(art) {\n  const a = clean(art).toLowerCase();\n  if (a === \u0027snack\u0027 || a.includes(\u0027snack\u0027) || a === \u0027riegel\u0027) return mwstSnack;\n  if (a === \u0027getraenk\u0027 || a.includes(\u0027getraenk\u0027) || a.includes(\u0027drink\u0027)) return mwstGetraenk;\n  return mwstGetraenk;\n}\n\nconst batchMap = new Map();\nfor (const b of batches) {\n  const id = clean(b.batch_id);\n  if (id) batchMap.set(id, b);\n}\n\nconst productMap = new Map();\nfor (const p of products) {\n  const k = clean(p.product_key);\n  if (k) productMap.set(k, p);\n}\n\nfunction aggKey(date, machineId, productKey) { return date + \u0027|\u0027 + machineId + \u0027|\u0027 + productKey; }\nconst existingKeys = new Set();\nfor (const r of existingGuV) {\n  const d = clean(r.date), m = clean(r.machine_id), p = clean(r.product_key);\n  if (d \u0026\u0026 m \u0026\u0026 p) existingKeys.add(aggKey(d, m, p));\n}\n\nfunction deriveDate(tx) {\n  const ts = clean(tx.settlement_datetime_gmt || tx.sale_date || tx.timestamp || tx.processed_at);\n  if (!ts) return \u0027\u0027;\n  const m = ts.match(/^(\\d{4}-\\d{2}-\\d{2})/);\n  if (!m) return \u0027\u0027;\n  if (m[1].startsWith(\u00272001-\u0027)) return \u0027\u0027; // Sentinel-Wert\n  return m[1];\n}\n\nconst aggregates = new Map();\nlet skippedStatus = 0, skippedNoPrice = 0, skippedExisting = 0, skippedInvalid = 0, processed = 0;\n\nfor (const tx of transactions) {\n  const status = clean(tx.status).toUpperCase();\n  if (status \u0026\u0026 status !== \u0027OK\u0027) { skippedStatus++; continue; }\n\n  const date      = deriveDate(tx);\n  const machineId  = clean(tx.machine_id);\n  const productKey = clean(tx.product_key);\n  if (!date || !machineId || !productKey) { skippedInvalid++; continue; }\n\n  const vkBrutto = num(tx.vk_preis_brutto) || num((productMap.get(productKey) || {}).sale_price_eur);\n  const qty      = num(tx.quantity || tx.qty || 1) || 1;\n  const umsatzBr = num(tx.umsatz_brutto) \u003e 0 ? num(tx.umsatz_brutto) : qty * vkBrutto;\n  if (vkBrutto \u003c= 0 \u0026\u0026 umsatzBr \u003c= 0) { skippedNoPrice++; continue; }\n\n  const key = aggKey(date, machineId, productKey);\n  if (existingKeys.has(key)) { skippedExisting++; continue; }\n\n  const batchIds = clean(tx.batch_id_abgebucht).split(\u0027,\u0027).map(s =\u003e s.trim()).filter(Boolean);\n  let ekBrutto = 0;\n  let mwstEinkauf = 0;\n  if (batchIds.length \u003e 0) {\n    const firstBatch = batchMap.get(batchIds[0]);\n    if (firstBatch) {\n      ekBrutto    = num(firstBatch.unit_cost);\n      mwstEinkauf = num(firstBatch.mwst_satz);\n    }\n  }\n\n  const product    = productMap.get(productKey) || {};\n  const produktart = clean(product.produktart);\n  if (!mwstEinkauf || mwstEinkauf \u003c= 0) mwstEinkauf = mwstVonProduktart(produktart);\n\n  const ekNetto  = mwstEinkauf \u003e 0 ? ekBrutto / (1 + mwstEinkauf / 100) : ekBrutto;\n  const warenein = qty * ekBrutto;\n\n  if (!aggregates.has(key)) {\n    aggregates.set(key, {\n      date, machine_id: machineId, product_key: productKey,\n      mdb_code: clean(tx.mdb_code_extracted || tx.mdb_code),\n      product_slot_id: clean(tx.product_slot_id),\n      nayax_product_name: clean(tx.nayax_product_name || tx.product_name),\n      produktart,\n      qty_sum: 0, umsatz_sum: 0, warenein_sum: 0,\n      vk_weighted: 0, ek_brutto_weighted: 0, ek_netto_weighted: 0, mwst_weighted: 0,\n      batch_missing: false,\n    });\n  }\n  const a = aggregates.get(key);\n  a.qty_sum            += qty;\n  a.umsatz_sum         += umsatzBr;\n  a.warenein_sum       += warenein;\n  a.vk_weighted        += vkBrutto * qty;\n  a.ek_brutto_weighted += ekBrutto * qty;\n  a.ek_netto_weighted  += ekNetto  * qty;\n  a.mwst_weighted      += mwstEinkauf * qty;\n  if (batchIds.length === 0 || ekBrutto === 0) a.batch_missing = true;\n  processed++;\n}\n\nconst now = new Date().toISOString();\nconst out = [];\nfor (const a of aggregates.values()) {\n  const q = a.qty_sum || 1;\n  out.push({\n    json: {\n      date:                  a.date,\n      machine_id:            a.machine_id,\n      mdb_code:              a.mdb_code,\n      product_slot_id:       a.product_slot_id,\n      product_key:           a.product_key,\n      nayax_product_name:    a.nayax_product_name,\n      produktart:            a.produktart,\n      quantity_sold:         a.qty_sum,\n      vk_preis_brutto:       r4(a.vk_weighted / q),\n      umsatz_brutto:         r2(a.umsatz_sum),\n      ek_preis_netto:        r4(a.ek_netto_weighted / q),\n      mwst_satz_einkauf:     r2(a.mwst_weighted / q),\n      ek_preis_brutto:       r4(a.ek_brutto_weighted / q),\n      wareneinsatz_brutto:   r2(a.warenein_sum),\n      guv:                   r2(a.umsatz_sum - a.warenein_sum),\n      kleinunternehmer_aktiv: kleinunternehmerAktiv ? \u0027TRUE\u0027 : \u0027FALSE\u0027,\n      aggregiert_am:         now + (a.batch_missing ? \u0027 [EK-Daten fehlen]\u0027 : \u0027\u0027),\n    }\n  });\n}\n\nif (out.length === 0) {\n  return [];\n}\nreturn out;"
+                                                           },
+                                            "id":  "7d53fafe-d426-48a0-baa0-69831dac1445",
+                                            "name":  "Code - GuV aggregieren",
+                                            "type":  "n8n-nodes-base.code",
+                                            "typeVersion":  2,
+                                            "position":  [
+                                                             1344,
+                                                             0
+                                                         ]
+                                        },
+                                        {
+                                            "parameters":  {
+                                                               "operation":  "append",
+                                                               "documentId":  {
+                                                                                  "__rl":  true,
+                                                                                  "mode":  "id",
+                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo"
+                                                                              },
+                                                               "sheetName":  {
+                                                                                 "__rl":  true,
+                                                                                 "mode":  "name",
+                                                                                 "value":  "GuV_Tagesposten"
+                                                                             },
+                                                               "columns":  {
+                                                                               "mappingMode":  "autoMapInputData",
+                                                                               "value":  {
+
+                                                                                         },
+                                                                               "matchingColumns":  [
+
+                                                                                                   ],
+                                                                               "schema":  [
+
+                                                                                          ],
+                                                                               "attemptToConvertTypes":  false,
+                                                                               "convertFieldsToString":  false
+                                                                           },
+                                                               "options":  {
+
+                                                                           }
+                                                           },
+                                            "id":  "3a753900-d198-44f1-bd33-4a5f04e0bfb8",
+                                            "name":  "Append - GuV_Tagesposten",
+                                            "type":  "n8n-nodes-base.googleSheets",
+                                            "typeVersion":  4.7,
+                                            "position":  [
+                                                             1568,
+                                                             0
+                                                         ],
+                                            "credentials":  {
+                                                                "googleSheetsOAuth2Api":  {
+                                                                                              "id":  "6GG86fWHw536Rk36",
+                                                                                              "name":  "Google Sheets API"
+                                                                                          }
+                                                            }
+                                        },
+                                        {
+                                            "parameters":  {
+                                                               "jsCode":  "const batchRunId = \u0027wf8_\u0027 + new Date().toISOString().slice(0, 10);\n\nreturn $input.all()\n  .filter(item =\u003e !item.json._empty)\n  .map(item =\u003e {\n    const r = item.json;\n    const guvKey = [r.date, r.machine_id, r.product_key].join(\u0027|\u0027);\n    const kleinunternehmer = String(r.kleinunternehmer_aktiv || \u0027\u0027).toUpperCase() === \u0027TRUE\u0027;\n    const art = String(r.produktart || \u0027\u0027).toLowerCase();\n    const vatRate = kleinunternehmer ? 0\n      : (art === \u0027snack\u0027 || art.includes(\u0027snack\u0027) || art === \u0027riegel\u0027 ? 7 : 19);\n    const revenueNet = vatRate === 0\n      ? r.umsatz_brutto\n      : Math.round(r.umsatz_brutto / (1 + vatRate / 100) * 100) / 100;\n\n    return {\n      json: {\n        event_type: \u0027guv_daily\u0027,\n        batch_run_id: batchRunId,\n        data: {\n          guv_key: guvKey,\n          posting_date: r.date,\n          machine_key: String(r.machine_id),\n          mdb_code: r.mdb_code || null,\n          product_key: r.product_key,\n          quantity_sold: r.quantity_sold,\n          revenue_gross: r.umsatz_brutto,\n          revenue_net: revenueNet,\n          cost_of_goods: r.wareneinsatz_brutto,\n          gross_profit: r.guv,\n          source: \u0027wf8_guv_aggregator\u0027\n        }\n      }\n    };\n  });",
+                                                               "mode":  "runOnceForAllItems"
+                                                           },
+                                            "id":  "927036d8-5d1e-452c-99cd-ccc7b76c4d41",
+                                            "name":  "Prepare PGW - guv_daily",
+                                            "type":  "n8n-nodes-base.code",
+                                            "typeVersion":  2,
+                                            "position":  [
+                                                             1792,
+                                                             0
+                                                         ]
+                                        },
+                                        {
+                                            "parameters":  {
+                                                               "workflowId":  {
+                                                                                  "__rl":  true,
+                                                                                  "value":  "Sajezv8tJll0CLIv",
+                                                                                  "mode":  "id"
+                                                                              },
+                                                               "mode":  "each",
+                                                               "options":  {
+                                                                               "waitForSubWorkflow":  false
+                                                                           }
+                                                           },
+                                            "id":  "5de6c14a-33ee-4a6f-916f-c430c8f968a4",
+                                            "name":  "WF-PGW - guv_daily",
+                                            "type":  "n8n-nodes-base.executeWorkflow",
+                                            "typeVersion":  1.2,
+                                            "position":  [
+                                                             2016,
+                                                             0
+                                                         ]
+                                        }
+                                    ],
+                          "connections":  {
+                                              "Cron - Taeglich 02:00":  {
+                                                                            "main":  [
+                                                                                         [
+                                                                                             {
+                                                                                                 "node":  "Read - Verarbeitete_Transaktionen",
+                                                                                                 "type":  "main",
+                                                                                                 "index":  0
+                                                                                             }
+                                                                                         ]
+                                                                                     ]
+                                                                        },
+                                              "Read - Verarbeitete_Transaktionen":  {
+                                                                                        "main":  [
+                                                                                                     [
+                                                                                                         {
+                                                                                                             "node":  "Read - Lagerchargen",
+                                                                                                             "type":  "main",
+                                                                                                             "index":  0
+                                                                                                         }
+                                                                                                     ]
+                                                                                                 ]
+                                                                                    },
+                                              "Read - Lagerchargen":  {
+                                                                          "main":  [
+                                                                                       [
+                                                                                           {
+                                                                                               "node":  "Read - Produkte",
+                                                                                               "type":  "main",
+                                                                                               "index":  0
+                                                                                           }
+                                                                                       ]
+                                                                                   ]
+                                                                      },
+                                              "Read - Produkte":  {
+                                                                      "main":  [
+                                                                                   [
+                                                                                       {
+                                                                                           "node":  "Read - GuV_Konfiguration",
+                                                                                           "type":  "main",
+                                                                                           "index":  0
+                                                                                       }
+                                                                                   ]
+                                                                               ]
+                                                                  },
+                                              "Read - GuV_Konfiguration":  {
+                                                                               "main":  [
+                                                                                            [
+                                                                                                {
+                                                                                                    "node":  "Read - GuV_Tagesposten (vorhanden)",
+                                                                                                    "type":  "main",
+                                                                                                    "index":  0
+                                                                                                }
+                                                                                            ]
+                                                                                        ]
+                                                                           },
+                                              "Read - GuV_Tagesposten (vorhanden)":  {
+                                                                                         "main":  [
+                                                                                                      [
+                                                                                                          {
+                                                                                                              "node":  "Code - GuV aggregieren",
+                                                                                                              "type":  "main",
+                                                                                                              "index":  0
+                                                                                                          }
+                                                                                                      ]
+                                                                                                  ]
+                                                                                     },
+                                              "Code - GuV aggregieren":  {
+                                                                             "main":  [
+                                                                                          [
+                                                                                              {
+                                                                                                  "node":  "Append - GuV_Tagesposten",
+                                                                                                  "type":  "main",
+                                                                                                  "index":  0
+                                                                                              }
+                                                                                          ]
+                                                                                      ]
+                                                                         },
+                                              "Append - GuV_Tagesposten":  {
+                                                                               "main":  [
+                                                                                            [
+                                                                                                {
+                                                                                                    "node":  "Prepare PGW - guv_daily",
+                                                                                                    "type":  "main",
+                                                                                                    "index":  0
+                                                                                                }
+                                                                                            ]
+                                                                                        ]
+                                                                           },
+                                              "Prepare PGW - guv_daily":  {
+                                                                              "main":  [
+                                                                                           [
+                                                                                               {
+                                                                                                   "node":  "WF-PGW - guv_daily",
+                                                                                                   "type":  "main",
+                                                                                                   "index":  0
+                                                                                               }
+                                                                                           ]
+                                                                                       ]
+                                                                          }
+                                          },
+                          "authors":  "Patrick Matthes",
+                          "name":  null,
+                          "description":  null,
+                          "autosaved":  false,
+                          "workflowPublishHistory":  [
+                                                         {
+                                                             "createdAt":  "2026-05-27T14:51:05.292Z",
+                                                             "id":  114,
+                                                             "workflowId":  "gyM9rnvUMfnv4x3G",
+                                                             "versionId":  "10a68541-9e1d-465e-8c35-bea8b62f5017",
+                                                             "event":  "deactivated",
+                                                             "userId":  "dd26b63a-7133-4afa-995a-0d7d72693aee"
+                                                         },
+                                                         {
+                                                             "createdAt":  "2026-05-27T14:51:05.303Z",
+                                                             "id":  115,
+                                                             "workflowId":  "gyM9rnvUMfnv4x3G",
+                                                             "versionId":  "10a68541-9e1d-465e-8c35-bea8b62f5017",
+                                                             "event":  "activated",
+                                                             "userId":  "dd26b63a-7133-4afa-995a-0d7d72693aee"
+                                                         },
+                                                         {
+                                                             "createdAt":  "2026-05-27T14:51:05.340Z",
+                                                             "id":  116,
+                                                             "workflowId":  "gyM9rnvUMfnv4x3G",
+                                                             "versionId":  "10a68541-9e1d-465e-8c35-bea8b62f5017",
+                                                             "event":  "deactivated",
+                                                             "userId":  "dd26b63a-7133-4afa-995a-0d7d72693aee"
+                                                         },
+                                                         {
+                                                             "createdAt":  "2026-05-27T14:51:05.390Z",
+                                                             "id":  117,
+                                                             "workflowId":  "gyM9rnvUMfnv4x3G",
+                                                             "versionId":  "10a68541-9e1d-465e-8c35-bea8b62f5017",
+                                                             "event":  "activated",
+                                                             "userId":  "dd26b63a-7133-4afa-995a-0d7d72693aee"
+                                                         }
+                                                     ]
+                      }
 }
