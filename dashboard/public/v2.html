@@ -32,6 +32,10 @@
           <span class="v2-refill-btn-icon" aria-hidden="true">↓</span>
           Nachfüllen
         </button>
+        <button class="v2-slot-change-btn" id="v2SlotChangeOpen" aria-haspopup="dialog" aria-expanded="false">
+          <span class="v2-slot-change-btn-icon" aria-hidden="true">⇄</span>
+          Produktwechsel
+        </button>
       </aside>
 
       <!-- Refill Drawer -->
@@ -124,6 +128,93 @@
               </button>
               <div class="v2-refill-result-box" id="v2RefillResultBox"></div>
               <button class="v2-refill-back" id="v2RefillBackToDetails" aria-label="Zurück zu Details" style="margin-top:14px">←</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slot-Change Drawer -->
+      <div class="v2-slot-change-backdrop" id="v2SlotChangeBackdrop" hidden role="dialog" aria-modal="true" aria-label="Produktwechsel">
+        <div class="v2-slot-change-drawer">
+          <div class="v2-sc-head">
+            <div class="v2-sc-head-top">
+              <p class="v2-sc-title">Produktwechsel</p>
+              <button class="v2-sc-close" id="v2SlotChangeClose" aria-label="Schließen">✕</button>
+            </div>
+            <div class="v2-sc-steps" role="list" aria-label="Schritte">
+              <div class="v2-sc-step-tab active" id="v2ScStepTab1" role="listitem"><span class="v2-sc-step-num">1</span><span>Suche</span></div>
+              <span class="v2-sc-step-arrow" aria-hidden="true">›</span>
+              <div class="v2-sc-step-tab" id="v2ScStepTab2" role="listitem"><span class="v2-sc-step-num">2</span><span>Produkt</span></div>
+              <span class="v2-sc-step-arrow" aria-hidden="true">›</span>
+              <div class="v2-sc-step-tab" id="v2ScStepTab3" role="listitem"><span class="v2-sc-step-num">3</span><span>Bestätigen</span></div>
+              <span class="v2-sc-step-arrow" aria-hidden="true">›</span>
+              <div class="v2-sc-step-tab" id="v2ScStepTab4" role="listitem"><span class="v2-sc-step-num">4</span><span>Ergebnis</span></div>
+            </div>
+          </div>
+          <div class="v2-sc-body">
+            <!-- Step 1: Search -->
+            <div id="v2SlotChangeStep1">
+              <div class="v2-sc-search-wrap">
+                <svg class="v2-sc-search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.5"/>
+                  <path d="M10 10l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                <input class="v2-sc-search-input" id="v2ScSearch" type="search"
+                  placeholder="Produkt, Automat oder MDB-Code …"
+                  autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Slot suchen">
+              </div>
+              <p class="v2-sc-search-hint">Mindestens 2 Zeichen eingeben.</p>
+              <div id="v2ScResults" class="v2-sc-results" role="listbox" aria-label="Suchergebnisse"></div>
+            </div>
+            <!-- Step 2: Product & Qty -->
+            <div id="v2SlotChangeStep2" hidden>
+              <div class="v2-sc-slot-head">
+                <button class="v2-sc-back-circle" id="v2ScBack" aria-label="Zurück zur Suche">←</button>
+                <p class="v2-sc-slot-eyebrow">Aktueller Slot</p>
+              </div>
+              <div class="v2-sc-current-card" id="v2ScCurrentSlot"></div>
+              <div class="v2-sc-form">
+                <div class="v2-sc-field">
+                  <label class="v2-sc-label" for="v2ScProductSelect">Neues Produkt</label>
+                  <div class="v2-sc-select-wrap">
+                    <select class="v2-sc-select" id="v2ScProductSelect" aria-label="Neues Produkt auswählen">
+                      <option value="">— Produkt wählen —</option>
+                    </select>
+                    <svg class="v2-sc-select-caret" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+                      <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </div>
+                </div>
+                <div class="v2-sc-field-row">
+                  <div class="v2-sc-field">
+                    <label class="v2-sc-label" for="v2ScNewQty">Startmenge</label>
+                    <input class="v2-sc-number-input" id="v2ScNewQty" type="number" min="0" step="1" placeholder="0" aria-label="Neue Startmenge">
+                  </div>
+                  <div class="v2-sc-field">
+                    <label class="v2-sc-label" for="v2ScStartDate">Wechsel ab</label>
+                    <input class="v2-sc-date-input" id="v2ScStartDate" type="date" aria-label="Startdatum">
+                  </div>
+                </div>
+                <div class="v2-sc-readonly-notice" id="v2ScReadonlyNotice" hidden>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M7 4v3.5M7 9.5v.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                  Nur Admin kann Produktwechsel durchführen.
+                </div>
+                <button class="v2-sc-primary-btn" id="v2ScToStep3" disabled>Weiter zur Bestätigung →</button>
+              </div>
+            </div>
+            <!-- Step 3: Confirm -->
+            <div id="v2SlotChangeStep3" hidden>
+              <p class="v2-sc-section-eyebrow">Zusammenfassung</p>
+              <div class="v2-sc-confirm-summary" id="v2ScConfirmSummary"></div>
+              <div class="v2-sc-action-row">
+                <button class="v2-sc-ghost-btn" id="v2ScBackFromStep3">← Zurück</button>
+                <button class="v2-sc-confirm-btn" id="v2ScConfirmBtn">Wechsel durchführen</button>
+              </div>
+            </div>
+            <!-- Step 4: Result -->
+            <div id="v2SlotChangeStep4" hidden>
+              <div class="v2-sc-result-card" id="v2ScResultMsg"></div>
+              <button class="v2-sc-ghost-btn v2-sc-full" id="v2ScDoneBtn">Schließen</button>
             </div>
           </div>
         </div>

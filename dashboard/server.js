@@ -8,6 +8,7 @@ const { buildInventoryMhdData, queryInventoryMhdPg } = require('./lib/inventory-
 const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/assortment-slots.js');
 const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = require('./lib/overview-monitoring.js');
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
+const { buildSlotChangePreview, validateSlotChange, buildSlotChangePayload, buildSlotChangeAuditEntry } = require('./lib/slot-change.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -1757,6 +1758,125 @@ const server = http.createServer(async (req, res) => {
         status_ref: auditEntry.status_ref,
         message: wfResult.message,
         ...(wfResult.ok ? {} : { error: { code: 'WF7_ERROR', message: wfResult.message } }),
+      });
+      return;
+    }
+
+    // ── Slot-Change routes ────────────────────────────────────────────────────
+
+    if (parsed.pathname === '/api/v2/slot-change/preview' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      const slotAssignmentId = clean(parsed.query.slot_assignment_id || '');
+      const machineId = clean(parsed.query.machine_id || '');
+      const mdbCode = parseInt(clean(parsed.query.mdb_code || ''), 10);
+      if (!slotAssignmentId && (!machineId || !mdbCode)) {
+        sendJson(res, 400, { ok: false, error: { code: 'MISSING_PARAMS', message: 'slot_assignment_id oder machine_id+mdb_code erforderlich.' } });
+        return;
+      }
+      try {
+        const { Client } = require('pg');
+        const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
+        await client.connect();
+        const whereClause = slotAssignmentId
+          ? 'sa.slot_assignment_id = $1'
+          : 'sa.machine_id = $1 AND sa.mdb_code = $2 AND sa.active = true';
+        const queryParams = slotAssignmentId ? [slotAssignmentId] : [machineId, mdbCode];
+        const slotResult = await client.query(
+          `SELECT sa.slot_assignment_id, sa.machine_id::text AS machine_id,
+                  m.name AS machine_label, sa.mdb_code, sa.product_id,
+                  p.name AS product_name, sa.current_machine_qty,
+                  sa.target_stock, sa.machine_capacity,
+                  l.name AS location_name
+             FROM automatenlager.slot_assignments sa
+             JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
+             JOIN automatenlager.locations l ON l.location_id = m.location_id
+             JOIN automatenlager.products p ON p.product_id = sa.product_id
+            WHERE ${whereClause}
+            LIMIT 1`,
+          queryParams,
+        );
+        if (!slotResult.rows.length) {
+          await client.end();
+          sendJson(res, 404, { ok: false, error: { code: 'SLOT_NOT_FOUND', message: 'Slot nicht gefunden.' } });
+          return;
+        }
+        const productResult = await client.query(
+          'SELECT product_id, name FROM automatenlager.products WHERE active = true ORDER BY name',
+        );
+        await client.end();
+        const preview = buildSlotChangePreview(slotResult.rows[0], productResult.rows);
+        sendJson(res, 200, { ok: true, ...preview });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    if (parsed.pathname === '/api/v2/slot-change/confirm' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        auditGuestAccess(viewer, 'slot_change_denied', {});
+        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer dürfen keinen Produktwechsel durchführen.' } });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await new Promise((resolve, reject) => {
+          let data = '';
+          req.on('data', (chunk) => { data += chunk; });
+          req.on('end', () => { try { resolve(data); } catch (e) { reject(e); } });
+          req.on('error', reject);
+        }));
+      } catch {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON.' } });
+        return;
+      }
+      const { slot_assignment_id, machine_id, mdb_code, new_product_id, new_qty, start_date } = body || {};
+      if (!machine_id || !mdb_code || !new_product_id || !start_date) {
+        sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: 'machine_id, mdb_code, new_product_id, start_date erforderlich.' } });
+        return;
+      }
+      const validation = validateSlotChange({ new_product_id, new_qty, start_date });
+      if (!validation.valid) {
+        sendJson(res, 400, { ok: false, error: { code: 'VALIDATION_ERROR', message: validation.errors.map((e) => e.message).join(' '), errors: validation.errors } });
+        return;
+      }
+      const slotRow = { slot_assignment_id, machine_id, mdb_code: Number(mdb_code), product_id: 0 };
+      const payload = buildSlotChangePayload(slotRow, { new_product_id, new_qty: Number(new_qty ?? 0), start_date });
+      const webhookUrl = process.env.SLOT_CHANGE_WEBHOOK_URL;
+      let wfResult = { ok: true, status_ref: `sc-${Date.now()}`, message: 'Payload protokolliert.' };
+      if (webhookUrl) {
+        try {
+          const wfResponse = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payload, triggered_by: viewer.login }),
+          });
+          const wfText = await wfResponse.text();
+          wfResult = {
+            ok: wfResponse.ok,
+            status_ref: `sc-${Date.now()}`,
+            message: wfResponse.ok ? 'Webhook erfolgreich.' : `Webhook antwortete ${wfResponse.status}: ${wfText.slice(0, 200)}`,
+          };
+        } catch (err) {
+          wfResult = { ok: false, status_ref: null, message: `Webhook nicht erreichbar: ${err.message}` };
+        }
+      }
+      const auditEntry = buildSlotChangeAuditEntry(viewer, payload, wfResult);
+      const auditPath = path.join(__dirname, 'logs', 'slot-change-actions.jsonl');
+      try {
+        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
+        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
+      } catch { /* audit write failure must not block response */ }
+      sendJson(res, wfResult.ok ? 200 : 502, {
+        ok: wfResult.ok,
+        status_ref: auditEntry.status_ref,
+        message: wfResult.message,
+        ...(wfResult.ok ? {} : { error: { code: 'WEBHOOK_ERROR', message: wfResult.message } }),
       });
       return;
     }

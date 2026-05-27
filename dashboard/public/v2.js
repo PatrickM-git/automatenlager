@@ -967,3 +967,225 @@ initInventoryMhd();
 initAssortmentSlots();
 initEconomics();
 initRefillDrawer();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Slot-Change Drawer
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function initSlotChangeDrawer() {
+  'use strict';
+
+  let _slot = null;
+  let _searchTimer = null;
+
+  function esc(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function $(id) { return document.getElementById(id); }
+
+  function openSlotChangeDrawer() {
+    const backdrop = $('v2SlotChangeBackdrop');
+    if (!backdrop) return;
+    backdrop.hidden = false;
+    $('v2SlotChangeOpen')?.setAttribute('aria-expanded', 'true');
+    showSlotChangeStep(1);
+    _slot = null;
+    const search = $('v2ScSearch');
+    if (search) { search.value = ''; search.focus(); }
+    const results = $('v2ScResults');
+    if (results) results.innerHTML = '';
+  }
+
+  function closeSlotChangeDrawer() {
+    const backdrop = $('v2SlotChangeBackdrop');
+    if (!backdrop) return;
+    backdrop.hidden = true;
+    $('v2SlotChangeOpen')?.setAttribute('aria-expanded', 'false');
+    _slot = null;
+  }
+
+  function showSlotChangeStep(n) {
+    [1, 2, 3, 4].forEach((i) => {
+      const step = $(`v2SlotChangeStep${i}`);
+      const tab  = $(`v2ScStepTab${i}`);
+      if (step) step.hidden = i !== n;
+      if (tab)  { tab.classList.toggle('active', i === n); tab.classList.toggle('done', i < n); }
+    });
+  }
+
+  function handleSlotChangeSearch() {
+    const q = ($('v2ScSearch')?.value ?? '').trim();
+    const resultsEl = $('v2ScResults');
+    if (!resultsEl) return;
+    if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+    resultsEl.innerHTML = '<p class="v2-sc-hint">Suche läuft…</p>';
+    fetch(`/api/v2/refill/search?q=${encodeURIComponent(q)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.ok || !data.results?.length) {
+          resultsEl.innerHTML = '<p class="v2-sc-hint">Keine Slots gefunden.</p>';
+          return;
+        }
+        resultsEl.innerHTML = data.results.map((s) => `
+          <div class="v2-sc-result-item" role="option" tabindex="0"
+            data-sid="${esc(s.slot_assignment_id ?? '')}"
+            data-machine="${esc(s.machine_id)}"
+            data-mdb="${esc(s.mdb_code)}"
+            data-pid="${esc(s.product_id)}"
+            data-pname="${esc(s.product_name)}"
+            data-mlabel="${esc(s.machine_label || s.machine_id)}"
+            data-loc="${esc(s.location_name || '')}"
+            data-qty="${s.current_machine_qty ?? 0}"
+            data-cap="${s.capacity ?? s.target_stock ?? 0}">
+            <div class="v2-sc-result-name">${esc(s.product_name)}</div>
+            <div class="v2-sc-result-sub">${esc(s.machine_label || s.machine_id)} · MDB ${esc(s.mdb_code)} · ${esc(s.location_name || '')}</div>
+          </div>`).join('');
+        resultsEl.querySelectorAll('.v2-sc-result-item').forEach((el) => {
+          el.addEventListener('click', () => onSlotSelect(el));
+          el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') onSlotSelect(el); });
+        });
+      })
+      .catch(() => { resultsEl.innerHTML = '<p class="v2-sc-hint">Fehler bei der Suche.</p>'; });
+  }
+
+  function onSlotSelect(el) {
+    _slot = {
+      slot_assignment_id: el.dataset.sid || null,
+      machine_id: el.dataset.machine,
+      mdb_code: el.dataset.mdb,
+      product_id: el.dataset.pid,
+      product_name: el.dataset.pname,
+      machine_label: el.dataset.mlabel,
+      location_name: el.dataset.loc,
+      current_machine_qty: Number(el.dataset.qty),
+      capacity: Number(el.dataset.cap),
+    };
+    loadStep2();
+  }
+
+  function loadStep2() {
+    if (!_slot) return;
+    showSlotChangeStep(2);
+    renderCurrentCard();
+    const dateInput = $('v2ScStartDate');
+    if (dateInput && !dateInput.value) dateInput.value = new Date().toISOString().slice(0, 10);
+    const isAdmin = !!window.v2IsAdmin;
+    const notice = $('v2ScReadonlyNotice');
+    const nextBtn = $('v2ScToStep3');
+    if (notice) notice.hidden = isAdmin;
+    if (!isAdmin && nextBtn) nextBtn.disabled = true;
+    const productSel = $('v2ScProductSelect');
+    if (productSel) productSel.innerHTML = '<option value="">Lade Produkte…</option>';
+    const params = _slot.slot_assignment_id
+      ? `slot_assignment_id=${encodeURIComponent(_slot.slot_assignment_id)}`
+      : `machine_id=${encodeURIComponent(_slot.machine_id)}&mdb_code=${encodeURIComponent(_slot.mdb_code)}`;
+    fetch(`/api/v2/slot-change/preview?${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!productSel) return;
+        if (!data.ok || !data.products?.length) {
+          productSel.innerHTML = '<option value="">Keine Produkte verfügbar</option>';
+          return;
+        }
+        productSel.innerHTML = '<option value="">— Produkt wählen —</option>'
+          + data.products.map((p) => `<option value="${esc(p.product_id)}">${esc(p.name)}</option>`).join('');
+        validateStep2();
+      })
+      .catch(() => { if (productSel) productSel.innerHTML = '<option value="">Fehler beim Laden</option>'; });
+    validateStep2();
+  }
+
+  function renderCurrentCard() {
+    const card = $('v2ScCurrentSlot');
+    if (!card || !_slot) return;
+    card.innerHTML = `
+      <div class="v2-sc-card-product">${esc(_slot.product_name)}</div>
+      <div class="v2-sc-card-meta">${esc(_slot.machine_label)} · MDB ${esc(_slot.mdb_code)} · ${esc(_slot.location_name)}${_slot.current_machine_qty != null ? ` · ${_slot.current_machine_qty} / ${_slot.capacity || '?'} Stk.` : ''}</div>`;
+  }
+
+  function validateStep2() {
+    const nextBtn = $('v2ScToStep3');
+    if (!nextBtn || !window.v2IsAdmin) return;
+    const prod = $('v2ScProductSelect')?.value;
+    const qty  = $('v2ScNewQty')?.value;
+    const date = $('v2ScStartDate')?.value;
+    nextBtn.disabled = !prod || !date || qty === '' || Number(qty) < 0;
+  }
+
+  function buildConfirmSummary() {
+    const sel     = $('v2ScProductSelect');
+    const newName = sel?.options[sel.selectedIndex]?.text || '—';
+    const newQty  = $('v2ScNewQty')?.value || '—';
+    const date    = $('v2ScStartDate')?.value || '—';
+    const el      = $('v2ScConfirmSummary');
+    if (!el || !_slot) return;
+    el.innerHTML = `
+      <div class="v2-sc-change-row">
+        <div class="v2-sc-change-before">
+          <div class="v2-sc-change-product">${esc(_slot.product_name)}</div>
+          <div class="v2-sc-change-meta">${_slot.current_machine_qty} Stk. aktuell</div>
+        </div>
+        <div class="v2-sc-change-arrow">→</div>
+        <div class="v2-sc-change-after">
+          <div class="v2-sc-change-product">${esc(newName)}</div>
+          <div class="v2-sc-change-meta">${esc(newQty)} Stk. ab Start</div>
+        </div>
+      </div>
+      <div class="v2-sc-confirm-detail">
+        ${esc(_slot.machine_label)} · MDB ${esc(_slot.mdb_code)} · ${esc(_slot.location_name)}<br>
+        Startdatum: <strong>${esc(date)}</strong>
+      </div>`;
+  }
+
+  async function handleSlotChangeConfirm() {
+    if (!_slot || !window.v2IsAdmin) return;
+    const confirmBtn = $('v2ScConfirmBtn');
+    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Wird übertragen…'; }
+    const newProductId = $('v2ScProductSelect')?.value;
+    const newQty       = Number($('v2ScNewQty')?.value);
+    const startDate    = $('v2ScStartDate')?.value;
+    let data;
+    try {
+      const res = await fetch('/api/v2/slot-change/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slot_assignment_id: _slot.slot_assignment_id,
+          machine_id: _slot.machine_id,
+          mdb_code: _slot.mdb_code,
+          new_product_id: newProductId,
+          new_qty: newQty,
+          start_date: startDate,
+        }),
+      });
+      data = await res.json();
+    } catch (err) {
+      data = { ok: false, error: { message: err.message } };
+    }
+    showSlotChangeStep(4);
+    const resultEl = $('v2ScResultMsg');
+    if (!resultEl) return;
+    if (data.ok) {
+      resultEl.className = 'v2-sc-result-card is-success';
+      resultEl.innerHTML = `<div class="v2-sc-result-icon">✓</div><div class="v2-sc-result-title">Produktwechsel registriert</div><div>${esc(data.message || 'Wechsel erfolgreich übertragen.')}</div>${data.status_ref ? `<div class="v2-sc-result-ref">Ref: ${esc(data.status_ref)}</div>` : ''}`;
+    } else {
+      resultEl.className = 'v2-sc-result-card is-error';
+      resultEl.innerHTML = `<div class="v2-sc-result-icon">✗</div><div class="v2-sc-result-title">Fehler beim Wechsel</div><div>${esc(data.error?.message || 'Unbekannter Fehler.')}</div>`;
+    }
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Wechsel durchführen'; }
+  }
+
+  $('v2SlotChangeOpen')?.addEventListener('click', openSlotChangeDrawer);
+  $('v2SlotChangeClose')?.addEventListener('click', closeSlotChangeDrawer);
+  $('v2SlotChangeBackdrop')?.addEventListener('click', (e) => { if (e.target === e.currentTarget) closeSlotChangeDrawer(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('v2SlotChangeBackdrop')?.hidden) closeSlotChangeDrawer(); });
+
+  $('v2ScSearch')?.addEventListener('input', () => { clearTimeout(_searchTimer); _searchTimer = setTimeout(handleSlotChangeSearch, 260); });
+  $('v2ScBack')?.addEventListener('click', () => showSlotChangeStep(1));
+  $('v2ScBackFromStep3')?.addEventListener('click', () => showSlotChangeStep(2));
+  $('v2ScDoneBtn')?.addEventListener('click', closeSlotChangeDrawer);
+  $('v2ScProductSelect')?.addEventListener('change', validateStep2);
+  $('v2ScNewQty')?.addEventListener('input', validateStep2);
+  $('v2ScStartDate')?.addEventListener('change', validateStep2);
+  $('v2ScToStep3')?.addEventListener('click', () => { buildConfirmSummary(); showSlotChangeStep(3); });
+  $('v2ScConfirmBtn')?.addEventListener('click', handleSlotChangeConfirm);
+})();
