@@ -1189,3 +1189,155 @@ initRefillDrawer();
   $('v2ScToStep3')?.addEventListener('click', () => { buildConfirmSummary(); showSlotChangeStep(3); });
   $('v2ScConfirmBtn')?.addEventListener('click', handleSlotChangeConfirm);
 })();
+
+// ── Product Onboarding ───────────────────────────────────────────────────────
+
+(function initOnboarding() {
+  const esc = escapeHtml;
+
+  const STATUS_META = {
+    intern_erstellt:  { label: 'Intern erstellt',  sub: 'Noch keine Nayax-Zuordnung',   cls: 'intern_erstellt' },
+    bereit_fur_moma:  { label: 'Bereit für Moma',  sub: 'Hat interne Aliasse',           cls: 'bereit_fur_moma' },
+    slot_offen:       { label: 'Slot-Zuordnung offen', sub: 'In Nayax, kein aktiver Slot', cls: 'slot_offen' },
+    verkaufsbereit:   { label: 'Verkaufsbereit',   sub: 'Hat aktiven Slot',              cls: 'verkaufsbereit' },
+  };
+
+  function setPipelineBadge(id, count, pending) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = count != null ? String(count) : '—';
+    const stageEl = el.closest('.v2-ob-stage');
+    if (stageEl) {
+      stageEl.classList.toggle('v2-ob-stage--pending', pending && count > 0);
+    }
+  }
+
+  function animateConnectors(data) {
+    const connectors = document.querySelectorAll('.v2-ob-connector');
+    const hasPendingApprovals = (data.pending_approvals || []).length > 0;
+    const hasMoma = (data.products_by_status?.bereit_fur_moma || []).length > 0;
+    const hasSlotOffen = (data.products_by_status?.slot_offen || []).length > 0;
+    // connectors: [wf1→approval, approval→moma, moma→slot, slot→ready]
+    if (connectors[0]) connectors[0].classList.toggle('v2-ob-connector--active', hasPendingApprovals);
+    if (connectors[1]) connectors[1].classList.toggle('v2-ob-connector--active', hasMoma);
+    if (connectors[2]) connectors[2].classList.toggle('v2-ob-connector--active', hasSlotOffen);
+  }
+
+  function renderApprovalList(approvals, wf2Url, isAdmin) {
+    const list = document.getElementById('obApprovalList');
+    const badge = document.getElementById('obApprovalCount');
+    if (!list) return;
+
+    if (badge) badge.textContent = String(approvals.length);
+
+    if (!approvals.length) {
+      list.innerHTML = '<div class="v2-ob-empty">Keine offenen Freigaben – alles bearbeitet.</div>';
+      return;
+    }
+
+    list.innerHTML = approvals.map((item) => {
+      const btnHtml = wf2Url
+        ? `<a class="v2-ob-approval-btn${isAdmin ? '' : ' v2-ob-approval-btn--readonly'}" href="${esc(wf2Url)}" target="_blank" rel="noopener noreferrer" ${isAdmin ? '' : 'aria-disabled="true" tabindex="-1"'}>WF2 öffnen ↗</a>`
+        : `<span class="v2-ob-approval-btn v2-ob-approval-btn--readonly">WF2 nicht konfiguriert</span>`;
+      return `
+        <div class="v2-ob-approval-row" role="listitem">
+          <div class="v2-ob-approval-main">
+            <div class="v2-ob-approval-title">Rechnung ${esc(item.invoice_number || item.invoice_key)}</div>
+            <div class="v2-ob-approval-meta">
+              <span>${esc(item.supplier_name || '—')}</span>
+              <span>${esc(item.invoice_date || '—')}</span>
+              <span class="v2-ob-approval-badge">${esc(String(item.open_items))} offen</span>
+            </div>
+          </div>
+          ${btnHtml}
+        </div>`;
+    }).join('');
+  }
+
+  function renderUnknownList(unknowns) {
+    const list = document.getElementById('obUnknownList');
+    const badge = document.getElementById('obUnknownCount');
+    if (!list) return;
+
+    if (badge) badge.textContent = String(unknowns.length);
+
+    if (!unknowns.length) {
+      list.innerHTML = '<div class="v2-ob-empty">Keine unbekannten Nayax-Produkte.</div>';
+      return;
+    }
+
+    list.innerHTML = unknowns.map((item) => `
+      <div class="v2-ob-unknown-row" role="listitem">
+        <div>
+          <div class="v2-ob-unknown-key">${esc(item.product_key || item.nayax_product_name || '—')}</div>
+          <div class="v2-ob-unknown-hint">Produkt anlegen via WF1/WF2</div>
+        </div>
+        <span class="v2-ob-unknown-tx">${esc(String(item.tx_count))} Tx</span>
+      </div>`).join('');
+  }
+
+  function renderStatusGrid(productsByStatus) {
+    const grid = document.getElementById('obStatusGrid');
+    if (!grid) return;
+
+    const order = ['intern_erstellt', 'bereit_fur_moma', 'slot_offen', 'verkaufsbereit'];
+    grid.innerHTML = order.map((key) => {
+      const meta = STATUS_META[key];
+      const products = productsByStatus?.[key] || [];
+      return `
+        <div class="v2-ob-status-card v2-ob-status-card--${esc(meta.cls)}">
+          <div class="v2-ob-status-label">${esc(meta.label)}</div>
+          <div class="v2-ob-status-count">${products.length}</div>
+          <div class="v2-ob-status-sublabel">${esc(meta.sub)}</div>
+        </div>`;
+    }).join('');
+  }
+
+  function renderOnboarding(data, wf2Url, isAdmin) {
+    const byStatus = data.products_by_status || {};
+
+    // Pipeline badges
+    setPipelineBadge('obBadgeWf1',      data.total_invoices ?? 0,            false);
+    setPipelineBadge('obBadgeApproval', (data.pending_approvals || []).length, true);
+    setPipelineBadge('obBadgeMoma',     (byStatus.bereit_fur_moma || []).length, true);
+    setPipelineBadge('obBadgeSlot',     (byStatus.slot_offen || []).length,     true);
+    setPipelineBadge('obBadgeReady',    (byStatus.verkaufsbereit || []).length, false);
+
+    animateConnectors(data);
+    renderApprovalList(data.pending_approvals || [], wf2Url, isAdmin);
+    renderUnknownList(data.unknown_products || []);
+    renderStatusGrid(byStatus);
+
+    const content = document.getElementById('onboardingContent');
+    if (content) content.hidden = false;
+  }
+
+  async function loadOnboarding() {
+    const stateEl = document.getElementById('onboardingState');
+    try {
+      const response = await fetch('/api/v2/onboarding', { cache: 'no-store' });
+      const payload = await response.json();
+
+      if (!payload.ok || !payload.data) {
+        if (stateEl) stateEl.textContent = `${payload.error?.code || 'FEHLER'}: ${payload.error?.message || 'Unbekannter Fehler'}`;
+        return;
+      }
+
+      if (stateEl) {
+        stateEl.textContent = payload.generatedAtDisplay
+          ? `Stand: ${payload.generatedAtDisplay}`
+          : 'Daten geladen.';
+      }
+
+      renderOnboarding(
+        payload.data,
+        payload.data.wf2_form_url || '',
+        payload.data.is_admin || false,
+      );
+    } catch (err) {
+      if (stateEl) stateEl.textContent = `FEHLER: API nicht erreichbar: ${err.message}`;
+    }
+  }
+
+  loadOnboarding();
+}());

@@ -2012,3 +2012,494 @@ h2 {
 .v2-sc-result-icon  { font-size: 1.4rem; margin-bottom: 8px; }
 .v2-sc-result-title { font-family: 'DM Serif Display', serif; font-size: 1.05rem; margin-bottom: 5px; }
 .v2-sc-result-ref   { margin-top: 8px; font-size: 0.67rem; opacity: 0.65; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Product Onboarding Panel  (v2-ob-*)
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.v2-panel--onboarding {
+  grid-column: 1 / -1;
+  border-top: 2px solid #c47a00;
+  padding-top: 22px;
+}
+
+.v2-ob-title {
+  font-family: 'DM Serif Display', Georgia, serif;
+  font-size: 24px;
+  letter-spacing: -0.01em;
+}
+
+/* ── Pipeline rail ── */
+
+.v2-ob-pipeline {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  margin: 20px 0 28px;
+  padding: 20px 24px;
+  background: var(--v2-surface);
+  border: 1px solid var(--v2-line);
+  border-radius: 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.v2-ob-pipeline::-webkit-scrollbar { display: none; }
+
+.v2-ob-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 96px;
+  flex-shrink: 0;
+}
+
+.v2-ob-stage-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.v2-ob-stage-num {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 2px solid var(--v2-line);
+  background: var(--v2-bg);
+  font-family: 'DM Mono', ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--v2-muted);
+  transition: border-color 200ms, background 200ms, color 200ms;
+  position: relative;
+  z-index: 1;
+}
+
+.v2-ob-stage--pending .v2-ob-stage-num {
+  border-color: #c47a00;
+  background: #fffbeb;
+  color: #a36500;
+  box-shadow: 0 0 0 4px rgba(196, 122, 0, 0.12);
+}
+
+.v2-ob-stage--goal .v2-ob-stage-num {
+  border-color: var(--v2-ok);
+  background: rgba(31, 122, 90, 0.06);
+  color: var(--v2-ok);
+}
+
+.v2-ob-stage-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ede8e3;
+  color: var(--v2-muted);
+  font-family: 'DM Mono', ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  transition: background 200ms, color 200ms;
+}
+
+.v2-ob-stage--pending .v2-ob-stage-badge {
+  background: #c47a00;
+  color: #fff;
+}
+
+.v2-ob-stage--goal .v2-ob-stage-badge {
+  background: rgba(31, 122, 90, 0.15);
+  color: var(--v2-ok);
+}
+
+.v2-ob-stage-label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--v2-ink);
+  text-align: center;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.v2-ob-stage-sub {
+  margin: 0;
+  font-size: 10px;
+  color: var(--v2-muted);
+  text-align: center;
+  font-family: 'DM Mono', ui-monospace, monospace;
+  white-space: nowrap;
+}
+
+/* ── Connector between stages ── */
+
+.v2-ob-connector {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  margin-top: 11px; /* vertically center with stage nodes */
+  flex-shrink: 0;
+}
+
+.v2-ob-connector-dot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--v2-line);
+  transition: background 200ms;
+}
+
+.v2-ob-connector--active .v2-ob-connector-dot {
+  background: #c47a00;
+  animation: ob-flow 1.2s ease-in-out infinite;
+}
+
+.v2-ob-connector--active .v2-ob-connector-dot:nth-child(2) { animation-delay: 0.2s; }
+.v2-ob-connector--active .v2-ob-connector-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes ob-flow {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50%       { opacity: 1;    transform: scale(1.3); }
+}
+
+/* ── Onboarding content sections ── */
+
+.v2-ob-section {
+  margin-bottom: 28px;
+}
+
+.v2-ob-section-head {
+  margin-bottom: 10px;
+}
+
+.v2-ob-section-hint {
+  margin: 0;
+  color: var(--v2-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.v2-ob-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(122, 31, 92, 0.1);
+  color: var(--v2-accent);
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'DM Mono', ui-monospace, monospace;
+  vertical-align: middle;
+}
+
+.v2-ob-count-badge--warn {
+  background: rgba(196, 122, 0, 0.12);
+  color: #a36500;
+}
+
+/* ── Pending Approvals list ── */
+
+.v2-ob-approval-list {
+  display: grid;
+  gap: 8px;
+}
+
+.v2-ob-approval-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  min-height: 64px;
+  padding: 12px 0;
+  border-top: 1px solid var(--v2-line);
+}
+
+.v2-ob-approval-row:first-child {
+  border-top-color: rgba(122, 31, 92, 0.25);
+}
+
+.v2-ob-approval-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.v2-ob-approval-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--v2-ink);
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.v2-ob-approval-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: var(--v2-muted);
+  font-size: 12px;
+  font-family: 'DM Mono', ui-monospace, monospace;
+}
+
+.v2-ob-approval-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(196, 122, 0, 0.1);
+  color: #a36500;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.v2-ob-approval-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1.5px solid var(--v2-accent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--v2-accent);
+  font-family: 'DM Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 120ms, color 120ms;
+  white-space: nowrap;
+}
+
+.v2-ob-approval-btn:hover {
+  background: var(--v2-accent);
+  color: #fff;
+}
+
+.v2-ob-approval-btn[aria-disabled="true"],
+.v2-ob-approval-btn--readonly {
+  border-color: var(--v2-line);
+  color: var(--v2-muted);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.v2-ob-empty {
+  padding: 14px 0;
+  color: var(--v2-muted);
+  font-size: 13px;
+  border-top: 1px solid var(--v2-line);
+}
+
+/* ── Unknown products list ── */
+
+.v2-ob-unknown-list {
+  display: grid;
+  gap: 0;
+}
+
+.v2-ob-unknown-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  min-height: 52px;
+  padding: 10px 0;
+  border-top: 1px solid var(--v2-line);
+}
+
+.v2-ob-unknown-key {
+  font-family: 'DM Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--v2-ink);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.v2-ob-unknown-hint {
+  font-size: 11px;
+  color: var(--v2-muted);
+}
+
+.v2-ob-unknown-tx {
+  font-family: 'DM Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: #a36500;
+  background: rgba(196, 122, 0, 0.08);
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Status grid ── */
+
+.v2-ob-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.v2-ob-status-card {
+  position: relative;
+  padding: 14px 16px 12px 20px;
+  border: 1px solid var(--v2-line);
+  border-radius: 10px;
+  background: var(--v2-surface);
+  overflow: hidden;
+}
+
+.v2-ob-status-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: 10px 0 0 10px;
+}
+
+.v2-ob-status-card--intern_erstellt::before  { background: var(--v2-muted); }
+.v2-ob-status-card--bereit_fur_moma::before  { background: #1c5cae; }
+.v2-ob-status-card--slot_offen::before       { background: #c47a00; }
+.v2-ob-status-card--verkaufsbereit::before   { background: var(--v2-ok); }
+
+.v2-ob-status-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--v2-muted);
+  margin-bottom: 7px;
+}
+
+.v2-ob-status-card--bereit_fur_moma .v2-ob-status-label  { color: #1c5cae; }
+.v2-ob-status-card--slot_offen      .v2-ob-status-label  { color: #a36500; }
+.v2-ob-status-card--verkaufsbereit  .v2-ob-status-label  { color: var(--v2-ok); }
+
+.v2-ob-status-count {
+  font-family: 'DM Mono', ui-monospace, monospace;
+  font-size: 28px;
+  font-weight: 500;
+  color: var(--v2-ink);
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.v2-ob-status-sublabel {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--v2-muted);
+  line-height: 1.3;
+}
+
+/* ── Products detail table ── */
+
+.v2-ob-products-table-wrap {
+  margin-top: 12px;
+  border: 1px solid var(--v2-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.v2-ob-products-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.v2-ob-products-table th {
+  padding: 8px 12px;
+  background: #f0ece8;
+  border-bottom: 1px solid var(--v2-line);
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--v2-muted);
+  white-space: nowrap;
+}
+
+.v2-ob-products-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #ede8e3;
+  vertical-align: middle;
+}
+
+.v2-ob-products-table tr:last-child td { border-bottom: none; }
+.v2-ob-products-table tr:nth-child(even) td { background: rgba(0,0,0,0.012); }
+
+.v2-ob-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.v2-ob-status-pill--intern_erstellt {
+  background: rgba(108, 102, 115, 0.1);
+  color: var(--v2-muted);
+}
+
+.v2-ob-status-pill--bereit_fur_moma {
+  background: rgba(28, 92, 174, 0.1);
+  color: #1c5cae;
+}
+
+.v2-ob-status-pill--slot_offen {
+  background: rgba(196, 122, 0, 0.1);
+  color: #a36500;
+}
+
+.v2-ob-status-pill--verkaufsbereit {
+  background: rgba(31, 122, 90, 0.1);
+  color: var(--v2-ok);
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 820px) {
+  .v2-ob-pipeline {
+    padding: 14px 16px;
+  }
+
+  .v2-ob-stage { min-width: 76px; }
+
+  .v2-ob-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .v2-ob-approval-row,
+  .v2-ob-unknown-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .v2-ob-approval-btn {
+    justify-self: start;
+  }
+}

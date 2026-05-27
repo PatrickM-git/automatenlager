@@ -9,6 +9,7 @@ const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/asso
 const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = require('./lib/overview-monitoring.js');
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
 const { buildSlotChangePreview, validateSlotChange, buildSlotChangePayload, buildSlotChangeAuditEntry } = require('./lib/slot-change.js');
+const { buildProductOnboardingData, queryProductOnboardingPg } = require('./lib/product-onboarding.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -1759,6 +1760,43 @@ const server = http.createServer(async (req, res) => {
         message: wfResult.message,
         ...(wfResult.ok ? {} : { error: { code: 'WF7_ERROR', message: wfResult.message } }),
       });
+      return;
+    }
+
+    // ── Onboarding route ──────────────────────────────────────────────────────
+
+    if (parsed.pathname === '/api/v2/onboarding' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, data: null, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL ist für das Onboarding-Panel nicht konfiguriert.' } });
+        return;
+      }
+      const viewer = getViewer(req);
+      const isAdmin = viewer.role === 'admin';
+      try {
+        const rawData = await queryProductOnboardingPg(pgUrl);
+        const data = buildProductOnboardingData(rawData);
+        let wf2FormUrl = '';
+        try {
+          const n8nBaseUrl = dashboardConfig().n8nBaseUrl;
+          const workflows = workflowFiles
+            .filter((fn) => fn.includes('WF2'))
+            .map((fn) => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, fn), 'utf8')); } catch { return null; } })
+            .filter(Boolean);
+          const wf2 = workflows[0];
+          if (wf2?.active && wf2?.formTriggers?.length) {
+            wf2FormUrl = `${n8nBaseUrl}/form/${encodeURIComponent(wf2.formTriggers[0].formPath)}`;
+          }
+        } catch { /* wf2 url optional */ }
+        sendJson(res, 200, {
+          ok: true,
+          generatedAt: new Date().toISOString(),
+          generatedAtDisplay: new Date().toLocaleString('de-DE', { timeZone: 'Europe/Berlin' }),
+          data: { ...data, wf2_form_url: wf2FormUrl, is_admin: isAdmin },
+        });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, data: { is_admin: isAdmin }, error: { code: 'PG_ERROR', message: err.message } });
+      }
       return;
     }
 

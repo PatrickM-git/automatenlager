@@ -26,6 +26,7 @@
           <a href="#economics" class="v2-nav-link">GuV &amp; KPI</a>
           <a href="#assortment" class="v2-nav-link">Sortiment &amp; Slots</a>
           <a href="#monitoring" class="v2-nav-link">Monitoring</a>
+          <a href="#onboarding" class="v2-nav-link">Produkt-Onboarding</a>
         </nav>
 
         <button class="v2-refill-btn" id="v2RefillOpen" aria-haspopup="dialog" aria-expanded="false">
@@ -410,6 +411,90 @@
               <div id="assortmentSlotList" class="v2-assortment-list" aria-label="Aktuelle Slot-Belegung"></div>
             </div>
           </article>
+          <article id="onboarding" class="v2-panel v2-panel--onboarding" data-endpoint="/api/v2/onboarding">
+            <div class="v2-panel-header">
+              <div>
+                <p class="v2-eyebrow">Produkt-Onboarding</p>
+                <h2 class="v2-ob-title">Produkte auf dem Weg in den Automaten</h2>
+              </div>
+              <p id="onboardingState" class="v2-panel-state" aria-live="polite">Noch keine PG-Antwort geladen.</p>
+            </div>
+
+            <!-- Pipeline rail -->
+            <div class="v2-ob-pipeline" aria-label="Onboarding-Pipeline" id="obPipeline">
+              <div class="v2-ob-stage" data-stage="wf1" aria-label="WF1 Eingang">
+                <div class="v2-ob-stage-node">
+                  <span class="v2-ob-stage-num">1</span>
+                  <span class="v2-ob-stage-badge" id="obBadgeWf1">—</span>
+                </div>
+                <p class="v2-ob-stage-label">WF1 Eingang</p>
+                <p class="v2-ob-stage-sub">Rechnungen importiert</p>
+              </div>
+              <div class="v2-ob-connector" aria-hidden="true"><span class="v2-ob-connector-dot"></span><span class="v2-ob-connector-dot"></span><span class="v2-ob-connector-dot"></span></div>
+              <div class="v2-ob-stage" data-stage="approval" aria-label="WF2 Freigabe">
+                <div class="v2-ob-stage-node">
+                  <span class="v2-ob-stage-num">2</span>
+                  <span class="v2-ob-stage-badge" id="obBadgeApproval">—</span>
+                </div>
+                <p class="v2-ob-stage-label">WF2 Freigabe</p>
+                <p class="v2-ob-stage-sub">Offene Freigaben</p>
+              </div>
+              <div class="v2-ob-connector" aria-hidden="true"><span class="v2-ob-connector-dot"></span><span class="v2-ob-connector-dot"></span><span class="v2-ob-connector-dot"></span></div>
+              <div class="v2-ob-stage" data-stage="moma" aria-label="Moma-Setup">
+                <div class="v2-ob-stage-node">
+                  <span class="v2-ob-stage-num">3</span>
+                  <span class="v2-ob-stage-badge" id="obBadgeMoma">—</span>
+                </div>
+                <p class="v2-ob-stage-label">Moma-Setup</p>
+                <p class="v2-ob-stage-sub">Bereit für Moma</p>
+              </div>
+              <div class="v2-ob-connector" aria-hidden="true"><span class="v2-ob-connector-dot"></span><span class="v2-ob-connector-dot"></span><span class="v2-ob-connector-dot"></span></div>
+              <div class="v2-ob-stage" data-stage="slot_offen" aria-label="Slot-Zuordnung offen">
+                <div class="v2-ob-stage-node">
+                  <span class="v2-ob-stage-num">4</span>
+                  <span class="v2-ob-stage-badge" id="obBadgeSlot">—</span>
+                </div>
+                <p class="v2-ob-stage-label">Slot-Zuordnung</p>
+                <p class="v2-ob-stage-sub">Noch kein Slot</p>
+              </div>
+              <div class="v2-ob-connector" aria-hidden="true"><span class="v2-ob-connector-dot"></span><span class="v2-ob-connector-dot"></span><span class="v2-ob-connector-dot"></span></div>
+              <div class="v2-ob-stage v2-ob-stage--goal" data-stage="verkaufsbereit" aria-label="Verkaufsbereit">
+                <div class="v2-ob-stage-node">
+                  <span class="v2-ob-stage-num">5</span>
+                  <span class="v2-ob-stage-badge" id="obBadgeReady">—</span>
+                </div>
+                <p class="v2-ob-stage-label">Verkaufsbereit</p>
+                <p class="v2-ob-stage-sub">Aktive Slots</p>
+              </div>
+            </div>
+
+            <div id="onboardingContent" hidden>
+              <!-- Pending Approvals -->
+              <div class="v2-ob-section" id="obApprovalsSection">
+                <div class="v2-ob-section-head">
+                  <p class="v2-eyebrow v2-section-gap">Offene WF2-Freigaben <span id="obApprovalCount" class="v2-ob-count-badge"></span></p>
+                  <p class="v2-ob-section-hint">Rechnungspositionen ohne Produktzuordnung. Admin kann WF2 direkt öffnen.</p>
+                </div>
+                <div id="obApprovalList" class="v2-ob-approval-list" role="list" aria-label="Offene WF2-Freigaben"></div>
+              </div>
+
+              <!-- Unknown Nayax Products -->
+              <div class="v2-ob-section" id="obUnknownSection">
+                <div class="v2-ob-section-head">
+                  <p class="v2-eyebrow v2-section-gap">Unbekannte Nayax-Produkte <span id="obUnknownCount" class="v2-ob-count-badge v2-ob-count-badge--warn"></span></p>
+                  <p class="v2-ob-section-hint">In Nayax-Transaktionen erkannt, aber noch nicht im System. Via WF1/WF2 anlegen.</p>
+                </div>
+                <div id="obUnknownList" class="v2-ob-unknown-list" role="list" aria-label="Unbekannte Produkte"></div>
+              </div>
+
+              <!-- Products by status -->
+              <div class="v2-ob-section">
+                <p class="v2-eyebrow v2-section-gap">Produktstatus-Übersicht <span class="v2-eyebrow-sub">· alle Produkte nach Onboarding-Stufe</span></p>
+                <div class="v2-ob-status-grid" id="obStatusGrid" aria-label="Produkte nach Status"></div>
+              </div>
+            </div>
+          </article>
+
           <article id="monitoring" class="v2-panel" data-endpoint="/api/v2/monitoring">
             <p class="v2-eyebrow">Monitoring</p>
             <h2>Systemzustand</h2>
