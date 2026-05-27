@@ -1681,7 +1681,7 @@ const server = http.createServer(async (req, res) => {
         const batchResult = await client.query(`
           SELECT batch_key, product_id, remaining_qty, mhd_date::text AS mhd_date, status, unit_cost_net::text AS unit_cost_net
           FROM automatenlager.stock_batches
-          WHERE product_id = $1 AND remaining_qty > 0 AND status = 'active'
+          WHERE product_id = $1 AND remaining_qty > 0 AND status = 'aktiv'
           ORDER BY mhd_date ASC NULLS LAST
         `, [slotRow.product_id]);
         await client.end();
