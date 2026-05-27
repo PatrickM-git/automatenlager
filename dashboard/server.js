@@ -5,6 +5,7 @@ const url = require('url');
 const zlib = require('zlib');
 const { buildEconomicsData, queryEconomicsPg } = require('./lib/economics.js');
 const { buildInventoryMhdData, queryInventoryMhdPg } = require('./lib/inventory-mhd.js');
+const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/assortment-slots.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -260,6 +261,30 @@ async function buildDashboardV2Area(area, query = {}) {
     try {
       const pgRows = await queryInventoryMhdPg(pgUrl, query);
       const data = buildInventoryMhdData(pgRows, query);
+      const now = new Date();
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          area,
+          source: 'postgres',
+          generatedAt: now.toISOString(),
+          generatedAtDisplay: formatBerlinDateTime(now),
+          lastSuccessfulAt: now.toISOString(),
+          lastSuccessfulAtDisplay: formatBerlinDateTime(now),
+          data,
+          error: null,
+        },
+      };
+    } catch (err) {
+      return buildDashboardV2Error(area, 'PG_ERROR', `PostgreSQL-Abfrage fehlgeschlagen: ${err.message}`);
+    }
+  }
+
+  if (area === 'assortment-slots') {
+    try {
+      const pgRows = await queryAssortmentSlotsPg(pgUrl, query);
+      const data = buildAssortmentSlotsData(pgRows, query);
       const now = new Date();
       return {
         status: 200,

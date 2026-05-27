@@ -154,10 +154,24 @@
               <div id="ecoTotalsBar" class="v2-eco-totals-bar" aria-label="Summenzeile"></div>
             </div>
           </article>
-          <article id="assortment" class="v2-panel" data-endpoint="/api/v2/assortment-slots">
-            <p class="v2-eyebrow">Sortiment &amp; Slots</p>
-            <h2>Belegung und Indikatoren</h2>
-            <div class="v2-panel-state">Noch keine PG-Antwort geladen.</div>
+          <article id="assortment" class="v2-panel v2-panel--assortment" data-endpoint="/api/v2/assortment-slots">
+            <div class="v2-panel-header">
+              <div>
+                <p class="v2-eyebrow">Sortiment &amp; Slots</p>
+                <h2>Belegung und Indikatoren</h2>
+              </div>
+              <div class="v2-eco-filters">
+                <label class="v2-filter-label" for="assortmentLocationFilter">Standort</label>
+                <input class="v2-filter-input" id="assortmentLocationFilter" type="text" placeholder="alle" autocomplete="off" spellcheck="false">
+                <label class="v2-filter-label" for="assortmentMachineFilter">Automat</label>
+                <input class="v2-filter-input" id="assortmentMachineFilter" type="text" placeholder="alle" autocomplete="off" spellcheck="false">
+              </div>
+            </div>
+            <div id="assortmentState" class="v2-panel-state" aria-live="polite">Noch keine PG-Antwort geladen.</div>
+            <div id="assortmentContent" hidden>
+              <div id="assortmentIndicatorLegend" class="v2-indicator-legend" aria-label="Indikator-Legende"></div>
+              <div id="assortmentSlotList" class="v2-assortment-list" aria-label="Aktuelle Slot-Belegung"></div>
+            </div>
           </article>
           <article id="monitoring" class="v2-panel" data-endpoint="/api/v2/monitoring">
             <p class="v2-eyebrow">Monitoring</p>

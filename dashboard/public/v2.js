@@ -118,6 +118,101 @@ function initInventoryMhd() {
   loadInventoryMhd();
 }
 
+// ── Assortment / Sortiment & Slots ───────────────────────────────────────────
+
+const assortmentState = {
+  location: '',
+  machine: '',
+};
+
+function renderIndicatorChips(indicators) {
+  if (!indicators || !indicators.length) {
+    return '<span class="v2-indicator-empty">keine Signale</span>';
+  }
+  return indicators.map((item) => `
+    <span class="v2-indicator-chip v2-indicator-chip--${escapeHtml(item.source)}" title="${escapeHtml(item.evidence)}">
+      ${escapeHtml(item.label)}
+    </span>`).join('');
+}
+
+function renderAssortmentLegend(items) {
+  const legend = document.querySelector('#assortmentIndicatorLegend');
+  legend.innerHTML = `
+    <span class="v2-indicator-note">Indikatoren sind Signale, keine automatischen Empfehlungen.</span>
+    ${(items || []).map((item) => `
+      <span class="v2-indicator-chip v2-indicator-chip--${escapeHtml(item.source)}">${escapeHtml(item.label)}</span>
+    `).join('')}`;
+}
+
+function renderAssortmentSlots(rows) {
+  const list = document.querySelector('#assortmentSlotList');
+  if (!rows || !rows.length) {
+    list.innerHTML = '<div class="v2-inventory-empty">Keine Slot-Belegung für diesen Filter.</div>';
+    return;
+  }
+  list.innerHTML = rows.map((row) => `
+    <div class="v2-assortment-row">
+      <div class="v2-assortment-slot">
+        <span class="v2-assortment-mdb">MDB ${escapeHtml(row.mdb_code)}</span>
+        <strong>${escapeHtml(row.product_name)}</strong>
+        <span>${escapeHtml(row.location_name || row.location_id)} · ${escapeHtml(row.machine_name || row.machine_id)}</span>
+      </div>
+      <div class="v2-assortment-occupancy">
+        <span>${escapeHtml(row.occupancy.label)}</span>
+        <span>${escapeHtml(row.occupancy.fill_pct)} % Füllung</span>
+        <span>${escapeHtml(row.qty)} Stk. verkauft</span>
+      </div>
+      <div class="v2-assortment-indicators">
+        ${renderIndicatorChips(row.indicators)}
+      </div>
+    </div>`).join('');
+}
+
+async function loadAssortmentSlots() {
+  const stateEl = document.querySelector('#assortmentState');
+  const contentEl = document.querySelector('#assortmentContent');
+  const location = assortmentState.location.trim();
+  const machine = assortmentState.machine.trim();
+  const url = `/api/v2/assortment-slots?location=${encodeURIComponent(location)}&machine=${encodeURIComponent(machine)}`;
+
+  stateEl.hidden = false;
+  contentEl.hidden = true;
+
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    const payload = await response.json();
+
+    if (!payload.ok || !payload.data) {
+      stateEl.textContent = `${payload.error?.code || 'FEHLER'}: ${payload.error?.message || 'Unbekannter Fehler'}`;
+      return;
+    }
+
+    renderAssortmentLegend(payload.data.indicatorLegend);
+    renderAssortmentSlots(payload.data.slots);
+    stateEl.hidden = true;
+    contentEl.hidden = false;
+  } catch (err) {
+    stateEl.textContent = `API nicht erreichbar: ${err.message}`;
+  }
+}
+
+function initAssortmentSlots() {
+  const locationInput = document.querySelector('#assortmentLocationFilter');
+  const machineInput = document.querySelector('#assortmentMachineFilter');
+  if (!locationInput || !machineInput) return;
+
+  let debounce;
+  const onChange = () => {
+    clearTimeout(debounce);
+    assortmentState.location = locationInput.value;
+    assortmentState.machine = machineInput.value;
+    debounce = setTimeout(loadAssortmentSlots, 300);
+  };
+  locationInput.addEventListener('input', onChange);
+  machineInput.addEventListener('input', onChange);
+  loadAssortmentSlots();
+}
+
 // ── Economics / GuV & KPI ────────────────────────────────────────────────────
 
 function currentBerlinMonth() {
@@ -323,4 +418,5 @@ function initEconomics() {
 
 loadV2Overview();
 initInventoryMhd();
+initAssortmentSlots();
 initEconomics();

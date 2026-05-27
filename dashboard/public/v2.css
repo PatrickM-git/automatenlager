@@ -220,6 +220,10 @@ h2 {
   grid-column: 1 / -1;
 }
 
+.v2-panel--assortment {
+  grid-column: 1 / -1;
+}
+
 .v2-inventory-content {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -298,6 +302,104 @@ h2 {
   border-top: 1px solid var(--v2-line);
   color: var(--v2-muted);
   font-size: 13px;
+}
+
+.v2-indicator-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 14px 0 12px;
+}
+
+.v2-indicator-note {
+  width: 100%;
+  color: var(--v2-muted);
+  font-size: 12px;
+}
+
+.v2-assortment-list {
+  display: grid;
+  gap: 0;
+}
+
+.v2-assortment-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(180px, 0.7fr) minmax(260px, 1fr);
+  gap: 16px;
+  align-items: center;
+  min-height: 74px;
+  padding: 12px 0;
+  border-top: 1px solid var(--v2-line);
+}
+
+.v2-assortment-slot,
+.v2-assortment-occupancy,
+.v2-assortment-indicators {
+  min-width: 0;
+}
+
+.v2-assortment-slot {
+  display: grid;
+  gap: 3px;
+}
+
+.v2-assortment-slot strong {
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.v2-assortment-slot span,
+.v2-assortment-occupancy {
+  color: var(--v2-muted);
+  font-size: 12px;
+}
+
+.v2-assortment-mdb {
+  color: var(--v2-accent);
+  font-family: 'DM Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-weight: 600;
+}
+
+.v2-assortment-occupancy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-family: 'DM Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+
+.v2-assortment-indicators {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.v2-indicator-chip,
+.v2-indicator-empty {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.v2-indicator-chip--kpi {
+  background: rgba(31, 122, 90, 0.1);
+  color: var(--v2-ok);
+}
+
+.v2-indicator-chip--stock {
+  background: rgba(154, 95, 19, 0.12);
+  color: var(--v2-warn);
+}
+
+.v2-indicator-empty {
+  background: #ede8e3;
+  color: var(--v2-muted);
 }
 
 .v2-eco-title {
@@ -739,6 +841,16 @@ h2 {
   .v2-inventory-meta {
     justify-content: flex-start;
     text-align: left;
+  }
+
+  .v2-assortment-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 8px;
+  }
+
+  .v2-assortment-indicators {
+    justify-content: flex-start;
   }
 
   .v2-skeleton-hero {
