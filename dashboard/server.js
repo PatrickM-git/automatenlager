@@ -1722,25 +1722,21 @@ const server = http.createServer(async (req, res) => {
       }
       const cfg = dashboardConfig();
       const n8nBase = cfg.n8nBaseUrl;
-      const webhookUrl = `${n8nBase}/webhook/nachfuellung`;
-      const payload = {
+      const qs = new URLSearchParams({
         source: 'automatenlager_dashboard_v2',
         machine_id: String(machine_id),
-        mdb_code: Number(mdb_code),
-        product_id: Number(product_id),
+        mdb_code: String(Number(mdb_code)),
+        product_id: String(Number(product_id)),
         product_name: String(product_name || ''),
-        qty: Number(qty),
+        qty: String(Number(qty)),
         notes: String(notes || ''),
         triggered_by: viewer.login,
         triggered_at: new Date().toISOString(),
-      };
+      }).toString();
+      const webhookUrl = `${n8nBase}/webhook/nachfuellung?${qs}`;
       let wfResult = { ok: false, status_ref: null, message: '' };
       try {
-        const wfResponse = await fetch(webhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
+        const wfResponse = await fetch(webhookUrl, { method: 'GET' });
         const wfText = await wfResponse.text();
         wfResult = {
           ok: wfResponse.ok,
