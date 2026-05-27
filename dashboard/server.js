@@ -7,6 +7,7 @@ const { buildEconomicsData, queryEconomicsPg } = require('./lib/economics.js');
 const { buildInventoryMhdData, queryInventoryMhdPg } = require('./lib/inventory-mhd.js');
 const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/assortment-slots.js');
 const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = require('./lib/overview-monitoring.js');
+const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -1594,6 +1595,173 @@ const server = http.createServer(async (req, res) => {
     if (v2Area && req.method === 'GET') {
       const result = await buildDashboardV2Area(v2Area[0], parsed.query);
       sendJson(res, result.status, result.body);
+      return;
+    }
+
+    // ── Refill routes ─────────────────────────────────────────────────────────
+
+    if (parsed.pathname === '/api/v2/refill/search' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      const q = clean(parsed.query.q || '');
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, results: [], error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      try {
+        const { Client } = require('pg');
+        const client = new Client({ connectionString: pgUrl });
+        await client.connect();
+        const { rows } = await client.query(`
+          SELECT
+            sa.machine_id::text AS machine_id,
+            m.name AS machine_label,
+            sa.mdb_code,
+            sa.product_id,
+            p.name AS product_name,
+            sa.current_machine_qty,
+            sa.target_stock,
+            sa.machine_capacity AS capacity,
+            l.name AS location_name
+          FROM automatenlager.slot_assignments sa
+          JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
+          JOIN automatenlager.locations l ON l.location_id = m.location_id
+          JOIN automatenlager.products p ON p.product_id = sa.product_id
+          WHERE sa.active = true
+          ORDER BY p.name, sa.machine_id, sa.mdb_code
+        `);
+        await client.end();
+        const results = searchRefillTargets(q, rows);
+        sendJson(res, 200, { ok: true, results });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, results: [], error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    if (parsed.pathname === '/api/v2/refill/details' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      const machineId = clean(parsed.query.machine_id || '');
+      const mdbCode = parseInt(clean(parsed.query.mdb_code || ''), 10);
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      if (!machineId || !mdbCode) {
+        sendJson(res, 400, { ok: false, error: { code: 'MISSING_PARAMS', message: 'machine_id und mdb_code erforderlich.' } });
+        return;
+      }
+      try {
+        const { Client } = require('pg');
+        const client = new Client({ connectionString: pgUrl });
+        await client.connect();
+        const slotResult = await client.query(`
+          SELECT
+            sa.machine_id::text AS machine_id,
+            m.name AS machine_label,
+            sa.mdb_code,
+            sa.product_id,
+            p.name AS product_name,
+            sa.current_machine_qty,
+            sa.target_stock,
+            sa.machine_capacity AS capacity,
+            l.name AS location_name
+          FROM automatenlager.slot_assignments sa
+          JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
+          JOIN automatenlager.locations l ON l.location_id = m.location_id
+          JOIN automatenlager.products p ON p.product_id = sa.product_id
+          WHERE sa.machine_id = $1 AND sa.mdb_code = $2 AND sa.active = true
+          LIMIT 1
+        `, [machineId, mdbCode]);
+        if (!slotResult.rows.length) {
+          await client.end();
+          sendJson(res, 404, { ok: false, error: { code: 'SLOT_NOT_FOUND', message: 'Slot nicht gefunden.' } });
+          return;
+        }
+        const slotRow = slotResult.rows[0];
+        const batchResult = await client.query(`
+          SELECT batch_key, product_id, remaining_qty, mhd_date::text AS mhd_date, status, unit_cost_net::text AS unit_cost_net
+          FROM automatenlager.stock_batches
+          WHERE product_id = $1 AND remaining_qty > 0 AND status = 'active'
+          ORDER BY mhd_date ASC NULLS LAST
+        `, [slotRow.product_id]);
+        await client.end();
+        const data = buildRefillDetails(slotRow, batchResult.rows, new Date());
+        sendJson(res, 200, { ok: true, data });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    if (parsed.pathname === '/api/v2/refill/trigger' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        auditGuestAccess(viewer, 'refill_trigger_denied', {});
+        sendJson(res, 403, {
+          ok: false,
+          error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer duerfen keine Nachfuellung ausloesen.' },
+        });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await new Promise((resolve, reject) => {
+          let data = '';
+          req.on('data', (chunk) => { data += chunk; });
+          req.on('end', () => { try { resolve(data); } catch (e) { reject(e); } });
+          req.on('error', reject);
+        }));
+      } catch {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON im Request-Body.' } });
+        return;
+      }
+      const { machine_id, mdb_code, product_id, qty, product_name, notes } = body || {};
+      if (!machine_id || !mdb_code || !product_id || !qty) {
+        sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: 'machine_id, mdb_code, product_id, qty erforderlich.' } });
+        return;
+      }
+      const cfg = dashboardConfig();
+      const n8nBase = cfg.n8nBaseUrl;
+      const webhookUrl = `${n8nBase}/webhook/nachfuellung`;
+      const payload = {
+        source: 'automatenlager_dashboard_v2',
+        machine_id: String(machine_id),
+        mdb_code: Number(mdb_code),
+        product_id: Number(product_id),
+        product_name: String(product_name || ''),
+        qty: Number(qty),
+        notes: String(notes || ''),
+        triggered_by: viewer.login,
+        triggered_at: new Date().toISOString(),
+      };
+      let wfResult = { ok: false, status_ref: null, message: '' };
+      try {
+        const wfResponse = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const wfText = await wfResponse.text();
+        wfResult = {
+          ok: wfResponse.ok,
+          status_ref: `nachfuellung-${Date.now()}`,
+          message: wfResponse.ok ? 'WF7 gestartet.' : `WF7 antwortete mit ${wfResponse.status}: ${wfText.slice(0, 200)}`,
+        };
+      } catch (err) {
+        wfResult = { ok: false, status_ref: null, message: `Webhook nicht erreichbar: ${err.message}` };
+      }
+      const auditEntry = buildRefillAuditEntry(viewer, { machine_id, mdb_code, product_id, qty }, wfResult);
+      const auditPath = path.join(__dirname, 'logs', 'refill-actions.jsonl');
+      try {
+        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
+        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
+      } catch { /* audit write failure must not block response */ }
+      sendJson(res, wfResult.ok ? 200 : 502, {
+        ok: wfResult.ok,
+        status_ref: auditEntry.status_ref,
+        message: wfResult.message,
+        ...(wfResult.ok ? {} : { error: { code: 'WF7_ERROR', message: wfResult.message } }),
+      });
       return;
     }
 

@@ -27,7 +27,107 @@
           <a href="#assortment" class="v2-nav-link">Sortiment &amp; Slots</a>
           <a href="#monitoring" class="v2-nav-link">Monitoring</a>
         </nav>
+
+        <button class="v2-refill-btn" id="v2RefillOpen" aria-haspopup="dialog" aria-expanded="false">
+          <span class="v2-refill-btn-icon" aria-hidden="true">↓</span>
+          Nachfüllen
+        </button>
       </aside>
+
+      <!-- Refill Drawer -->
+      <div class="v2-refill-backdrop" id="v2RefillBackdrop" hidden role="dialog" aria-modal="true" aria-label="Einzel-Nachfüllung">
+        <div class="v2-refill-drawer">
+          <div class="v2-refill-head">
+            <div class="v2-refill-head-top">
+              <p class="v2-refill-title">Einzel-Nachfüllung</p>
+              <button class="v2-refill-close" id="v2RefillClose" aria-label="Schließen">✕</button>
+            </div>
+            <div class="v2-refill-steps" role="list" aria-label="Schritte">
+              <div class="v2-refill-step-tab active" id="v2StepTab1" role="listitem">
+                <span class="v2-step-num">1</span>
+                <span>Suche</span>
+              </div>
+              <span class="v2-step-arrow" aria-hidden="true">›</span>
+              <div class="v2-refill-step-tab" id="v2StepTab2" role="listitem">
+                <span class="v2-step-num">2</span>
+                <span>Details</span>
+              </div>
+              <span class="v2-step-arrow" aria-hidden="true">›</span>
+              <div class="v2-refill-step-tab" id="v2StepTab3" role="listitem">
+                <span class="v2-step-num">3</span>
+                <span>Bestätigen</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="v2-refill-body">
+            <!-- Step 1: Search -->
+            <div id="v2RefillStep1">
+              <div class="v2-refill-search-wrap">
+                <svg class="v2-refill-search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.5"/>
+                  <path d="M10 10l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                <input
+                  class="v2-refill-search-input"
+                  id="v2RefillSearch"
+                  type="search"
+                  placeholder="Produkt, Automat oder MDB-Code …"
+                  autocomplete="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                  aria-label="Slot suchen"
+                >
+              </div>
+              <p class="v2-refill-search-hint">Gib mindestens 2 Zeichen ein, um Slots zu finden.</p>
+              <div id="v2RefillResults" class="v2-refill-results" role="listbox" aria-label="Suchergebnisse"></div>
+            </div>
+
+            <!-- Step 2: Details -->
+            <div id="v2RefillStep2" hidden>
+              <div class="v2-refill-slot-head">
+                <button class="v2-refill-back" id="v2RefillBack" aria-label="Zurück zur Suche">←</button>
+                <div>
+                  <p class="v2-refill-slot-name" id="v2RefillSlotName">—</p>
+                  <p class="v2-refill-slot-meta" id="v2RefillSlotMeta">—</p>
+                </div>
+              </div>
+
+              <div class="v2-refill-kpis" id="v2RefillKpis"></div>
+
+              <p class="v2-refill-section-label">MHD-Chargen im Backstock</p>
+              <div class="v2-refill-batches" id="v2RefillBatches"></div>
+
+              <div class="v2-refill-qty-wrap">
+                <label class="v2-refill-qty-label" for="v2RefillQty">Menge nachfüllen</label>
+                <div class="v2-refill-qty-row">
+                  <input
+                    class="v2-refill-qty-input"
+                    id="v2RefillQty"
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="0"
+                    aria-describedby="v2RefillQtyWarnings"
+                  >
+                  <button class="v2-refill-qty-next" id="v2RefillQtyNext" disabled>Weiter →</button>
+                </div>
+                <div class="v2-refill-warnings" id="v2RefillQtyWarnings" role="alert" aria-live="polite"></div>
+              </div>
+            </div>
+
+            <!-- Step 3: Confirm -->
+            <div id="v2RefillStep3" hidden>
+              <div class="v2-refill-summary" id="v2RefillSummary"></div>
+              <button class="v2-refill-confirm-btn" id="v2RefillConfirm">
+                <span id="v2RefillConfirmLabel">Jetzt nachfüllen</span>
+              </button>
+              <div class="v2-refill-result-box" id="v2RefillResultBox"></div>
+              <button class="v2-refill-back" id="v2RefillBackToDetails" aria-label="Zurück zu Details" style="margin-top:14px">←</button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <main class="v2-main">
         <header class="v2-topbar">

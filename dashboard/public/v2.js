@@ -600,9 +600,370 @@ function initEconomics() {
   loadEconomics();
 }
 
+// ── Refill Drawer ────────────────────────────────────────────────────────────
+
+const refillState = {
+  step: 1,
+  query: '',
+  allSlots: null,
+  selected: null,
+  details: null,
+  qty: 0,
+};
+
+function setRefillStep(step) {
+  refillState.step = step;
+
+  document.querySelector('#v2RefillStep1').hidden = step !== 1;
+  document.querySelector('#v2RefillStep2').hidden = step !== 2;
+  document.querySelector('#v2RefillStep3').hidden = step !== 3;
+
+  const tabs = [
+    document.querySelector('#v2StepTab1'),
+    document.querySelector('#v2StepTab2'),
+    document.querySelector('#v2StepTab3'),
+  ];
+  tabs.forEach((tab, i) => {
+    tab.classList.remove('active', 'done');
+    if (i + 1 === step) tab.classList.add('active');
+    else if (i + 1 < step) tab.classList.add('done');
+  });
+}
+
+function openRefillDrawer() {
+  const backdrop = document.querySelector('#v2RefillBackdrop');
+  const openBtn = document.querySelector('#v2RefillOpen');
+  backdrop.hidden = false;
+  openBtn.setAttribute('aria-expanded', 'true');
+  document.body.style.overflow = 'hidden';
+  setRefillStep(1);
+  refillState.selected = null;
+  refillState.details = null;
+  refillState.qty = 0;
+  const searchInput = document.querySelector('#v2RefillSearch');
+  if (searchInput) {
+    searchInput.value = '';
+    setTimeout(() => searchInput.focus(), 240);
+  }
+  renderRefillResults([]);
+}
+
+function closeRefillDrawer() {
+  const backdrop = document.querySelector('#v2RefillBackdrop');
+  const openBtn = document.querySelector('#v2RefillOpen');
+  backdrop.hidden = true;
+  openBtn.setAttribute('aria-expanded', 'false');
+  document.body.style.overflow = '';
+}
+
+async function fetchRefillSearch(query) {
+  const resultsEl = document.querySelector('#v2RefillResults');
+  if (!query || query.length < 2) {
+    renderRefillResults([]);
+    return;
+  }
+
+  resultsEl.innerHTML = '<div class="v2-refill-loading"><div class="v2-refill-skel"></div><div class="v2-refill-skel"></div></div>';
+
+  try {
+    const response = await fetch(`/api/v2/refill/search?q=${encodeURIComponent(query)}`, { cache: 'no-store' });
+    const payload = await response.json();
+    renderRefillResults(payload.ok ? (payload.results || []) : []);
+  } catch {
+    renderRefillResults([]);
+  }
+}
+
+function renderRefillResults(results) {
+  const el = document.querySelector('#v2RefillResults');
+  if (!results || !results.length) {
+    const query = refillState.query;
+    el.innerHTML = query.length >= 2
+      ? '<div class="v2-refill-empty">Kein Slot gefunden für diese Suche.</div>'
+      : '';
+    return;
+  }
+
+  el.innerHTML = results.map((r, i) => `
+    <button
+      class="v2-refill-result-item"
+      data-index="${i}"
+      role="option"
+      aria-selected="false"
+      tabindex="0"
+    >
+      <div>
+        <div class="v2-refill-result-name">${escapeHtml(r.product_name)}</div>
+        <div class="v2-refill-result-sub">${escapeHtml(r.machine_label || r.machine_id)} · ${escapeHtml(r.location_name || '')} · MDB ${escapeHtml(String(r.mdb_code))}</div>
+      </div>
+      <span class="v2-refill-result-mdb">MDB ${escapeHtml(String(r.mdb_code))}</span>
+    </button>
+  `).join('');
+
+  el.querySelectorAll('.v2-refill-result-item').forEach((btn, i) => {
+    btn.addEventListener('click', () => selectRefillSlot(results[i]));
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectRefillSlot(results[i]); }
+    });
+  });
+}
+
+async function selectRefillSlot(slot) {
+  refillState.selected = slot;
+  setRefillStep(2);
+
+  document.querySelector('#v2RefillSlotName').textContent = slot.product_name || '—';
+  document.querySelector('#v2RefillSlotMeta').textContent =
+    `${slot.machine_label || slot.machine_id} · MDB ${slot.mdb_code}`;
+
+  document.querySelector('#v2RefillKpis').innerHTML =
+    '<div class="v2-refill-skel" style="height:72px;grid-column:1/-1"></div>';
+  document.querySelector('#v2RefillBatches').innerHTML =
+    '<div class="v2-refill-skel" style="margin:10px"></div>';
+
+  const qtyInput = document.querySelector('#v2RefillQty');
+  qtyInput.value = '';
+  document.querySelector('#v2RefillQtyNext').disabled = true;
+  document.querySelector('#v2RefillQtyWarnings').innerHTML = '';
+
+  try {
+    const response = await fetch(
+      `/api/v2/refill/details?machine_id=${encodeURIComponent(slot.machine_id)}&mdb_code=${encodeURIComponent(slot.mdb_code)}`,
+      { cache: 'no-store' },
+    );
+    const payload = await response.json();
+    if (payload.ok && payload.data) {
+      refillState.details = payload.data;
+      renderRefillDetails(payload.data);
+    } else {
+      document.querySelector('#v2RefillKpis').innerHTML =
+        '<div class="v2-refill-empty" style="grid-column:1/-1">Details konnten nicht geladen werden.</div>';
+    }
+  } catch (err) {
+    document.querySelector('#v2RefillKpis').innerHTML =
+      `<div class="v2-refill-empty" style="grid-column:1/-1">API nicht erreichbar: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function kpiClass(val, warn, danger) {
+  if (val <= danger) return 'v2-refill-kpi--empty';
+  if (val <= warn) return 'v2-refill-kpi--warn';
+  return 'v2-refill-kpi--ok';
+}
+
+function batchDateClass(daysLeft) {
+  if (daysLeft <= 7) return 'critical';
+  if (daysLeft <= 21) return 'warn';
+  return '';
+}
+
+function renderRefillDetails(data) {
+  const { slot, backstock, mhd_batches } = data;
+  const freeCap = (slot.capacity || 0) - (slot.current_machine_qty || 0);
+
+  document.querySelector('#v2RefillKpis').innerHTML = `
+    <div class="v2-refill-kpi ${kpiClass(slot.current_machine_qty, slot.target_stock * 0.4, 0)}">
+      <div class="v2-refill-kpi-label">Im Automaten</div>
+      <div class="v2-refill-kpi-value">${slot.current_machine_qty}</div>
+      <div class="v2-refill-kpi-sub">Ziel: ${slot.target_stock || '—'}</div>
+    </div>
+    <div class="v2-refill-kpi ${freeCap <= 0 ? 'v2-refill-kpi--empty' : freeCap < 3 ? 'v2-refill-kpi--warn' : 'v2-refill-kpi--ok'}">
+      <div class="v2-refill-kpi-label">Freie Kapaz.</div>
+      <div class="v2-refill-kpi-value">${Math.max(0, freeCap)}</div>
+      <div class="v2-refill-kpi-sub">max. ${slot.capacity || '—'}</div>
+    </div>
+    <div class="v2-refill-kpi ${backstock.total_qty <= 0 ? 'v2-refill-kpi--empty' : 'v2-refill-kpi--ok'}">
+      <div class="v2-refill-kpi-label">Backstock</div>
+      <div class="v2-refill-kpi-value">${backstock.total_qty}</div>
+      <div class="v2-refill-kpi-sub">${backstock.batches_count} Charge${backstock.batches_count !== 1 ? 'n' : ''}</div>
+    </div>
+  `;
+
+  const batchesEl = document.querySelector('#v2RefillBatches');
+  if (!mhd_batches || !mhd_batches.length) {
+    batchesEl.innerHTML = '<div class="v2-refill-no-batches">Keine Chargen mit MHD-Datum vorhanden.</div>';
+  } else {
+    batchesEl.innerHTML = mhd_batches.map((b) => {
+      const cls = batchDateClass(b.days_until_mhd);
+      return `
+        <div class="v2-refill-batch-row">
+          <span class="v2-refill-batch-date v2-refill-batch-date--${cls}">${escapeHtml(b.mhd_date)}</span>
+          <span class="v2-refill-batch-qty">${escapeHtml(String(b.remaining_qty))} Stk.</span>
+          <span class="v2-refill-batch-days v2-refill-batch-days--${cls}">${b.days_until_mhd >= 0 ? `${b.days_until_mhd} T.` : 'abgelaufen'}</span>
+        </div>`;
+    }).join('');
+  }
+}
+
+function validateQtyLive(qty) {
+  const details = refillState.details;
+  const warnings = [];
+  const errors = [];
+
+  if (!qty || qty <= 0) {
+    errors.push('Menge muss mindestens 1 sein.');
+  }
+  if (details) {
+    const freeCap = (details.slot.capacity || 0) - (details.slot.current_machine_qty || 0);
+    if (qty > freeCap) {
+      warnings.push(`Übersteigt freie Kapazität (${freeCap} frei). Das kann trotzdem gespeichert werden.`);
+    }
+    if (details.backstock.total_qty <= 0) {
+      warnings.push('Kein Backstock verfügbar — Waren vorhanden?');
+    }
+    if (qty > details.backstock.total_qty && details.backstock.total_qty > 0) {
+      warnings.push(`Menge übersteigt Backstock (${details.backstock.total_qty} Stk. verfügbar).`);
+    }
+  }
+
+  const warningsEl = document.querySelector('#v2RefillQtyWarnings');
+  const nextBtn = document.querySelector('#v2RefillQtyNext');
+  const qtyInput = document.querySelector('#v2RefillQty');
+
+  if (errors.length) {
+    qtyInput.classList.add('invalid');
+    nextBtn.disabled = true;
+  } else {
+    qtyInput.classList.remove('invalid');
+    nextBtn.disabled = false;
+  }
+
+  warningsEl.innerHTML = [
+    ...errors.map((e) => `<div class="v2-refill-warn-item v2-refill-warn-item--error"><i class="v2-refill-warn-icon">✕</i>${escapeHtml(e)}</div>`),
+    ...warnings.map((w) => `<div class="v2-refill-warn-item v2-refill-warn-item--warn"><i class="v2-refill-warn-icon">!</i>${escapeHtml(w)}</div>`),
+  ].join('');
+
+  return errors.length === 0;
+}
+
+function goToConfirm() {
+  const qty = parseInt(document.querySelector('#v2RefillQty').value, 10);
+  if (!validateQtyLive(qty)) return;
+
+  refillState.qty = qty;
+  const slot = refillState.selected;
+
+  document.querySelector('#v2RefillSummary').innerHTML = `
+    <p class="v2-refill-summary-title">Zusammenfassung</p>
+    <div class="v2-refill-summary-row">
+      <span class="v2-refill-summary-key">Produkt</span>
+      <span class="v2-refill-summary-val">${escapeHtml(slot.product_name)}</span>
+    </div>
+    <div class="v2-refill-summary-row">
+      <span class="v2-refill-summary-key">Automat / MDB</span>
+      <span class="v2-refill-summary-val">${escapeHtml(slot.machine_label || slot.machine_id)} · MDB ${escapeHtml(String(slot.mdb_code))}</span>
+    </div>
+    <div class="v2-refill-summary-row">
+      <span class="v2-refill-summary-key">Menge</span>
+      <span class="v2-refill-summary-val">${qty} Stück</span>
+    </div>
+  `;
+
+  document.querySelector('#v2RefillResultBox').classList.remove('visible');
+  document.querySelector('#v2RefillConfirm').disabled = false;
+  document.querySelector('#v2RefillConfirmLabel').textContent = 'Jetzt nachfüllen';
+  setRefillStep(3);
+}
+
+async function confirmRefill() {
+  const btn = document.querySelector('#v2RefillConfirm');
+  const label = document.querySelector('#v2RefillConfirmLabel');
+  const resultBox = document.querySelector('#v2RefillResultBox');
+  const slot = refillState.selected;
+
+  btn.disabled = true;
+  btn.classList.add('v2-refill-confirm-btn--loading');
+  label.textContent = 'Wird übermittelt …';
+  resultBox.classList.remove('visible');
+
+  try {
+    const response = await fetch('/api/v2/refill/trigger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        machine_id: slot.machine_id,
+        mdb_code: slot.mdb_code,
+        product_id: slot.product_id,
+        product_name: slot.product_name,
+        qty: refillState.qty,
+      }),
+    });
+
+    const payload = await response.json();
+    btn.classList.remove('v2-refill-confirm-btn--loading');
+
+    if (response.ok && payload.ok) {
+      label.textContent = '✓ Übermittelt';
+      resultBox.className = 'v2-refill-result-box v2-refill-result-box--ok visible';
+      resultBox.innerHTML = `
+        <div class="v2-refill-result-title">Nachfüllung erfolgreich übermittelt</div>
+        <div>Der WF7-Workflow wurde gestartet. Bitte trage die Nachfüllung im Automaten ein.</div>
+        ${payload.status_ref ? `<div class="v2-refill-result-ref">Ref: ${escapeHtml(payload.status_ref)}</div>` : ''}
+      `;
+    } else if (response.status === 403) {
+      label.textContent = 'Nicht erlaubt';
+      resultBox.className = 'v2-refill-result-box v2-refill-result-box--error visible';
+      resultBox.innerHTML = '<div class="v2-refill-result-title">Keine Berechtigung</div><div>Read-Only-Benutzer dürfen keine Nachfüllung auslösen.</div>';
+      btn.disabled = false;
+    } else {
+      label.textContent = 'Fehler – erneut versuchen';
+      resultBox.className = 'v2-refill-result-box v2-refill-result-box--error visible';
+      resultBox.innerHTML = `
+        <div class="v2-refill-result-title">Übermittlung fehlgeschlagen</div>
+        <div>${escapeHtml(payload.error?.message || 'Unbekannter Fehler')}</div>
+      `;
+      btn.disabled = false;
+    }
+  } catch (err) {
+    btn.classList.remove('v2-refill-confirm-btn--loading');
+    label.textContent = 'Fehler – erneut versuchen';
+    resultBox.className = 'v2-refill-result-box v2-refill-result-box--error visible';
+    resultBox.innerHTML = `<div class="v2-refill-result-title">API nicht erreichbar</div><div>${escapeHtml(err.message)}</div>`;
+    btn.disabled = false;
+  }
+}
+
+function initRefillDrawer() {
+  document.querySelector('#v2RefillOpen').addEventListener('click', openRefillDrawer);
+  document.querySelector('#v2RefillClose').addEventListener('click', closeRefillDrawer);
+  document.querySelector('#v2RefillBackdrop').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeRefillDrawer();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !document.querySelector('#v2RefillBackdrop').hidden) {
+      closeRefillDrawer();
+    }
+  });
+
+  document.querySelector('#v2RefillBack').addEventListener('click', () => setRefillStep(1));
+  document.querySelector('#v2RefillBackToDetails').addEventListener('click', () => setRefillStep(2));
+  document.querySelector('#v2RefillConfirm').addEventListener('click', confirmRefill);
+  document.querySelector('#v2RefillQtyNext').addEventListener('click', goToConfirm);
+
+  const searchInput = document.querySelector('#v2RefillSearch');
+  let searchDebounce;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchDebounce);
+    refillState.query = searchInput.value;
+    searchDebounce = setTimeout(() => fetchRefillSearch(refillState.query), 250);
+  });
+
+  const qtyInput = document.querySelector('#v2RefillQty');
+  qtyInput.addEventListener('input', () => {
+    const qty = parseInt(qtyInput.value, 10);
+    refillState.qty = qty;
+    validateQtyLive(qty);
+  });
+  qtyInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') goToConfirm();
+  });
+}
+
 loadV2Overview();
 loadMonitoring();
 initUploads();
 initInventoryMhd();
 initAssortmentSlots();
 initEconomics();
+initRefillDrawer();
