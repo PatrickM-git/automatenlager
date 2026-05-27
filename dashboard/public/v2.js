@@ -1341,3 +1341,75 @@ initRefillDrawer();
 
   loadOnboarding();
 }());
+
+// ── CSV Export ────────────────────────────────────────────────────────────────
+(function () {
+  const btn = document.getElementById('csvExportBtn');
+  if (!btn) return;
+
+  btn.addEventListener('click', async () => {
+    const monthSelect = document.getElementById('ecoMonthSelect');
+    const month = monthSelect ? monthSelect.value : new Date().toISOString().slice(0, 7);
+    const url = `/api/v2/reports/export?format=csv&from=${encodeURIComponent(month)}&to=${encodeURIComponent(month)}`;
+
+    try {
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) {
+        const data = await response.json();
+        alert(`Export fehlgeschlagen: ${data.error?.message || response.status}`);
+        return;
+      }
+      const blob = await response.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `kpi-bericht-${month}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      alert(`Export fehlgeschlagen: ${err.message}`);
+    }
+  });
+}());
+
+// ── Locations Panel ───────────────────────────────────────────────────────────
+(function () {
+  async function loadLocations() {
+    const stateEl = document.getElementById('locationsState');
+    const contentEl = document.getElementById('locationsContent');
+    const bodyEl = document.getElementById('locationsBody');
+
+    try {
+      const response = await fetch('/api/v2/locations', { cache: 'no-store' });
+      const payload = await response.json();
+
+      if (!payload.ok || !payload.data) {
+        if (stateEl) stateEl.textContent = `${payload.error?.code || 'FEHLER'}: ${payload.error?.message || 'Unbekannter Fehler'}`;
+        return;
+      }
+
+      if (stateEl) stateEl.textContent = '';
+      if (contentEl) contentEl.hidden = false;
+
+      if (bodyEl) {
+        bodyEl.innerHTML = payload.data.map((loc) => {
+          const kpis = loc.kpis;
+          return `<tr>
+            <td>${loc.name}</td>
+            <td>${loc.status}</td>
+            <td>${(loc.machine_ids || []).join(', ') || '—'}</td>
+            <td>${kpis ? kpis.revenue_net.toFixed(2) + ' €' : '—'}</td>
+            <td>${kpis ? kpis.db_net.toFixed(2) + ' €' : '—'}</td>
+            <td>${kpis ? kpis.margin_pct.toFixed(1) + ' %' : '—'}</td>
+            <td>${kpis ? kpis.qty : '—'}</td>
+          </tr>`;
+        }).join('');
+      }
+    } catch (err) {
+      if (stateEl) stateEl.textContent = `FEHLER: ${err.message}`;
+    }
+  }
+
+  loadLocations();
+}());

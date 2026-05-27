@@ -2503,3 +2503,82 @@ h2 {
     justify-self: start;
   }
 }
+
+/* ── CSV Export Button ───────────────────────────────────────────────────── */
+.v2-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  margin-left: 10px;
+  background: transparent;
+  border: 1.5px solid var(--v2-border, #e2e8f0);
+  border-radius: 6px;
+  color: var(--v2-text-muted, #64748b);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.v2-export-btn:hover {
+  border-color: var(--v2-accent, #3b82f6);
+  color: var(--v2-accent, #3b82f6);
+  background: rgba(59,130,246,.06);
+}
+
+/* ── Locations Panel ─────────────────────────────────────────────────────── */
+.v2-panel--locations {}
+.v2-locations-table { margin-top: 12px; }
+
+/* ── Print styles ────────────────────────────────────────────────────────── */
+@media print {
+  .v2-topbar,
+  .v2-sidebar,
+  .v2-slot-change-btn,
+  .v2-export-btn,
+  .v2-eco-filters,
+  .v2-panel-header button,
+  #csvExportBtn {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+    font-size: 11pt;
+  }
+
+  .v2-layout {
+    display: block;
+  }
+
+  .v2-main-content {
+    padding: 0;
+  }
+
+  .v2-panel {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none;
+    border: 1px solid #ccc;
+    margin-bottom: 16pt;
+  }
+
+  .v2-kpi-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9pt;
+  }
+
+  .v2-kpi-table th,
+  .v2-kpi-table td {
+    border: 1px solid #aaa;
+    padding: 4pt 6pt;
+  }
+
+  .v2-kpi-table thead {
+    background: #f0f0f0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

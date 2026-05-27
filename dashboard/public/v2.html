@@ -333,6 +333,12 @@
                   Automat
                 </label>
                 <input class="v2-filter-input" id="ecoMachineFilter" type="text" placeholder="alle" autocomplete="off" spellcheck="false">
+                <button class="v2-export-btn" id="csvExportBtn" type="button" aria-label="KPI-Daten als CSV herunterladen">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M8 2v9M5 8l3 3 3-3M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  CSV
+                </button>
               </div>
             </div>
 
@@ -500,6 +506,32 @@
             <h2>Systemzustand</h2>
             <div id="monitoringState" class="v2-panel-state" aria-live="polite">Noch keine PG-Antwort geladen.</div>
             <div id="monitoringAmpelList" class="v2-ampel-grid v2-ampel-grid--detail" aria-label="Monitoring-Ampeln"></div>
+          </article>
+
+          <article id="locationsPanel" class="v2-panel v2-panel--locations" data-endpoint="/api/v2/locations">
+            <div class="v2-panel-header">
+              <div>
+                <p class="v2-eyebrow">Standorte</p>
+                <h2>Standortvergleich</h2>
+              </div>
+            </div>
+            <div id="locationsState" class="v2-panel-state" aria-live="polite">Noch keine Daten geladen.</div>
+            <div id="locationsContent" hidden>
+              <table class="v2-kpi-table v2-locations-table" aria-label="Standortvergleich">
+                <thead>
+                  <tr>
+                    <th>Standort</th>
+                    <th>Status</th>
+                    <th>Automaten</th>
+                    <th>Umsatz</th>
+                    <th>Deckungsbeitrag</th>
+                    <th>Marge %</th>
+                    <th>Menge</th>
+                  </tr>
+                </thead>
+                <tbody id="locationsBody"></tbody>
+              </table>
+            </div>
           </article>
         </section>
       </main>

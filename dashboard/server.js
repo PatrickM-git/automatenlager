@@ -10,6 +10,8 @@ const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = re
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
 const { buildSlotChangePreview, validateSlotChange, buildSlotChangePayload, buildSlotChangeAuditEntry } = require('./lib/slot-change.js');
 const { buildProductOnboardingData, queryProductOnboardingPg } = require('./lib/product-onboarding.js');
+const { buildCsvExport, buildCsvFilename } = require('./lib/reports.js');
+const { buildLocationProfile, buildLocationComparison, queryLocationsPg, upsertLocationPg } = require('./lib/location-profiles.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -2266,6 +2268,91 @@ const server = http.createServer(async (req, res) => {
       }
 
       sendJson(res, 409, { ok: false, action, message: 'Diese Aktion ist noch nicht auslösbar.' });
+      return;
+    }
+
+    // ── Reports export route ──────────────────────────────────────────────────
+
+    if (parsed.pathname === '/api/v2/reports/export' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      const from = clean(parsed.query.from) || new Date().toISOString().slice(0, 7);
+      const to   = clean(parsed.query.to)   || from;
+      try {
+        const rawData = await queryEconomicsPg(pgUrl, { from, to });
+        const economicsData = buildEconomicsData(rawData, { from, to });
+        const fields = [
+          { key: 'product_name',  label: 'Produkt' },
+          { key: 'revenue_net',   label: 'Umsatz (netto)' },
+          { key: 'db_net',        label: 'Deckungsbeitrag' },
+          { key: 'margin_pct',    label: 'Marge %' },
+          { key: 'qty',           label: 'Menge' },
+        ];
+        const csv = buildCsvExport(economicsData.byProduct, fields);
+        const filename = buildCsvFilename(from, to);
+        res.writeHead(200, {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+        });
+        res.end(csv);
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    // ── Locations routes ──────────────────────────────────────────────────────
+
+    if (parsed.pathname === '/api/v2/locations' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      try {
+        const profiles = await queryLocationsPg(pgUrl);
+        const kpiRows = [];
+        const comparison = buildLocationComparison(profiles, kpiRows);
+        sendJson(res, 200, {
+          ok: true,
+          generatedAt: new Date().toISOString(),
+          data: comparison,
+        });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    if (parsed.pathname === '/api/v2/locations' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        sendJson(res, 403, { ok: false, error: { code: 'FORBIDDEN', message: 'Nur Admins können Standortprofile anlegen.' } });
+        return;
+      }
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      await new Promise((resolve) => req.on('end', resolve));
+      try {
+        const raw = JSON.parse(body);
+        const profile = buildLocationProfile(raw);
+        const saved = await upsertLocationPg(pgUrl, profile);
+        sendJson(res, 200, { ok: true, data: saved });
+      } catch (err) {
+        if (err.message.match(/name|status/i)) {
+          sendJson(res, 400, { ok: false, error: { code: 'VALIDATION_ERROR', message: err.message } });
+        } else {
+          sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+        }
+      }
       return;
     }
 
