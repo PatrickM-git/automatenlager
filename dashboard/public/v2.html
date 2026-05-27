@@ -38,12 +38,28 @@
           <div class="v2-status" id="v2Status" role="status" aria-live="polite">API: /api/v2/overview</div>
         </header>
 
-        <section id="overview" class="v2-section v2-decision-band">
-          <div>
-            <p class="v2-eyebrow">Handlungsbedarf heute</p>
-            <h2>Warten auf PostgreSQL-Daten</h2>
+        <section id="overview" class="v2-section v2-first-screen">
+          <div class="v2-overview-head">
+            <div>
+              <p class="v2-eyebrow">Handlungsbedarf heute</p>
+              <h2>Operativer Einstieg ohne Scrollen</h2>
+            </div>
+            <p id="overviewStaleState" class="v2-panel-state" aria-live="polite">Lade aktuellen Datenstand ...</p>
           </div>
-          <p>Dieser Einstieg ersetzt das produktive Legacy-Dashboard nicht. Sobald die v2-API Daten liefert, erscheinen hier Prioritäten, Ampeln und zentrale Kennzahlen.</p>
+
+          <div class="v2-overview-grid">
+            <div class="v2-overview-priorities">
+              <p class="v2-eyebrow v2-section-gap">Prioritaeten</p>
+              <div id="overviewPriorities" class="v2-priority-list" aria-live="polite"></div>
+            </div>
+            <div class="v2-overview-ampels">
+              <div class="v2-overview-ampels-head">
+                <p class="v2-eyebrow v2-section-gap">Systemampeln</p>
+                <a href="#monitoring" class="v2-monitoring-link">Monitoring-Details</a>
+              </div>
+              <div id="overviewAmpels" class="v2-ampel-grid" aria-label="Systemampeln"></div>
+            </div>
+          </div>
         </section>
 
         <section id="uploads" class="v2-section v2-uploads" hidden>
@@ -206,7 +222,8 @@
           <article id="monitoring" class="v2-panel" data-endpoint="/api/v2/monitoring">
             <p class="v2-eyebrow">Monitoring</p>
             <h2>Systemzustand</h2>
-            <div class="v2-panel-state">Noch keine PG-Antwort geladen.</div>
+            <div id="monitoringState" class="v2-panel-state" aria-live="polite">Noch keine PG-Antwort geladen.</div>
+            <div id="monitoringAmpelList" class="v2-ampel-grid v2-ampel-grid--detail" aria-label="Monitoring-Ampeln"></div>
           </article>
         </section>
       </main>

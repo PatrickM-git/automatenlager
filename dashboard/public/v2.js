@@ -1,16 +1,3 @@
-async function loadV2Overview() {
-  const status = document.querySelector('#v2Status');
-  try {
-    const response = await fetch('/api/v2/overview', { cache: 'no-store' });
-    const data = await response.json();
-    status.textContent = data.ok
-      ? `PG-Datenstand: ${data.generatedAtDisplay || data.generatedAt}`
-      : `${data.error.code}: ${data.error.message}`;
-  } catch (error) {
-    status.textContent = `API nicht erreichbar: ${error.message}`;
-  }
-}
-
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -18,6 +5,111 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function ampelLabel(state) {
+  if (state === 'red') return 'kritisch';
+  if (state === 'yellow') return 'beobachten';
+  return 'ok';
+}
+
+function renderAmpelGrid(containerSelector, ampels) {
+  const container = document.querySelector(containerSelector);
+  if (!container) return;
+  if (!ampels || !ampels.length) {
+    container.innerHTML = '<div class="v2-priority-empty">Keine Monitoring-Daten vorhanden.</div>';
+    return;
+  }
+
+  container.innerHTML = ampels.map((item) => `
+    <div class="v2-ampel-card v2-ampel-card--${escapeHtml(item.state)}">
+      <div class="v2-ampel-head">
+        <span class="v2-ampel-dot" aria-hidden="true"></span>
+        <strong>${escapeHtml(item.label)}</strong>
+      </div>
+      <p class="v2-ampel-state">${escapeHtml(ampelLabel(item.state))}</p>
+      <p class="v2-ampel-message">${escapeHtml(item.message || '')}</p>
+    </div>
+  `).join('');
+}
+
+function renderOverview(payload) {
+  const data = payload?.data || {};
+  const prioritiesEl = document.querySelector('#overviewPriorities');
+  const staleEl = document.querySelector('#overviewStaleState');
+
+  if (staleEl) {
+    staleEl.textContent = data.stale?.message || 'Datenstand wird geladen.';
+    staleEl.dataset.state = data.stale?.isStale ? 'stale' : 'fresh';
+  }
+
+  const priorities = data.priorities || [];
+  if (prioritiesEl) {
+    if (!priorities.length) {
+      prioritiesEl.innerHTML = '<div class="v2-priority-empty">Keine offenen Prioritaeten fuer heute.</div>';
+    } else {
+      prioritiesEl.innerHTML = priorities.map((item) => `
+        <div class="v2-priority-item v2-priority-item--${escapeHtml(item.severity)}">
+          <div class="v2-priority-main">
+            <strong>${escapeHtml(item.title)}</strong>
+            <span>${escapeHtml(item.message)}</span>
+          </div>
+          <span class="v2-priority-count">${escapeHtml(item.count)}</span>
+        </div>
+      `).join('');
+    }
+  }
+
+  renderAmpelGrid('#overviewAmpels', data.ampels || []);
+}
+
+async function loadV2Overview() {
+  const status = document.querySelector('#v2Status');
+  try {
+    const response = await fetch('/api/v2/overview', { cache: 'no-store' });
+    const payload = await response.json();
+    if (!payload.ok || !payload.data) {
+      if (status) {
+        status.textContent = `${payload.error?.code || 'FEHLER'}: ${payload.error?.message || 'Unbekannter Fehler'}`;
+      }
+      renderOverview({ data: { priorities: [], ampels: [], stale: { isStale: true, message: 'FEHLER: Overview-Daten konnten nicht geladen werden.' } } });
+      return;
+    }
+
+    if (status) {
+      status.textContent = `PG-Datenstand: ${payload.generatedAtDisplay || payload.generatedAt}`;
+    }
+    renderOverview(payload);
+  } catch (error) {
+    if (status) status.textContent = `FEHLER: API nicht erreichbar: ${error.message}`;
+    renderOverview({ data: { priorities: [], ampels: [], stale: { isStale: true, message: `FEHLER: ${error.message}` } } });
+  }
+}
+
+async function loadMonitoring() {
+  const stateEl = document.querySelector('#monitoringState');
+  try {
+    const response = await fetch('/api/v2/monitoring', { cache: 'no-store' });
+    const payload = await response.json();
+    if (!payload.ok || !payload.data) {
+      if (stateEl) {
+        stateEl.textContent = `${payload.error?.code || 'FEHLER'}: ${payload.error?.message || 'Unbekannter Fehler'}`;
+      }
+      renderAmpelGrid('#monitoringAmpelList', []);
+      return;
+    }
+
+    const stale = payload.data.stale?.isStale;
+    if (stateEl) {
+      stateEl.textContent = stale
+        ? payload.data.stale.message
+        : `Stand: ${payload.generatedAtDisplay || payload.generatedAt}`;
+    }
+    renderAmpelGrid('#monitoringAmpelList', payload.data.ampels || []);
+  } catch (error) {
+    if (stateEl) stateEl.textContent = `FEHLER: API nicht erreichbar: ${error.message}`;
+    renderAmpelGrid('#monitoringAmpelList', []);
+  }
 }
 
 // ── Inventory / Bestand & MHD ────────────────────────────────────────────────
@@ -509,6 +601,7 @@ function initEconomics() {
 }
 
 loadV2Overview();
+loadMonitoring();
 initUploads();
 initInventoryMhd();
 initAssortmentSlots();

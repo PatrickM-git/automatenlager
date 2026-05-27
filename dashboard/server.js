@@ -6,6 +6,7 @@ const zlib = require('zlib');
 const { buildEconomicsData, queryEconomicsPg } = require('./lib/economics.js');
 const { buildInventoryMhdData, queryInventoryMhdPg } = require('./lib/inventory-mhd.js');
 const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/assortment-slots.js');
+const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = require('./lib/overview-monitoring.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -434,6 +435,39 @@ async function buildDashboardV2Area(area, query = {}) {
       'PG_UNCONFIGURED',
       'PostgreSQL ist fuer Dashboard v2 nicht konfiguriert. Es wird kein Sheet- oder Legacy-Fallback genutzt.',
     );
+  }
+
+  if (area === 'overview' || area === 'monitoring') {
+    try {
+      const raw = await queryOverviewMonitoringPg(pgUrl);
+      const overview = buildOverviewData(raw);
+      const monitoring = buildMonitoringData(raw);
+      const now = new Date();
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          area,
+          source: 'postgres',
+          generatedAt: now.toISOString(),
+          generatedAtDisplay: formatBerlinDateTime(now),
+          lastSuccessfulAt: now.toISOString(),
+          lastSuccessfulAtDisplay: formatBerlinDateTime(now),
+          data: area === 'overview'
+            ? {
+                ...overview,
+                ampels: monitoring.ampels,
+                stale: monitoring.stale,
+              }
+            : {
+                ...monitoring,
+              },
+          error: null,
+        },
+      };
+    } catch (err) {
+      return buildDashboardV2Error(area, 'PG_ERROR', `PostgreSQL-Abfrage fehlgeschlagen: ${err.message}`);
+    }
   }
 
   if (area === 'economics') {
