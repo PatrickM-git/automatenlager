@@ -217,5 +217,5 @@ async function queryEconomicsPg(pgUrl, query = {}) {
   }
 }
 
-module.exports = { buildEconomicsData, queryEconomicsPg, resolvePeriod };
+module.exports = { buildEconomicsData, queryEconomicsPg, resolvePeriod, formatProductName };
 

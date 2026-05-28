@@ -1741,6 +1741,7 @@ loadMachineProfiles();
       const data = await res.json();
 
       if (data.ok) {
+        setPending(false);
         successMsg.textContent = data.message || 'Korrektur erfolgreich gespeichert.';
         contentEl.querySelector('.v2-ca-field').setAttribute('hidden', '');
         contentEl.querySelector('.v2-ca-actions').setAttribute('hidden', '');

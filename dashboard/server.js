@@ -3,7 +3,7 @@ const http = require('http');
 const path = require('path');
 const url = require('url');
 const zlib = require('zlib');
-const { buildEconomicsData, queryEconomicsPg } = require('./lib/economics.js');
+const { buildEconomicsData, queryEconomicsPg, formatProductName } = require('./lib/economics.js');
 const { buildInventoryMhdData, queryInventoryMhdPg } = require('./lib/inventory-mhd.js');
 const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/assortment-slots.js');
 const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = require('./lib/overview-monitoring.js');
@@ -2452,7 +2452,7 @@ const server = http.createServer(async (req, res) => {
             ]);
             const { cases } = buildCorrectionCases(rawCases);
             correctionCase = cases.find((c) => c.case_id === caseId) ?? null;
-            allProducts = prodRes.rows;
+            allProducts = prodRes.rows.map((r) => ({ ...r, name: formatProductName(r.name) ?? r.name }));
           } finally {
             await client.end();
           }

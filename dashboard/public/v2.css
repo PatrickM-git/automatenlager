@@ -3494,3 +3494,6 @@ h2 {
     animation: none;
   }
 }
+
+/* [hidden] override inside drawer — display:flex on child elements must not win */
+#v2CaBackdrop [hidden] { display: none !important; }
