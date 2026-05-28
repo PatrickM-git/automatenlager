@@ -18,6 +18,16 @@ function clean(value) {
   return String(value ?? '').trim();
 }
 
+function toIsoDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  const str = clean(value);
+  if (!str) return '';
+  const parsed = new Date(str);
+  return Number.isNaN(parsed.getTime()) ? str.slice(0, 10) : parsed.toISOString().slice(0, 10);
+}
+
 function normalizeSeverity(row) {
   const explicit = clean(row.warning_severity || row.severity).toLowerCase();
   if (explicit) return explicit === 'warn' ? 'warning' : explicit;
@@ -41,7 +51,7 @@ function parseMhdRiskRow(row) {
     batch_key: clean(row.batch_key),
     product_id: toNum(row.product_id),
     product_name: clean(row.product_name) || String(row.product_id ?? ''),
-    mhd_date: clean(row.mhd_date),
+    mhd_date: toIsoDate(row.mhd_date),
     remaining_qty: toNum(row.remaining_qty),
     severity: normalizeSeverity(row),
     warning_type: clean(row.warning_type),

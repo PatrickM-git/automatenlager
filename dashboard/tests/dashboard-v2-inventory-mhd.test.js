@@ -115,6 +115,15 @@ test('AC1: MHD risks are sorted by severity and nearest date by default', () => 
   assert.equal(result.sortOrder, 'asc');
 });
 
+test('AC1b: mhd_date from a pg Date object is normalized to ISO YYYY-MM-DD', () => {
+  const result = buildInventoryMhdData({
+    mhdRisks: [{ ...MHD_ROWS[0], mhd_date: new Date('2026-05-27T00:00:00Z') }],
+    lowStock: [],
+  }, {});
+
+  assert.equal(result.mhdRisks[0].mhd_date, '2026-05-27');
+});
+
 test('AC2: low stock rows are sorted by urgency with understandable refill gap', () => {
   const lowStockRows = [
     {
