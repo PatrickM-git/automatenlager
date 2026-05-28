@@ -1,6 +1,6 @@
 'use strict';
 
-const STALE_THRESHOLD_MINUTES = 180;
+const PIPELINE_STALE_THRESHOLD_MINUTES = 24 * 60;
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -39,19 +39,19 @@ function buildStaleInfo(raw = {}) {
     return {
       isStale: true,
       lastEvidenceAt: null,
-      message: 'Datenstand veraltet: keine aktuellen Monitoring-Hinweise gefunden.',
+      message: 'Keine Pipeline-Aktivität gefunden – Monitoring prüfen.',
     };
   }
 
   const ageMinutes = Math.floor((now.getTime() - lastEvidenceAt.getTime()) / 60000);
-  const isStale = ageMinutes > STALE_THRESHOLD_MINUTES;
+  const isStale = ageMinutes > PIPELINE_STALE_THRESHOLD_MINUTES;
   return {
     isStale,
     ageMinutes,
     lastEvidenceAt: lastEvidenceAt.toISOString(),
     message: isStale
-      ? `Datenstand veraltet: letzte Aktualisierung vor ${ageMinutes} Minuten.`
-      : `Datenstand aktuell: letzte Aktualisierung vor ${ageMinutes} Minuten.`,
+      ? `Datenstand veraltet: seit ${Math.floor(ageMinutes / 60)} h keine Pipeline-Aktivität – Monitoring prüfen.`
+      : 'Datenstand live aus PostgreSQL abgerufen.',
   };
 }
 
@@ -71,19 +71,6 @@ function hasWorkflowError(raw = {}) {
   return unresolvedWarnings(raw, 'WORKFLOW_ERROR').length > 0;
 }
 
-function hasRecentRun(raw = {}, workflowKeyFragment, withinMinutes) {
-  const now = parseDate(raw.nowIso) || new Date();
-  const fragment = clean(workflowKeyFragment).toLowerCase();
-  for (const row of raw.workflowRuns || []) {
-    if (!clean(row.workflow_key).toLowerCase().includes(fragment)) continue;
-    const at = parseDate(row.finished_at || row.started_at);
-    if (!at) continue;
-    const ageMinutes = (now.getTime() - at.getTime()) / 60000;
-    if (ageMinutes <= withinMinutes && clean(row.status).toLowerCase() === 'success') return true;
-  }
-  return false;
-}
-
 function ampel(key, label, state, message, details = '') {
   return { key, label, state, message, details };
 }
@@ -101,8 +88,7 @@ function buildMonitoringData(raw = {}) {
   const backupState = (backupStale > 0 || backupFail > 0) ? 'red' : hasBackupOk ? 'green' : 'yellow';
   const validationState = valDrift > 0 ? 'yellow' : 'green';
   const workflowsState = hasWorkflowError(raw) ? 'red' : 'green';
-  const monitorFresh = hasRecentRun(raw, 'monitor', STALE_THRESHOLD_MINUTES);
-  const monitoringState = !monitorFresh || stale.isStale ? 'yellow' : 'green';
+  const monitoringState = stale.isStale ? 'yellow' : 'green';
 
   return {
     stale,
@@ -189,8 +175,11 @@ async function queryOverviewMonitoringPg(pgUrl) {
       client.query('SELECT COUNT(*)::int AS count FROM automatenlager.v_warnings_open'),
       client.query(
         `SELECT COUNT(*)::int AS count
-           FROM automatenlager.v_warnings_open
-          WHERE warning_type IN ('MHD_NEAR', 'MHD_EXPIRED')`,
+           FROM automatenlager.stock_batches sb
+          WHERE sb.status IN ('aktiv', 'active')
+            AND sb.remaining_qty > 0
+            AND sb.mhd_date IS NOT NULL
+            AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'`,
       ),
       client.query(
         `SELECT COUNT(*)::int AS count

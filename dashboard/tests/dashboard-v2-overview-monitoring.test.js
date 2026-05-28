@@ -112,18 +112,34 @@ test('AC2: monitoring exposes six compact ampels with explicit state and message
   assert.ok(monitoring.ampels.every((item) => typeof item.message === 'string' && item.message.length > 0));
 });
 
-test('AC3: stale data is marked clearly when latest evidence is too old', () => {
+test('AC3: stale data is marked only after a full day without pipeline activity', () => {
   const staleMonitoring = buildMonitoringData({
     ...RAW_DATA,
     nowIso: '2026-05-27T15:00:00.000Z',
     workflowRuns: [],
     warnings: [
-      { warning_type: 'BACKUP_OK', severity: 'info', resolved: true, created_at: '2026-05-27T03:00:00.000Z', warning_key: 'BACKUP_OK|backup|2026-05-27', message: 'Backup erfolgreich' },
+      { warning_type: 'BACKUP_OK', severity: 'info', resolved: true, created_at: '2026-05-26T03:00:00.000Z', warning_key: 'BACKUP_OK|backup|2026-05-26', message: 'Backup erfolgreich' },
     ],
   });
 
   assert.equal(staleMonitoring.stale.isStale, true);
   assert.match(staleMonitoring.stale.message, /veraltet/i);
+  assert.equal(staleMonitoring.ampels.find((a) => a.key === 'monitoring').state, 'yellow');
+});
+
+test('AC3b: same-day batch evidence is fresh even when hours old (live read)', () => {
+  const freshMonitoring = buildMonitoringData({
+    ...RAW_DATA,
+    nowIso: '2026-05-27T13:00:00.000Z',
+    workflowRuns: [
+      { workflow_key: 'WF-Val', status: 'success', started_at: '2026-05-27T04:14:00.000Z', finished_at: '2026-05-27T05:00:00.000Z' },
+    ],
+    warnings: [],
+  });
+
+  assert.equal(freshMonitoring.stale.isStale, false);
+  assert.doesNotMatch(freshMonitoring.stale.message, /veraltet/i);
+  assert.equal(freshMonitoring.ampels.find((a) => a.key === 'monitoring').state, 'green');
 });
 
 test('AC-HTTP: /api/v2/overview and /api/v2/monitoring return explicit PG errors when DB is unreachable', async (t) => {

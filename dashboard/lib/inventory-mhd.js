@@ -152,8 +152,8 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
                 sb.mhd_date,
                 sb.remaining_qty,
                 w.warning_type,
-                w.severity AS warning_severity,
-                w.message AS warning_message,
+                w.warning_severity,
+                w.warning_message,
                 m.machine_key AS machine_id,
                 m.name AS machine_name,
                 l.location_key AS location_id,
@@ -165,14 +165,22 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
              ON sa.product_id = p.product_id AND sa.active = TRUE
            LEFT JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
            LEFT JOIN automatenlager.locations l ON l.location_id = m.location_id
-           LEFT JOIN automatenlager.warnings w
-             ON w.product_id = p.product_id
-            AND w.resolved = FALSE
-            AND w.warning_type IN ('MHD_NEAR', 'MHD_EXPIRED')
-          WHERE sb.status = 'active'
+           LEFT JOIN LATERAL (
+             SELECT w2.warning_type,
+                    w2.severity AS warning_severity,
+                    w2.message AS warning_message
+               FROM automatenlager.warnings w2
+              WHERE w2.product_id = p.product_id
+                AND w2.resolved = FALSE
+                AND w2.warning_type IN ('MHD_NEAR', 'MHD_EXPIRED')
+              ORDER BY CASE WHEN w2.warning_type = 'MHD_EXPIRED' THEN 0 ELSE 1 END,
+                       w2.created_at DESC
+              LIMIT 1
+           ) w ON TRUE
+          WHERE sb.status IN ('aktiv', 'active')
             AND sb.remaining_qty > 0
             AND sb.mhd_date IS NOT NULL
-            AND (sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days' OR w.warning_id IS NOT NULL)
+            AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'
             AND ($1 = '' OR l.location_key = $1 OR l.name ILIKE '%' || $1 || '%')
             AND ($2 = '' OR m.machine_key = $2 OR m.name ILIKE '%' || $2 || '%')
           ORDER BY sb.mhd_date ASC`,
@@ -182,7 +190,7 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
         `WITH batch_totals AS (
            SELECT product_id, SUM(remaining_qty)::int AS total_qty
              FROM automatenlager.stock_batches
-            WHERE status = 'active'
+            WHERE status IN ('aktiv', 'active')
             GROUP BY product_id
          )
          SELECT p.product_id,
