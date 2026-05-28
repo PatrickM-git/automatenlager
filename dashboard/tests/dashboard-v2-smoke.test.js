@@ -147,6 +147,7 @@ test('AC-READONLY: all v2 write endpoints return 403 for guest users', async (t)
     ['/api/v2/actions/smoke-test/trigger', 'v2 action trigger'],
     ['/api/v2/uploads/invoice', 'upload invoice'],
     ['/api/v2/locations', 'locations write'],
+    ['/api/v2/machine-profiles', 'machine-profiles write'],
   ];
 
   for (const [urlPath, label] of writeEndpoints) {

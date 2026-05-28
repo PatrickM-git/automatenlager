@@ -154,13 +154,14 @@ function getViewer(req) {
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
   const normalizedLogin = login.toLowerCase();
-  const isLocalRequestWithoutLogin = !normalizedLogin && isLocalDashboardHost(req.headers.host);
-  const isAdmin = isLocalRequestWithoutLogin
+  // No Tailscale-Serve identity header = operator trust (plain TCP Tailscale or localhost).
+  // Guest status requires an explicit tailscale-user-login that is NOT in the admin list.
+  const isAdmin = !normalizedLogin
     || configuredAdmins.includes(normalizedLogin)
     || normalizedLogin.startsWith('patrick');
 
   return {
-    login: login || (isLocalRequestWithoutLogin ? 'local-admin' : 'unknown-guest'),
+    login: login || (isLocalDashboardHost(req.headers.host) ? 'local-admin' : 'operator'),
     role: isAdmin ? 'admin' : 'guest',
     canTriggerActions: isAdmin,
   };

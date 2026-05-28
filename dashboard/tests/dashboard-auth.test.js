@@ -147,7 +147,7 @@ test('guest users cannot trigger workflow actions', async (t) => {
   assert.equal(body.ok, false);
 });
 
-test('requests without Tailscale identity are guests on tailnet hosts', async (t) => {
+test('requests with explicit non-admin Tailscale identity are guests on tailnet hosts', async (t) => {
   const mockN8n = startMockN8n();
   const n8nPort = await listen(mockN8n.server);
   const dashboardPort = await getFreePort();
@@ -158,18 +158,21 @@ test('requests without Tailscale identity are guests on tailnet hosts', async (t
     mockN8n.server.close();
   });
 
+  // Requests WITHOUT identity header = operator trust (no Tailscale Serve injecting headers).
+  // Guest status requires an explicit tailscale-user-login identifying a non-admin account.
   const response = await requestDashboard(dashboardPort, {
     method: 'POST',
     path: '/api/actions/invoice-intake/trigger',
     headers: {
       'Content-Type': 'application/json',
       Host: 'hp-mini-server.tail573a13.ts.net:8787',
+      'tailscale-user-login': 'guest@other-org.example',
     },
   });
 
   assert.equal(response.status, 403);
   const body = response.json();
-  assert.equal(body.viewer.login, 'unknown-guest');
+  assert.equal(body.viewer.login, 'guest@other-org.example');
   assert.equal(body.viewer.role, 'guest');
   assert.equal(mockN8n.calls.some((call) => call.method === 'POST' && call.url === '/webhook/dashboard-test-wf1'), false);
 });
