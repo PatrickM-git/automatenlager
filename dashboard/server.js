@@ -13,6 +13,7 @@ const { buildProductOnboardingData, queryProductOnboardingPg } = require('./lib/
 const { buildCsvExport, buildCsvFilename } = require('./lib/reports.js');
 const { buildLocationProfile, buildLocationComparison, queryLocationsPg, upsertLocationPg } = require('./lib/location-profiles.js');
 const { buildCorrectionCases, queryCorrectionCasesPg } = require('./lib/correction-cases.js');
+const { buildMachineProfile, getMachineOptions, queryMachineProfilesPg, upsertMachineProfilePg } = require('./lib/machine-profiles.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -2349,6 +2350,54 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, { ok: true, data: saved });
       } catch (err) {
         if (err.message.match(/name|status/i)) {
+          sendJson(res, 400, { ok: false, error: { code: 'VALIDATION_ERROR', message: err.message } });
+        } else {
+          sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+        }
+      }
+      return;
+    }
+
+    // ── Machine profiles routes ───────────────────────────────────────────────
+
+    if (parsed.pathname === '/api/v2/machine-profiles' && req.method === 'GET') {
+      const viewer = getViewer(req);
+      const options = getMachineOptions();
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), data: [], options, is_admin: viewer.canTriggerActions });
+        return;
+      }
+      try {
+        const data = await queryMachineProfilesPg(pgUrl);
+        sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), data, options, is_admin: viewer.canTriggerActions });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    if (parsed.pathname === '/api/v2/machine-profiles' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        sendJson(res, 403, { ok: false, error: { code: 'FORBIDDEN', message: 'Nur Admins können Automaten-Profile anlegen.' } });
+        return;
+      }
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      await new Promise((resolve) => req.on('end', resolve));
+      try {
+        const raw = JSON.parse(body);
+        const profile = buildMachineProfile(raw);
+        const pgUrl = dashboardV2PgUrl();
+        if (!pgUrl) {
+          sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+          return;
+        }
+        const saved = await upsertMachineProfilePg(pgUrl, profile);
+        sendJson(res, 200, { ok: true, data: saved });
+      } catch (err) {
+        if (err.message.includes('machine_id')) {
           sendJson(res, 400, { ok: false, error: { code: 'VALIDATION_ERROR', message: err.message } });
         } else {
           sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });

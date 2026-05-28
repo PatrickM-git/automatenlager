@@ -206,7 +206,7 @@ function initInventoryMhd() {
     debounce = setTimeout(loadInventoryMhd, 300);
   };
   locationInput.addEventListener('input', onChange);
-  machineInput.addEventListener('input', onChange);
+  machineInput.addEventListener('change', onChange);
   loadInventoryMhd();
 }
 
@@ -301,7 +301,7 @@ function initAssortmentSlots() {
     debounce = setTimeout(loadAssortmentSlots, 300);
   };
   locationInput.addEventListener('input', onChange);
-  machineInput.addEventListener('input', onChange);
+  machineInput.addEventListener('change', onChange);
   loadAssortmentSlots();
 }
 
@@ -591,7 +591,7 @@ function initEconomics() {
 
   const machineInput = document.querySelector('#ecoMachineFilter');
   let debounce;
-  machineInput.addEventListener('input', () => {
+  machineInput.addEventListener('change', () => {
     clearTimeout(debounce);
     ecoState.machine = machineInput.value;
     debounce = setTimeout(loadEconomics, 400);
@@ -967,6 +967,7 @@ initInventoryMhd();
 initAssortmentSlots();
 initEconomics();
 initRefillDrawer();
+loadMachineProfiles();
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Slot-Change Drawer
@@ -1570,4 +1571,271 @@ initRefillDrawer();
 
   loadCorrectionCases();
   window._reloadCorrectionCases = loadCorrectionCases;
+}());
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Machine Profiles – global loader + panel
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+let _machineProfilesCache = null;
+
+async function loadMachineProfiles() {
+  try {
+    const res = await fetch('/api/v2/machine-profiles');
+    const data = await res.json();
+    if (!data.ok) return;
+    _machineProfilesCache = data;
+    populateMachineSelects(data.data || []);
+    window.dispatchEvent(new CustomEvent('machineProfilesLoaded', { detail: data }));
+  } catch (_) {
+    // non-critical; selects stay with "alle" fallback
+  }
+}
+
+function populateMachineSelects(profiles) {
+  const selects = document.querySelectorAll(
+    '#inventoryMachineFilter, #assortmentMachineFilter, #ecoMachineFilter'
+  );
+  selects.forEach((sel) => {
+    const current = sel.value;
+    while (sel.options.length > 1) sel.remove(1);
+    profiles.forEach((p) => {
+      const opt = document.createElement('option');
+      opt.value = p.machine_id;
+      opt.textContent = p.label || p.machine_id;
+      sel.appendChild(opt);
+    });
+    if ([...sel.options].some((o) => o.value === current)) sel.value = current;
+  });
+}
+
+(function initMachineProfiles() {
+  const panel = document.querySelector('#machineProfilesPanel');
+  if (!panel) return;
+
+  const stateEl = document.querySelector('#machineProfilesState');
+  const contentEl = document.querySelector('#machineProfilesContent');
+  const bodyEl = document.querySelector('#machineProfilesBody');
+  const emptyEl = document.querySelector('#mpEmptyState');
+  const adminTools = document.querySelector('#mpAdminTools');
+  const editHeader = document.querySelector('#mpEditHeader');
+  const addBtn = document.querySelector('#mpAddBtn');
+  const formContainer = document.querySelector('#mpFormContainer');
+
+  function escHtml(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function badgeHtml(label) {
+    const parts = label.split('·').map((p) => p.trim());
+    if (parts.length <= 1) return `<span class="v2-mp-badge">${escHtml(label)}</span>`;
+    return `<span class="v2-mp-badge">${parts.map((p, i) => (i > 0 ? `<span class="v2-mp-badge-dot">·</span>${escHtml(p)}` : escHtml(p))).join('')}</span>`;
+  }
+
+  function renderProfiles(profiles, isAdmin) {
+    if (editHeader) editHeader.hidden = !isAdmin;
+    if (adminTools) adminTools.hidden = !isAdmin;
+
+    if (profiles.length === 0) {
+      bodyEl.innerHTML = '';
+      emptyEl.hidden = false;
+      return;
+    }
+    emptyEl.hidden = true;
+
+    bodyEl.innerHTML = profiles.map((p) => `
+      <tr data-machine-id="${escHtml(p.machine_id)}">
+        <td><span class="v2-mp-id">${escHtml(p.machine_id)}</span></td>
+        <td>${badgeHtml(p.label || p.machine_id)}</td>
+        <td>${escHtml(p.area ?? '—')}</td>
+        <td>${escHtml(p.type ?? '—')}</td>
+        <td>${escHtml(p.position ?? '—')}</td>
+        <td>${escHtml(p.nickname ?? '—')}</td>
+        ${isAdmin ? `<td><button class="v2-mp-edit-btn" data-action="edit" data-machine-id="${escHtml(p.machine_id)}">Bearbeiten</button></td>` : ''}
+      </tr>
+    `).join('');
+  }
+
+  function buildFormHtml(profile, options) {
+    const { types = [], positions = [], areas = [] } = options || {};
+    const p = profile || {};
+
+    function selectOpts(list, current) {
+      return list.map((v) => `<option value="${escHtml(v)}"${current === v ? ' selected' : ''}>${escHtml(v)}</option>`).join('');
+    }
+
+    const areaIsCustom = p.area && !areas.includes(p.area);
+    const typeIsCustom = p.type && !types.includes(p.type);
+    const posIsCustom = p.position && !positions.includes(p.position);
+
+    return `
+      <div class="v2-mp-form" id="mpForm">
+        <p class="v2-mp-form-title">
+          ${p.machine_id ? `Profil bearbeiten – <span class="v2-mp-id">${escHtml(p.machine_id)}</span>` : 'Neues Profil anlegen'}
+          <button class="v2-mp-form-close" id="mpFormClose" type="button" aria-label="Formular schließen">✕</button>
+        </p>
+        <div class="v2-mp-form-grid">
+          <div class="v2-mp-field v2-mp-field--full">
+            <label for="mpFieldMachineId">Maschinen-ID <span style="color:var(--v2-error)">*</span></label>
+            <input type="text" id="mpFieldMachineId" value="${escHtml(p.machine_id ?? '')}" placeholder="z.B. ABC-12345" ${p.machine_id ? 'readonly' : ''}>
+          </div>
+          <div class="v2-mp-field">
+            <label for="mpFieldArea">Bereich / Etage</label>
+            <select id="mpFieldArea">
+              <option value="">– keine Angabe –</option>
+              ${selectOpts(areas, areaIsCustom ? 'Sonstiges' : (p.area ?? ''))}
+            </select>
+            <input class="v2-mp-sonstiges" type="text" id="mpFieldAreaCustom" placeholder="Freitext Bereich …" value="${areaIsCustom ? escHtml(p.area) : ''}" ${!areaIsCustom ? 'hidden' : ''}>
+          </div>
+          <div class="v2-mp-field">
+            <label for="mpFieldType">Typ</label>
+            <select id="mpFieldType">
+              <option value="">– keine Angabe –</option>
+              ${selectOpts(types, typeIsCustom ? 'Sonstiges' : (p.type ?? ''))}
+            </select>
+            <input class="v2-mp-sonstiges" type="text" id="mpFieldTypeCustom" placeholder="Freitext Typ …" value="${typeIsCustom ? escHtml(p.type) : ''}" ${!typeIsCustom ? 'hidden' : ''}>
+          </div>
+          <div class="v2-mp-field">
+            <label for="mpFieldPosition">Position</label>
+            <select id="mpFieldPosition">
+              <option value="">– keine Angabe –</option>
+              ${selectOpts(positions, posIsCustom ? 'Sonstiges' : (p.position ?? ''))}
+            </select>
+            <input class="v2-mp-sonstiges" type="text" id="mpFieldPositionCustom" placeholder="Freitext Position …" value="${posIsCustom ? escHtml(p.position) : ''}" ${!posIsCustom ? 'hidden' : ''}>
+          </div>
+          <div class="v2-mp-field">
+            <label for="mpFieldNickname">Spitzname (optional)</label>
+            <input type="text" id="mpFieldNickname" value="${escHtml(p.nickname ?? '')}" placeholder="z.B. Hauptautomat">
+          </div>
+        </div>
+        <div class="v2-mp-form-actions">
+          <button class="v2-mp-cancel-btn" id="mpCancelBtn" type="button">Abbrechen</button>
+          <button class="v2-mp-save-btn" id="mpSaveBtn" type="button">Speichern</button>
+        </div>
+        <p class="v2-mp-form-status" id="mpFormStatus"></p>
+      </div>
+    `;
+  }
+
+  function wireFormToggle(field, customInput) {
+    const sel = document.querySelector(field);
+    const inp = document.querySelector(customInput);
+    if (!sel || !inp) return;
+    sel.addEventListener('change', () => {
+      inp.hidden = sel.value !== 'Sonstiges';
+      if (inp.hidden) inp.value = '';
+    });
+  }
+
+  function openForm(profile) {
+    const options = _machineProfilesCache?.options || {};
+    formContainer.innerHTML = buildFormHtml(profile, options);
+    formContainer.hidden = false;
+    if (addBtn) addBtn.hidden = true;
+
+    wireFormToggle('#mpFieldArea', '#mpFieldAreaCustom');
+    wireFormToggle('#mpFieldType', '#mpFieldTypeCustom');
+    wireFormToggle('#mpFieldPosition', '#mpFieldPositionCustom');
+
+    document.querySelector('#mpFormClose')?.addEventListener('click', closeForm);
+    document.querySelector('#mpCancelBtn')?.addEventListener('click', closeForm);
+    document.querySelector('#mpSaveBtn')?.addEventListener('click', saveProfile);
+  }
+
+  function closeForm() {
+    formContainer.innerHTML = '';
+    formContainer.hidden = true;
+    if (adminTools && !adminTools.hidden) addBtn.hidden = false;
+  }
+
+  function resolveField(selId, customId) {
+    const sel = document.querySelector(selId);
+    if (!sel) return null;
+    if (sel.value === 'Sonstiges') {
+      const custom = document.querySelector(customId);
+      return custom?.value.trim() || null;
+    }
+    return sel.value || null;
+  }
+
+  async function saveProfile() {
+    const machineId = document.querySelector('#mpFieldMachineId')?.value.trim();
+    const statusEl = document.querySelector('#mpFormStatus');
+    if (!machineId) {
+      statusEl.textContent = 'Maschinen-ID ist erforderlich.';
+      statusEl.className = 'v2-mp-form-status v2-mp-form-status--err';
+      return;
+    }
+    const payload = {
+      machine_id: machineId,
+      area: resolveField('#mpFieldArea', '#mpFieldAreaCustom'),
+      type: resolveField('#mpFieldType', '#mpFieldTypeCustom'),
+      position: resolveField('#mpFieldPosition', '#mpFieldPositionCustom'),
+      nickname: document.querySelector('#mpFieldNickname')?.value.trim() || null,
+    };
+    const saveBtn = document.querySelector('#mpSaveBtn');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Speichert …'; }
+    try {
+      const res = await fetch('/api/v2/machine-profiles', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json();
+      if (!body.ok) throw new Error(body.error?.message || 'Fehler beim Speichern');
+      statusEl.textContent = 'Gespeichert.';
+      statusEl.className = 'v2-mp-form-status v2-mp-form-status--ok';
+      await loadMachineProfiles();
+      setTimeout(() => { closeForm(); reloadPanel(); }, 800);
+    } catch (err) {
+      statusEl.textContent = err.message;
+      statusEl.className = 'v2-mp-form-status v2-mp-form-status--err';
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Speichern'; }
+    }
+  }
+
+  function reloadPanel() {
+    if (_machineProfilesCache) {
+      renderProfiles(_machineProfilesCache.data || [], _isAdmin);
+    }
+  }
+
+  let _isAdmin = false;
+
+  async function loadPanel() {
+    stateEl.textContent = 'Lade Automaten-Profile …';
+    stateEl.hidden = false;
+    contentEl.hidden = true;
+    try {
+      const res = await fetch('/api/v2/machine-profiles');
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error?.message || 'Fehler');
+      _machineProfilesCache = data;
+      _isAdmin = data.is_admin || false;
+      populateMachineSelects(data.data || []);
+      renderProfiles(data.data || [], _isAdmin);
+      stateEl.hidden = true;
+      contentEl.hidden = false;
+    } catch (err) {
+      stateEl.textContent = `Automaten-Profile konnten nicht geladen werden: ${err.message}`;
+    }
+  }
+
+  bodyEl?.addEventListener('click', (e) => {
+    const editBtn = e.target.closest('[data-action="edit"]');
+    if (!editBtn) return;
+    const machineId = editBtn.dataset.machineId;
+    const profile = (_machineProfilesCache?.data || []).find((p) => p.machine_id === machineId);
+    if (profile) openForm(profile);
+  });
+
+  addBtn?.addEventListener('click', () => openForm(null));
+
+  window.addEventListener('machineProfilesLoaded', (e) => {
+    const data = e.detail;
+    _isAdmin = data.is_admin || false;
+    if (!contentEl.hidden) renderProfiles(data.data || [], _isAdmin);
+  });
+
+  loadPanel();
 }());

@@ -27,6 +27,7 @@
           <a href="#assortment" class="v2-nav-link">Sortiment &amp; Slots</a>
           <a href="#monitoring" class="v2-nav-link">Monitoring</a>
           <a href="#onboarding" class="v2-nav-link">Produkt-Onboarding</a>
+          <a href="#machines" class="v2-nav-link">Automaten</a>
         </nav>
 
         <button class="v2-refill-btn" id="v2RefillOpen" aria-haspopup="dialog" aria-expanded="false">
@@ -295,7 +296,9 @@
                 <label class="v2-filter-label" for="inventoryLocationFilter">Standort</label>
                 <input class="v2-filter-input" id="inventoryLocationFilter" type="text" placeholder="alle" autocomplete="off" spellcheck="false">
                 <label class="v2-filter-label" for="inventoryMachineFilter">Automat</label>
-                <input class="v2-filter-input" id="inventoryMachineFilter" type="text" placeholder="alle" autocomplete="off" spellcheck="false">
+                <select class="v2-filter-select" id="inventoryMachineFilter" aria-label="Automat wählen">
+                  <option value="">alle</option>
+                </select>
               </div>
             </div>
 
@@ -332,7 +335,9 @@
                   </svg>
                   Automat
                 </label>
-                <input class="v2-filter-input" id="ecoMachineFilter" type="text" placeholder="alle" autocomplete="off" spellcheck="false">
+                <select class="v2-filter-select" id="ecoMachineFilter" aria-label="Automat wählen">
+                  <option value="">alle</option>
+                </select>
                 <button class="v2-export-btn" id="csvExportBtn" type="button" aria-label="KPI-Daten als CSV herunterladen">
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M8 2v9M5 8l3 3 3-3M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -408,7 +413,9 @@
                 <label class="v2-filter-label" for="assortmentLocationFilter">Standort</label>
                 <input class="v2-filter-input" id="assortmentLocationFilter" type="text" placeholder="alle" autocomplete="off" spellcheck="false">
                 <label class="v2-filter-label" for="assortmentMachineFilter">Automat</label>
-                <input class="v2-filter-input" id="assortmentMachineFilter" type="text" placeholder="alle" autocomplete="off" spellcheck="false">
+                <select class="v2-filter-select" id="assortmentMachineFilter" aria-label="Automat wählen">
+                  <option value="">alle</option>
+                </select>
               </div>
             </div>
             <div id="assortmentState" class="v2-panel-state" aria-live="polite">Noch keine PG-Antwort geladen.</div>
@@ -515,6 +522,45 @@
             <h2>Systemzustand</h2>
             <div id="monitoringState" class="v2-panel-state" aria-live="polite">Noch keine PG-Antwort geladen.</div>
             <div id="monitoringAmpelList" class="v2-ampel-grid v2-ampel-grid--detail" aria-label="Monitoring-Ampeln"></div>
+          </article>
+
+          <article id="machineProfilesPanel" class="v2-panel v2-panel--machine-profiles" data-endpoint="/api/v2/machine-profiles">
+            <div class="v2-panel-header">
+              <div>
+                <p class="v2-eyebrow">Automaten</p>
+                <h2>Automaten-Profile</h2>
+              </div>
+            </div>
+            <div id="machineProfilesState" class="v2-panel-state" aria-live="polite">Noch keine Daten geladen.</div>
+            <div id="machineProfilesContent" hidden>
+              <table class="v2-mp-table" aria-label="Automaten-Profile">
+                <thead>
+                  <tr>
+                    <th>Maschinen-ID</th>
+                    <th>Bezeichnung</th>
+                    <th>Bereich</th>
+                    <th>Typ</th>
+                    <th>Position</th>
+                    <th>Spitzname</th>
+                    <th id="mpEditHeader" hidden>Aktion</th>
+                  </tr>
+                </thead>
+                <tbody id="machineProfilesBody"></tbody>
+              </table>
+              <div id="mpEmptyState" class="v2-mp-empty" hidden>
+                <p>Noch keine Automaten-Profile angelegt.</p>
+                <p class="v2-mp-empty-hint">Erstelle das erste Profil, damit Automaten mit lesbaren Labels ausgewählt werden können.</p>
+              </div>
+              <div id="mpAdminTools" hidden>
+                <button class="v2-mp-add-btn" id="mpAddBtn" type="button">
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  </svg>
+                  Profil hinzufügen
+                </button>
+              </div>
+              <div id="mpFormContainer" hidden></div>
+            </div>
           </article>
 
           <article id="locationsPanel" class="v2-panel v2-panel--locations" data-endpoint="/api/v2/locations">
