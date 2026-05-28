@@ -14,6 +14,7 @@ const { buildCsvExport, buildCsvFilename } = require('./lib/reports.js');
 const { buildLocationProfile, buildLocationComparison, queryLocationsPg, upsertLocationPg } = require('./lib/location-profiles.js');
 const { buildCorrectionCases, queryCorrectionCasesPg } = require('./lib/correction-cases.js');
 const { buildMachineProfile, getMachineOptions, queryMachineProfilesPg, upsertMachineProfilePg } = require('./lib/machine-profiles.js');
+const { buildProductSuggestion, validateCorrectionAction, buildCorrectionActionPayload, buildCorrectionActionAuditEntry } = require('./lib/correction-action.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -2410,18 +2411,119 @@ const server = http.createServer(async (req, res) => {
     // ── Correction cases route ────────────────────────────────────────────────
 
     if (parsed.pathname === '/api/v2/correction-cases' && req.method === 'GET') {
+      const viewer = getViewer(req);
+      const isAdmin = viewer.role === 'admin';
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
-        sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), cases: [], counts: { mdb_proposals: 0, unknown_products: 0, correction_warnings: 0, total: 0 } });
+        sendJson(res, 200, { ok: true, is_admin: isAdmin, generatedAt: new Date().toISOString(), cases: [], counts: { mdb_proposals: 0, unknown_products: 0, correction_warnings: 0, total: 0 } });
         return;
       }
       try {
         const raw = await queryCorrectionCasesPg(pgUrl);
         const { cases, counts } = buildCorrectionCases(raw);
-        sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), cases, counts });
+        sendJson(res, 200, { ok: true, is_admin: isAdmin, generatedAt: new Date().toISOString(), cases, counts });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
       }
+      return;
+    }
+
+    // ── Correction action: suggest ────────────────────────────────────────────
+    // WF4 ID on Mini: 6tOZnWsxBNzHaVqA
+
+    if (parsed.pathname === '/api/v2/correction-action/suggest' && req.method === 'GET') {
+      const caseId = parsed.query?.case_id;
+      if (!caseId) {
+        sendJson(res, 400, { ok: false, error: { code: 'MISSING_CASE_ID', message: 'case_id erforderlich.' } });
+        return;
+      }
+      const pgUrl = dashboardV2PgUrl();
+      let correctionCase = null;
+      let allProducts = [];
+      if (pgUrl) {
+        try {
+          const { Client } = require('pg');
+          const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
+          await client.connect();
+          try {
+            const [rawCases, prodRes] = await Promise.all([
+              queryCorrectionCasesPg(pgUrl).catch(() => ({ proposals: [], unknownTxGroups: [], correctionWarnings: [] })),
+              client.query('SELECT product_id, name FROM automatenlager.products ORDER BY name'),
+            ]);
+            const { cases } = buildCorrectionCases(rawCases);
+            correctionCase = cases.find((c) => c.case_id === caseId) ?? null;
+            allProducts = prodRes.rows;
+          } finally {
+            await client.end();
+          }
+        } catch { /* fall through to empty response */ }
+      }
+      const { suggestion, products } = buildProductSuggestion(correctionCase ?? { case_id: caseId, suggested_product_id: null, suggested_product_name: null }, allProducts);
+      sendJson(res, 200, { ok: true, case_id: caseId, suggestion, products });
+      return;
+    }
+
+    // ── Correction action: confirm ────────────────────────────────────────────
+
+    if (parsed.pathname === '/api/v2/correction-action/confirm' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        auditGuestAccess(viewer, 'correction_action_denied', {});
+        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Nur Admins können Korrekturen bestätigen.' } });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await new Promise((resolve, reject) => {
+          let data = '';
+          req.on('data', (chunk) => { data += chunk; });
+          req.on('end', () => { try { resolve(data); } catch (e) { reject(e); } });
+          req.on('error', reject);
+        }));
+      } catch {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON.' } });
+        return;
+      }
+      const { case_id, case_type, machine_id, mdb_code, old_product_id, slot_assignment_id, confirmed_product_id } = body || {};
+      const validation = validateCorrectionAction({ confirmed_product_id });
+      if (!validation.valid) {
+        sendJson(res, 400, { ok: false, error: { code: 'VALIDATION_ERROR', message: validation.errors.map((e) => e.message).join(' '), errors: validation.errors } });
+        return;
+      }
+      const correctionCase = { case_id, case_type, machine_id, mdb_code, product_id: old_product_id, slot_assignment_id };
+      const payload = buildCorrectionActionPayload(correctionCase, { confirmed_product_id });
+      const webhookUrl = process.env.CORRECTION_ACTION_WEBHOOK_URL;
+      let wfResult = { ok: true, status_ref: `ca-${Date.now()}`, message: 'Payload protokolliert.' };
+      if (webhookUrl) {
+        try {
+          const wfResponse = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payload, triggered_by: viewer.login }),
+          });
+          const wfText = await wfResponse.text();
+          wfResult = {
+            ok: wfResponse.ok,
+            status_ref: `ca-${Date.now()}`,
+            message: wfResponse.ok ? 'Webhook erfolgreich.' : `Webhook antwortete ${wfResponse.status}: ${wfText.slice(0, 200)}`,
+          };
+        } catch (err) {
+          wfResult = { ok: false, status_ref: null, message: `Webhook nicht erreichbar: ${err.message}` };
+        }
+      }
+      const auditEntry = buildCorrectionActionAuditEntry(viewer, payload, wfResult);
+      const auditPath = path.join(__dirname, 'logs', 'correction-actions.jsonl');
+      try {
+        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
+        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
+      } catch { /* audit write failure must not block response */ }
+      sendJson(res, wfResult.ok ? 200 : 502, {
+        ok: wfResult.ok,
+        action_key: payload.action_key,
+        status_ref: auditEntry.status_ref,
+        message: wfResult.message,
+        ...(wfResult.ok ? {} : { error: { code: 'WEBHOOK_ERROR', message: wfResult.message } }),
+      });
       return;
     }
 

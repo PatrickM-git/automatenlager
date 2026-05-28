@@ -1464,10 +1464,13 @@ loadMachineProfiles();
     return fields.map(([label, val]) => `<div><p class="cc-field-label">${esc(label)}</p>${val}</div>`).join('');
   }
 
-  function buildCaseItem(c, idx) {
+  function buildCaseItem(c, idx, isAdmin) {
     const meta   = TYPE_META[c.case_type] || TYPE_META.correction_warning;
     const txCls  = (c.affected_tx_count > 0) ? ' cc-tx-count--nonzero' : '';
     const txBadge = c.affected_tx_count > 0 ? `<span class="cc-tx-count${txCls}">${esc(c.affected_tx_count)} Tx</span>` : '';
+    const fixBtn = isAdmin
+      ? `<button class="cc-fix-btn" data-action="fix" data-case-id="${esc(c.case_id)}" aria-label="Fall beheben">Beheben ▶</button>`
+      : '';
     return `<li class="cc-item cc-item--${meta.cls}" style="--cc-i:${idx}" data-case-id="${esc(c.case_id)}">
       <button class="cc-trigger" aria-expanded="false" aria-controls="cc-detail-${esc(c.case_id)}">
         <span class="cc-chip cc-chip--${meta.cls}">${esc(meta.icon)} ${esc(meta.label)}</span>
@@ -1475,6 +1478,7 @@ loadMachineProfiles();
         <span class="cc-meta">
           <span class="cc-date">${formatDate(c.created_at)}</span>
           ${txBadge}
+          ${fixBtn}
           <span class="cc-chevron">▾</span>
         </span>
       </button>
@@ -1515,8 +1519,12 @@ loadMachineProfiles();
     if (detail)  detail.setAttribute('aria-hidden', 'true');
   }
 
+  let _casesData = [];
+
   function renderCases(data) {
     const { cases, counts } = data;
+    const isAdmin = !!data.is_admin;
+    _casesData = cases;
 
     badge.removeAttribute('hidden');
     badge.textContent = counts.total;
@@ -1535,12 +1543,20 @@ loadMachineProfiles();
     for (const g of groups) {
       if (groups.length > 1) html += `<p class="cc-section-label">${esc(g.label)}</p>`;
       html += '<ul class="cc-list">';
-      for (const c of g.items) html += buildCaseItem(c, idx++);
+      for (const c of g.items) html += buildCaseItem(c, idx++, isAdmin);
       html += '</ul>';
     }
     body.innerHTML = html;
 
     body.addEventListener('click', (e) => {
+      const fixBtn = e.target.closest('[data-action="fix"]');
+      if (fixBtn) {
+        e.stopPropagation();
+        const caseId = fixBtn.dataset.caseId;
+        const caseData = _casesData.find((c) => c.case_id === caseId) || { case_id: caseId };
+        if (typeof window.openCorrectionDrawer === 'function') window.openCorrectionDrawer(caseData);
+        return;
+      }
       const closeBtn = e.target.closest('.cc-close');
       if (closeBtn) { const item = closeBtn.closest('.cc-item'); if (item) collapseItem(item); return; }
       const trigger = e.target.closest('.cc-trigger');
@@ -1571,6 +1587,188 @@ loadMachineProfiles();
 
   loadCorrectionCases();
   window._reloadCorrectionCases = loadCorrectionCases;
+}());
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Correction Action Drawer
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+(function initCorrectionActionDrawer() {
+  const backdrop   = document.getElementById('v2CaBackdrop');
+  const caseIdEl   = document.getElementById('v2CaCaseId');
+  const loadingEl  = document.getElementById('v2CaLoading');
+  const contentEl  = document.getElementById('v2CaContent');
+  const infoGrid   = document.getElementById('v2CaInfoGrid');
+  const suggestWrap= document.getElementById('v2CaSuggestWrap');
+  const suggestName= document.getElementById('v2CaSuggestName');
+  const productSel = document.getElementById('v2CaProductSelect');
+  const confirmBtn = document.getElementById('v2CaConfirmBtn');
+  const btnText    = confirmBtn?.querySelector('.v2-ca-btn-text');
+  const btnSpinner = confirmBtn?.querySelector('.v2-ca-btn-spinner');
+  const cancelBtn  = document.getElementById('v2CaCancel');
+  const closeBtn   = document.getElementById('v2CaClose');
+  const errorEl    = document.getElementById('v2CaError');
+  const successEl  = document.getElementById('v2CaSuccess');
+  const successMsg = document.getElementById('v2CaSuccessMsg');
+  if (!backdrop) return;
+
+  let _currentCase = null;
+  let _pending = false;
+
+  function esc(str) {
+    return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function showLoading() {
+    loadingEl.removeAttribute('hidden');
+    contentEl.setAttribute('hidden', '');
+  }
+
+  function showContent() {
+    loadingEl.setAttribute('hidden', '');
+    contentEl.removeAttribute('hidden');
+  }
+
+  function setPending(on) {
+    _pending = on;
+    confirmBtn.disabled = on;
+    if (btnText)    btnText.hidden    = on;
+    if (btnSpinner) btnSpinner.hidden = !on;
+  }
+
+  function showError(msg) {
+    errorEl.textContent = `${msg}  Bitte erneut versuchen oder Drawer schließen.`;
+    errorEl.removeAttribute('hidden');
+    errorEl.classList.remove('v2-ca-error--shake');
+    void errorEl.offsetWidth;
+    errorEl.classList.add('v2-ca-error--shake');
+  }
+
+  function hideError() {
+    errorEl.setAttribute('hidden', '');
+    errorEl.className = 'v2-ca-error';
+  }
+
+  window.openCorrectionDrawer = async function openCorrectionDrawer(caseData) {
+    _currentCase = caseData;
+    _pending = false;
+
+    caseIdEl.textContent = caseData.case_id || '';
+    infoGrid.innerHTML = '';
+    suggestWrap.setAttribute('hidden', '');
+    errorEl.setAttribute('hidden', '');
+    successEl.setAttribute('hidden', '');
+    productSel.innerHTML = '<option value="">— Produkt auswählen —</option>';
+    confirmBtn.disabled = false;
+    if (btnText)    btnText.hidden    = false;
+    if (btnSpinner) btnSpinner.hidden = true;
+    // Reset elements hidden on previous success
+    const fieldEl   = contentEl?.querySelector('.v2-ca-field');
+    const actionsEl = contentEl?.querySelector('.v2-ca-actions');
+    if (fieldEl)   fieldEl.removeAttribute('hidden');
+    if (actionsEl) actionsEl.removeAttribute('hidden');
+
+    // Info grid
+    const fields = [
+      ['Automat',      caseData.machine_id ?? '–'],
+      ['MDB-Code',     caseData.mdb_code   ?? '–'],
+      ['Produkt',      caseData.expected_product || caseData.product_id || '–'],
+      ['Transaktionen',caseData.affected_tx_count ?? 0],
+    ];
+    infoGrid.innerHTML = fields.map(([l, v]) =>
+      `<div class="v2-ca-info-item"><p class="v2-ca-info-label">${esc(l)}</p><p class="v2-ca-info-value">${esc(v)}</p></div>`
+    ).join('');
+
+    backdrop.removeAttribute('hidden');
+    backdrop.focus?.();
+    showLoading();
+
+    try {
+      const res = await fetch(`/api/v2/correction-action/suggest?case_id=${encodeURIComponent(caseData.case_id)}`);
+      const data = await res.json();
+
+      if (data.suggestion) {
+        suggestName.textContent = data.suggestion.name;
+        suggestWrap.removeAttribute('hidden');
+      }
+
+      const products = data.products || [];
+      productSel.innerHTML = '<option value="">— Produkt auswählen —</option>' +
+        products.map((p) => `<option value="${esc(p.product_id)}">${esc(p.name)}</option>`).join('');
+
+      if (data.suggestion?.product_id) {
+        productSel.value = String(data.suggestion.product_id);
+      }
+    } catch (_) {
+      // Non-critical: show empty select, user can still pick
+    }
+
+    showContent();
+  };
+
+  window.closeCorrectionDrawer = function closeCorrectionDrawer() {
+    backdrop.setAttribute('hidden', '');
+    _currentCase = null;
+    _pending = false;
+  };
+
+  window.submitCorrectionAction = async function submitCorrectionAction() {
+    if (_pending || !_currentCase) return;
+    const confirmedProductId = Number(productSel.value);
+    if (!confirmedProductId) {
+      showError('Bitte ein Produkt auswählen.');
+      return;
+    }
+    hideError();
+    setPending(true);
+
+    const body = {
+      case_id:              _currentCase.case_id,
+      case_type:            _currentCase.case_type,
+      machine_id:           _currentCase.machine_id,
+      mdb_code:             _currentCase.mdb_code,
+      old_product_id:       _currentCase.product_id,
+      slot_assignment_id:   _currentCase.slot_assignment_id,
+      confirmed_product_id: confirmedProductId,
+    };
+
+    try {
+      const res = await fetch('/api/v2/correction-action/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+
+      if (data.ok) {
+        successMsg.textContent = data.message || 'Korrektur erfolgreich gespeichert.';
+        contentEl.querySelector('.v2-ca-field').setAttribute('hidden', '');
+        contentEl.querySelector('.v2-ca-actions').setAttribute('hidden', '');
+        successEl.removeAttribute('hidden');
+        setTimeout(() => {
+          window.closeCorrectionDrawer();
+          if (typeof window._reloadCorrectionCases === 'function') window._reloadCorrectionCases();
+        }, 2000);
+      } else {
+        setPending(false);
+        showError(data.error?.message || 'Korrektur fehlgeschlagen.');
+      }
+    } catch (err) {
+      setPending(false);
+      showError(`Verbindungsfehler: ${err.message}`);
+    }
+  };
+
+  // Event listeners
+  if (closeBtn) closeBtn.addEventListener('click', window.closeCorrectionDrawer);
+  if (cancelBtn) cancelBtn.addEventListener('click', window.closeCorrectionDrawer);
+  if (confirmBtn) confirmBtn.addEventListener('click', window.submitCorrectionAction);
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) window.closeCorrectionDrawer();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !backdrop.hidden) window.closeCorrectionDrawer();
+  });
 }());
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -591,6 +591,77 @@
         </section>
       </main>
     </div>
+    <!-- Correction Action Drawer ──────────────────────────────────────────── -->
+    <div class="v2-ca-backdrop" id="v2CaBackdrop" hidden role="dialog" aria-modal="true" aria-label="Korrekturfall beheben">
+      <div class="v2-ca-drawer" id="v2CaDrawer">
+        <div class="v2-ca-head">
+          <div class="v2-ca-head-top">
+            <div>
+              <p class="v2-ca-title">Korrekturfall beheben</p>
+              <p class="v2-ca-case-id" id="v2CaCaseId"></p>
+            </div>
+            <button class="v2-ca-close" id="v2CaClose" aria-label="Schließen">✕</button>
+          </div>
+        </div>
+        <div class="v2-ca-body">
+          <!-- Loading state -->
+          <div id="v2CaLoading" class="v2-ca-loading">
+            <div class="v2-ca-spinner" aria-hidden="true"></div>
+            <p>Lade Produktvorschlag …</p>
+          </div>
+          <!-- Content -->
+          <div id="v2CaContent" hidden>
+            <!-- Case info -->
+            <div class="v2-ca-info-grid" id="v2CaInfoGrid"></div>
+            <!-- Suggestion -->
+            <div class="v2-ca-suggest-wrap" id="v2CaSuggestWrap" hidden>
+              <div class="v2-ca-suggest-box" id="v2CaSuggestBox">
+                <svg class="v2-ca-suggest-check" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <circle cx="8" cy="8" r="7" stroke="#f59e0b" stroke-width="1.5"/>
+                  <polyline points="5,8.5 7.2,10.5 11,6" stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                </svg>
+                <span class="v2-ca-suggest-label">Vorschlag:</span>
+                <span class="v2-ca-suggest-name" id="v2CaSuggestName"></span>
+              </div>
+            </div>
+            <!-- Product select -->
+            <div class="v2-ca-field">
+              <label class="v2-ca-label" for="v2CaProductSelect">Korrektes Produkt wählen</label>
+              <div class="v2-ca-select-wrap">
+                <select class="v2-ca-select" id="v2CaProductSelect" aria-label="Produkt auswählen">
+                  <option value="">— Produkt auswählen —</option>
+                </select>
+                <svg class="v2-ca-select-caret" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+                  <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+            </div>
+            <!-- Error feedback -->
+            <div class="v2-ca-error" id="v2CaError" hidden role="alert"></div>
+            <!-- Actions -->
+            <div class="v2-ca-actions">
+              <button class="v2-ca-confirm-btn" id="v2CaConfirmBtn">
+                <span class="v2-ca-btn-text">Korrektur bestätigen</span>
+                <span class="v2-ca-btn-spinner" aria-hidden="true" hidden></span>
+              </button>
+              <button class="v2-ca-cancel-link" id="v2CaCancel" type="button">Abbrechen</button>
+            </div>
+            <!-- Success feedback -->
+            <div class="v2-ca-success" id="v2CaSuccess" hidden role="status">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                <circle cx="9" cy="9" r="8" stroke="#16a34a" stroke-width="1.5"/>
+                <polyline points="5.5,9.5 7.8,11.5 12.5,6.5" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+              </svg>
+              <div>
+                <p class="v2-ca-success-msg" id="v2CaSuccessMsg"></p>
+                <p class="v2-ca-success-hint">Drawer schließt in 2 s …</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script src="/v2.js"></script>
   </body>
 </html>
