@@ -155,7 +155,7 @@ async function queryEconomicsPg(pgUrl, query = {}) {
                   date_trunc('month', g.posting_date)::DATE  AS month,
                   SUM(g.quantity_sold)::int                  AS qty,
                   SUM(g.revenue_net)                         AS revenue_net,
-                  SUM(g.gross_profit)                        AS db_net
+                  SUM(g.revenue_net - g.cost_of_goods * g.revenue_net / NULLIF(g.revenue_gross, 0)) AS db_net
              FROM automatenlager.guv_daily g
              LEFT JOIN automatenlager.products p ON p.product_id = g.product_id
             WHERE g.source != 'historic_backfill'
@@ -183,7 +183,7 @@ async function queryEconomicsPg(pgUrl, query = {}) {
                   date_trunc('month', g.posting_date)::DATE  AS month,
                   SUM(g.quantity_sold)::int                  AS qty,
                   SUM(g.revenue_net)                         AS revenue_net,
-                  SUM(g.gross_profit)                        AS db_net
+                  SUM(g.revenue_net - g.cost_of_goods * g.revenue_net / NULLIF(g.revenue_gross, 0)) AS db_net
              FROM automatenlager.guv_daily g
              LEFT JOIN automatenlager.products p ON p.product_id = g.product_id
             WHERE g.source != 'historic_backfill'
