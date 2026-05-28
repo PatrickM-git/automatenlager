@@ -120,8 +120,8 @@ async function queryCorrectionCasesPg(pgUrl) {
       `),
       client.query(`
         SELECT
-          st.product_key,
-          MAX(st.product_name_raw) AS product_name_raw,
+          st.product_name_raw      AS product_key,
+          st.product_name_raw,
           MAX(st.machine_id)       AS machine_id,
           MAX(st.mdb_code)         AS mdb_code,
           COUNT(*)::int            AS tx_count,
@@ -129,9 +129,9 @@ async function queryCorrectionCasesPg(pgUrl) {
           MAX(st.settlement_at)::text AS last_seen_at
         FROM automatenlager.sales_transactions st
         WHERE st.product_id IS NULL
-          AND st.product_key IS NOT NULL
-          AND st.product_key <> ''
-        GROUP BY st.product_key
+          AND st.product_name_raw IS NOT NULL
+          AND st.product_name_raw <> ''
+        GROUP BY st.product_name_raw
         ORDER BY tx_count DESC
         LIMIT 100
       `),
