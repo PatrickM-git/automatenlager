@@ -1413,3 +1413,161 @@ initRefillDrawer();
 
   loadLocations();
 }());
+
+// ── Correction Cases ──────────────────────────────────────────────────────────
+
+(function initCorrectionCases() {
+  const panel  = document.getElementById('correctionCases');
+  const state  = document.getElementById('correctionState');
+  const body   = document.getElementById('correctionBody');
+  const badge  = document.getElementById('correctionBadge');
+  if (!panel) return;
+
+  const TYPE_META = {
+    mdb_proposal:       { label: 'MDB-Mismatch', cls: 'proposal',  icon: '⇄' },
+    unknown_product:    { label: 'Unbekannt',     cls: 'unknown',   icon: '?' },
+    correction_warning: { label: 'Warnung',       cls: 'warning-c', icon: '!' },
+  };
+
+  function formatDate(iso) {
+    if (!iso) return '–';
+    const d = new Date(iso);
+    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  }
+
+  function esc(str) {
+    return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function buildHint(c) {
+    if (c.case_type === 'mdb_proposal' && c.wf4_auto_start) {
+      return `<div class="cc-hint cc-hint--green"><span class="cc-hint-icon">✓</span><span>WF4 hat automatisch einen Korrekturvorschlag erstellt.</span></div>`;
+    }
+    if (c.case_type === 'unknown_product') {
+      return `<div class="cc-hint cc-hint--amber"><span class="cc-hint-icon">⚑</span><span>Produkt noch nicht im System – Onboarding erforderlich.</span></div>`;
+    }
+    return '';
+  }
+
+  function buildDetailFields(c) {
+    const fields = [];
+    if (c.machine_id)           fields.push(['Automat',   `<span class="cc-field-value cc-field-value--mono">${esc(c.machine_id)}</span>`]);
+    if (c.mdb_code != null)     fields.push(['MDB-Slot',  `<span class="cc-field-value cc-field-value--mono">${esc(c.mdb_code)}</span>`]);
+    if (c.expected_product)     fields.push(['Erwartet',  `<span class="cc-field-value">${esc(c.expected_product)}</span>`]);
+    if (c.suggested_product_name) fields.push(['Vorschlag', `<span class="cc-field-value">${esc(c.suggested_product_name)}</span>`]);
+    if (c.product_key)          fields.push(['Nayax-Key', `<span class="cc-field-value cc-field-value--mono">${esc(c.product_key)}</span>`]);
+    if (c.warning_type)         fields.push(['Typ',       `<span class="cc-field-value cc-field-value--mono">${esc(c.warning_type)}</span>`]);
+    const txCls = (c.affected_tx_count > 0) ? ' cc-tx-count--nonzero' : '';
+    fields.push(['Transaktionen', `<span class="cc-field-value${txCls}">${esc(c.affected_tx_count ?? 0)}</span>`]);
+    if (c.created_at)           fields.push(['Erstellt',  `<span class="cc-field-value">${formatDate(c.created_at)}</span>`]);
+    return fields.map(([label, val]) => `<div><p class="cc-field-label">${esc(label)}</p>${val}</div>`).join('');
+  }
+
+  function buildCaseItem(c, idx) {
+    const meta   = TYPE_META[c.case_type] || TYPE_META.correction_warning;
+    const txCls  = (c.affected_tx_count > 0) ? ' cc-tx-count--nonzero' : '';
+    const txBadge = c.affected_tx_count > 0 ? `<span class="cc-tx-count${txCls}">${esc(c.affected_tx_count)} Tx</span>` : '';
+    return `<li class="cc-item cc-item--${meta.cls}" style="--cc-i:${idx}" data-case-id="${esc(c.case_id)}">
+      <button class="cc-trigger" aria-expanded="false" aria-controls="cc-detail-${esc(c.case_id)}">
+        <span class="cc-chip cc-chip--${meta.cls}">${esc(meta.icon)} ${esc(meta.label)}</span>
+        <span class="cc-summary">${esc(c.nayax_report || c.message || '–')}</span>
+        <span class="cc-meta">
+          <span class="cc-date">${formatDate(c.created_at)}</span>
+          ${txBadge}
+          <span class="cc-chevron">▾</span>
+        </span>
+      </button>
+      <div class="cc-detail" id="cc-detail-${esc(c.case_id)}" role="region" aria-hidden="true">
+        <div class="cc-detail-inner">
+          <button class="cc-close" aria-label="Schließen" title="Schließen">✕</button>
+          <div class="cc-fields">${buildDetailFields(c)}</div>
+          ${buildHint(c)}
+        </div>
+      </div>
+    </li>`;
+  }
+
+  function renderEmpty() {
+    body.innerHTML = `<div class="cc-empty">
+      <div class="cc-empty-icon">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+          <polyline points="4,12 9,17 18,7" stroke="var(--color-success,#16a34a)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </div>
+      <p class="cc-empty-text">Keine offenen Fälle – alles in Ordnung</p>
+    </div>`;
+  }
+
+  function expandItem(item) {
+    item.setAttribute('data-open', '');
+    const trigger = item.querySelector('.cc-trigger');
+    const detail  = item.querySelector('.cc-detail');
+    if (trigger) trigger.setAttribute('aria-expanded', 'true');
+    if (detail)  detail.setAttribute('aria-hidden', 'false');
+  }
+
+  function collapseItem(item) {
+    item.removeAttribute('data-open');
+    const trigger = item.querySelector('.cc-trigger');
+    const detail  = item.querySelector('.cc-detail');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    if (detail)  detail.setAttribute('aria-hidden', 'true');
+  }
+
+  function renderCases(data) {
+    const { cases, counts } = data;
+
+    badge.removeAttribute('hidden');
+    badge.textContent = counts.total;
+    badge.className = counts.total === 0 ? 'cc-badge cc-badge--ok' : 'cc-badge amber-pulse';
+
+    if (counts.total === 0) { renderEmpty(); return; }
+
+    const groups = [
+      { items: cases.filter((c) => c.case_type === 'mdb_proposal'),       label: 'MDB-Abweichungen' },
+      { items: cases.filter((c) => c.case_type === 'unknown_product'),    label: 'Unbekannte Produkte' },
+      { items: cases.filter((c) => c.case_type === 'correction_warning'), label: 'Warnungen' },
+    ].filter((g) => g.items.length > 0);
+
+    let idx = 0;
+    let html = '';
+    for (const g of groups) {
+      if (groups.length > 1) html += `<p class="cc-section-label">${esc(g.label)}</p>`;
+      html += '<ul class="cc-list">';
+      for (const c of g.items) html += buildCaseItem(c, idx++);
+      html += '</ul>';
+    }
+    body.innerHTML = html;
+
+    body.addEventListener('click', (e) => {
+      const closeBtn = e.target.closest('.cc-close');
+      if (closeBtn) { const item = closeBtn.closest('.cc-item'); if (item) collapseItem(item); return; }
+      const trigger = e.target.closest('.cc-trigger');
+      if (!trigger) return;
+      const item = trigger.closest('.cc-item');
+      if (!item) return;
+      const isOpen = item.hasAttribute('data-open');
+      body.querySelectorAll('.cc-item[data-open]').forEach(collapseItem);
+      if (!isOpen) expandItem(item);
+    });
+  }
+
+  async function loadCorrectionCases() {
+    state.textContent = 'Lade Korrekturfälle …';
+    state.removeAttribute('hidden');
+    body.setAttribute('hidden', '');
+    try {
+      const res  = await fetch('/api/v2/correction-cases');
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error?.message || 'Fehler beim Laden');
+      state.setAttribute('hidden', '');
+      body.removeAttribute('hidden');
+      renderCases(data);
+    } catch (err) {
+      state.textContent = `Korrekturfälle konnten nicht geladen werden: ${err.message}`;
+    }
+  }
+
+  loadCorrectionCases();
+  window._reloadCorrectionCases = loadCorrectionCases;
+}());

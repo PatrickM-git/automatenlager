@@ -12,6 +12,7 @@ const { buildSlotChangePreview, validateSlotChange, buildSlotChangePayload, buil
 const { buildProductOnboardingData, queryProductOnboardingPg } = require('./lib/product-onboarding.js');
 const { buildCsvExport, buildCsvFilename } = require('./lib/reports.js');
 const { buildLocationProfile, buildLocationComparison, queryLocationsPg, upsertLocationPg } = require('./lib/location-profiles.js');
+const { buildCorrectionCases, queryCorrectionCasesPg } = require('./lib/correction-cases.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -2352,6 +2353,24 @@ const server = http.createServer(async (req, res) => {
         } else {
           sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
         }
+      }
+      return;
+    }
+
+    // ── Correction cases route ────────────────────────────────────────────────
+
+    if (parsed.pathname === '/api/v2/correction-cases' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), cases: [], counts: { mdb_proposals: 0, unknown_products: 0, correction_warnings: 0, total: 0 } });
+        return;
+      }
+      try {
+        const raw = await queryCorrectionCasesPg(pgUrl);
+        const { cases, counts } = buildCorrectionCases(raw);
+        sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), cases, counts });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
       }
       return;
     }
