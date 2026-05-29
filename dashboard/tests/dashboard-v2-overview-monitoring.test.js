@@ -211,6 +211,20 @@ test('AC-WD1: buildWarningDrilldown extracts entity from warning_key and returns
   assert.equal(result.correction_link, null);
 });
 
+test('AC-WD1b: buildWarningDrilldown falls back to message prefix as entity when warning_key has no pipe separator', () => {
+  const result = buildWarningDrilldown({
+    warning_type: 'MHD_NEAR',
+    warning_key: 'WARN_MHD_NEAR_SKU_NICK_NACKS_B_NICK_NACKS_20260502_1_2026_05_29',
+    message: 'Nick Nacks: Charge B_NICK_NACKS_20260502_1 ist seit 2 Tag(en) abgelaufen.',
+    severity: 'critical',
+    resolved: false,
+    created_at: '2026-05-29T07:00:00.000Z',
+  });
+
+  assert.equal(result.entity, 'Nick Nacks');
+  assert.equal(result.correction_link, null);
+});
+
 test('AC-WD2: buildWarningDrilldown returns correction_link for actionable warning types', () => {
   const types = ['UNKNOWN_PRODUCT', 'UNMATCHED_PRODUCT', 'MDB_CODE_CHANGED_FOR_PRODUCT'];
   for (const warning_type of types) {

@@ -241,7 +241,16 @@ const CORRECTION_LINK_TYPES = new Set([
 
 function buildWarningDrilldown(warning = {}) {
   const parts = clean(warning.warning_key).split('|');
-  const entity = parts.length >= 2 ? parts[1] : null;
+  let entity = null;
+  if (parts.length >= 2) {
+    entity = parts[1];
+  } else {
+    const msg = clean(warning.message);
+    const colonIdx = msg.indexOf(':');
+    if (colonIdx > 0 && colonIdx < 60) {
+      entity = msg.substring(0, colonIdx).trim();
+    }
+  }
   const correctionLink = CORRECTION_LINK_TYPES.has(
     clean(warning.warning_type).toUpperCase(),
   ) ? '#correctionCasesPanel' : null;
