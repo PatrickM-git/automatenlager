@@ -506,6 +506,15 @@
                 <p class="v2-eyebrow v2-section-gap">Produktstatus-Übersicht <span class="v2-eyebrow-sub">· alle Produkte nach Onboarding-Stufe</span></p>
                 <div class="v2-ob-status-grid" id="obStatusGrid" aria-label="Produkte nach Status"></div>
               </div>
+
+              <!-- Slot offen – actionable list -->
+              <div class="v2-ob-section" id="obSlotOffenSection" hidden>
+                <div class="v2-ob-section-head">
+                  <p class="v2-eyebrow v2-section-gap">Slot-Zuordnung offen <span id="obSlotOffenCount" class="v2-ob-count-badge v2-ob-count-badge--warn"></span></p>
+                  <p class="v2-ob-section-hint">Diese Produkte haben einen Nayax-Alias, aber noch keinen aktiven Automaten-Slot. Slot direkt hier zuweisen.</p>
+                </div>
+                <div id="obSlotOffenList" class="v2-ob-slot-offen-list" role="list" aria-label="Produkte ohne Slot"></div>
+              </div>
             </div>
           </article>
 
@@ -658,6 +667,95 @@
                 <p class="v2-ca-success-hint">Drawer schließt in 2 s …</p>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slot-Assign Inline Drawer ───────────────────────────────────────── -->
+    <div class="v2-sa-backdrop" id="v2SaBackdrop" hidden role="dialog" aria-modal="true" aria-label="Slot zuweisen">
+      <div class="v2-sa-drawer" id="v2SaDrawer">
+        <div class="v2-sa-head">
+          <div class="v2-sa-head-top">
+            <div>
+              <p class="v2-sa-title">Slot zuweisen</p>
+              <p class="v2-sa-product-name" id="v2SaProductName"></p>
+            </div>
+            <button class="v2-sa-close" id="v2SaClose" aria-label="Schließen">✕</button>
+          </div>
+          <div class="v2-sa-steps" role="list" aria-label="Schritte">
+            <div class="v2-sa-step-tab active" id="v2SaStepTab1" role="listitem"><span class="v2-sa-step-num">1</span><span>Automat</span></div>
+            <span class="v2-sa-step-arrow" aria-hidden="true">›</span>
+            <div class="v2-sa-step-tab" id="v2SaStepTab2" role="listitem"><span class="v2-sa-step-num">2</span><span>MDB &amp; Menge</span></div>
+            <span class="v2-sa-step-arrow" aria-hidden="true">›</span>
+            <div class="v2-sa-step-tab" id="v2SaStepTab3" role="listitem"><span class="v2-sa-step-num">3</span><span>Bestätigen</span></div>
+            <span class="v2-sa-step-arrow" aria-hidden="true">›</span>
+            <div class="v2-sa-step-tab" id="v2SaStepTab4" role="listitem"><span class="v2-sa-step-num">4</span><span>Ergebnis</span></div>
+          </div>
+        </div>
+        <div class="v2-sa-body">
+          <!-- Step 1: Automat wählen -->
+          <div id="v2SaStep1">
+            <p class="v2-sa-section-eyebrow">Automat wählen</p>
+            <div class="v2-sa-select-wrap">
+              <select class="v2-sa-select" id="v2SaMachineSelect" aria-label="Automat auswählen">
+                <option value="">— Automat wählen —</option>
+              </select>
+              <svg class="v2-sa-select-caret" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+                <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div class="v2-sa-readonly-notice" id="v2SaReadonlyNotice" hidden>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M7 4v3.5M7 9.5v.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              Nur Admin kann Slots zuweisen.
+            </div>
+            <button class="v2-sa-primary-btn" id="v2SaToStep2" disabled>Weiter →</button>
+          </div>
+
+          <!-- Step 2: MDB, Menge, Datum -->
+          <div id="v2SaStep2" hidden>
+            <div class="v2-sa-slot-head">
+              <button class="v2-sa-back-circle" id="v2SaBack1" aria-label="Zurück zur Automaten-Auswahl">←</button>
+              <p class="v2-sa-slot-eyebrow">Automat</p>
+            </div>
+            <div class="v2-sa-machine-card" id="v2SaMachineCard"></div>
+            <div class="v2-sa-form">
+              <div class="v2-sa-field">
+                <label class="v2-sa-label" for="v2SaMdbCode">MDB-Code</label>
+                <input class="v2-sa-number-input" id="v2SaMdbCode" type="number" min="0" step="1" placeholder="z.B. 12" aria-label="MDB-Code">
+              </div>
+              <div class="v2-sa-field-row">
+                <div class="v2-sa-field">
+                  <label class="v2-sa-label" for="v2SaQty">Startmenge</label>
+                  <input class="v2-sa-number-input" id="v2SaQty" type="number" min="0" step="1" placeholder="0" aria-label="Startmenge">
+                </div>
+                <div class="v2-sa-field">
+                  <label class="v2-sa-label" for="v2SaStartDate">Zugewiesen ab</label>
+                  <input class="v2-sa-date-input" id="v2SaStartDate" type="date" aria-label="Startdatum">
+                </div>
+              </div>
+              <div class="v2-sa-validation-error" id="v2SaValidErr" hidden role="alert"></div>
+              <button class="v2-sa-primary-btn" id="v2SaToStep3" disabled>Weiter zur Bestätigung →</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Bestätigen -->
+          <div id="v2SaStep3" hidden>
+            <p class="v2-sa-section-eyebrow">Zusammenfassung</p>
+            <div class="v2-sa-confirm-summary" id="v2SaConfirmSummary"></div>
+            <div class="v2-sa-action-row">
+              <button class="v2-sa-ghost-btn" id="v2SaBackFromStep3">← Zurück</button>
+              <button class="v2-sa-confirm-btn" id="v2SaConfirmBtn">
+                <span class="v2-sa-btn-text">Slot zuweisen</span>
+                <span class="v2-sa-btn-spinner" aria-hidden="true" hidden></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 4: Ergebnis -->
+          <div id="v2SaStep4" hidden>
+            <div class="v2-sa-result-card" id="v2SaResultMsg"></div>
+            <button class="v2-sa-ghost-btn v2-sa-full" id="v2SaDoneBtn">Schließen</button>
           </div>
         </div>
       </div>

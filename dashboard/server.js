@@ -15,6 +15,7 @@ const { buildLocationProfile, buildLocationComparison, queryLocationsPg, upsertL
 const { buildCorrectionCases, queryCorrectionCasesPg } = require('./lib/correction-cases.js');
 const { buildMachineProfile, getMachineOptions, queryMachineProfilesPg, upsertMachineProfilePg } = require('./lib/machine-profiles.js');
 const { buildProductSuggestion, validateCorrectionAction, buildCorrectionActionPayload, buildCorrectionActionAuditEntry } = require('./lib/correction-action.js');
+const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buildSlotAssignAuditEntry } = require('./lib/slot-assign-inline.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -2523,6 +2524,113 @@ const server = http.createServer(async (req, res) => {
         action_key: payload.action_key,
         status_ref: auditEntry.status_ref,
         message: wfResult.message,
+        ...(wfResult.ok ? {} : { error: { code: 'WEBHOOK_ERROR', message: wfResult.message } }),
+      });
+      return;
+    }
+
+    // ── Slot-Assign Inline routes ─────────────────────────────────────────────
+
+    if (parsed.pathname === '/api/v2/slot-assign-inline/preview' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, data: null, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      const productId = clean(parsed.query.product_id || '');
+      if (!productId) {
+        sendJson(res, 400, { ok: false, error: { code: 'MISSING_PARAMS', message: 'product_id erforderlich.' } });
+        return;
+      }
+      try {
+        const { Client } = require('pg');
+        const client = new Client({ connectionString: pgUrl });
+        await client.connect();
+        let productRow, machineRows;
+        try {
+          const [pRes, mRes] = await Promise.all([
+            client.query(
+              `SELECT p.product_id, p.product_key, p.name
+               FROM automatenlager.products p
+               WHERE p.product_id = $1 LIMIT 1`,
+              [Number(productId)]
+            ),
+            client.query(
+              `SELECT machine_id, area, type, position, nickname
+               FROM automatenlager.machine_profiles
+               ORDER BY area NULLS LAST, machine_id`
+            ),
+          ]);
+          productRow  = pRes.rows[0] || null;
+          machineRows = mRes.rows;
+        } finally {
+          await client.end();
+        }
+        if (!productRow) {
+          sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: `Produkt ${productId} nicht gefunden.` } });
+          return;
+        }
+        const { buildMachineLabel } = require('./lib/machine-profiles.js');
+        const machines = machineRows.map((m) => ({ ...m, label: buildMachineLabel(m) }));
+        const preview = buildSlotAssignPreview(productRow, machines);
+        sendJson(res, 200, { ok: true, ...preview });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    if (parsed.pathname === '/api/v2/slot-assign-inline/confirm' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Nur Admin kann Slots zuweisen.' } });
+        return;
+      }
+      let body;
+      try { body = await readJsonBody(req); } catch { body = {}; }
+      const { product_id, product_key, machine_id, mdb_code, qty, start_date } = body || {};
+
+      const productRow = { product_id: product_id ?? null, product_key: product_key ?? null, name: '' };
+      const validation = validateSlotAssign({ machine_id, mdb_code, qty, start_date });
+      if (!validation.valid || !product_id) {
+        const missingFields = !product_id
+          ? [{ field: 'product_id', message: 'Produkt-ID erforderlich.' }, ...validation.errors]
+          : validation.errors;
+        sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: missingFields.map((e) => e.message).join(' '), fields: missingFields } });
+        return;
+      }
+
+      const payload  = buildSlotAssignPayload(productRow, { machine_id, mdb_code, qty, start_date });
+      const webhookUrl = process.env.SLOT_ASSIGN_INLINE_WEBHOOK_URL || '';
+      let wfResult;
+      if (webhookUrl) {
+        try {
+          const wfRes = await fetch(webhookUrl, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(payload),
+          });
+          const wfBody = await wfRes.json().catch(() => ({}));
+          wfResult = { ok: wfRes.ok, status_ref: wfBody.status_ref ?? null, message: wfBody.message ?? (wfRes.ok ? 'ok' : `HTTP ${wfRes.status}`) };
+        } catch (err) {
+          wfResult = { ok: false, status_ref: null, message: `Webhook nicht erreichbar: ${err.message}` };
+        }
+      } else {
+        wfResult = { ok: true, status_ref: `sa-local-${Date.now()}`, message: 'Slot-Zuweisung gespeichert (kein Webhook konfiguriert).' };
+      }
+
+      const auditEntry = buildSlotAssignAuditEntry(viewer, payload, wfResult);
+      const auditPath  = path.join(__dirname, 'logs', 'slot-assign-actions.jsonl');
+      try {
+        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
+        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
+      } catch { /* non-blocking */ }
+
+      sendJson(res, wfResult.ok ? 200 : 502, {
+        ok:         wfResult.ok,
+        assign_key: payload.assign_key,
+        status_ref: auditEntry.status_ref,
+        message:    wfResult.message,
         ...(wfResult.ok ? {} : { error: { code: 'WEBHOOK_ERROR', message: wfResult.message } }),
       });
       return;

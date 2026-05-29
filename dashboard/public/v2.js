@@ -1420,6 +1420,51 @@ loadMachineProfiles();
     }).join('');
   }
 
+  function renderSlotOffenList(products, isAdmin) {
+    const section = document.getElementById('obSlotOffenSection');
+    const list    = document.getElementById('obSlotOffenList');
+    const badge   = document.getElementById('obSlotOffenCount');
+    if (!section || !list) return;
+
+    if (badge) badge.textContent = String(products.length);
+
+    if (!products.length) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+
+    list.innerHTML = products.map((p) => {
+      const assignBtn = isAdmin
+        ? `<button class="v2-ob-assign-btn"
+             data-product-id="${esc(p.product_id)}"
+             data-product-name="${esc(p.name)}"
+             data-product-key="${esc(p.product_key || '')}"
+             aria-label="Slot zuweisen für ${esc(p.name)}">
+             ＋ Slot zuweisen
+           </button>`
+        : `<span class="v2-ob-assign-btn" style="opacity:.4;cursor:not-allowed" aria-disabled="true">Nur Admin</span>`;
+      return `
+        <div class="v2-ob-slot-offen-row" role="listitem">
+          <div>
+            <div class="v2-ob-slot-offen-name">${esc(p.name || p.product_key || '—')}</div>
+            ${p.product_key ? `<div class="v2-ob-slot-offen-key">${esc(p.product_key)}</div>` : ''}
+          </div>
+          ${assignBtn}
+        </div>`;
+    }).join('');
+
+    list.addEventListener('click', (e) => {
+      const btn = e.target.closest('.v2-ob-assign-btn[data-product-id]');
+      if (!btn) return;
+      window.openSlotAssignDrawer({
+        product_id:   btn.dataset.productId,
+        product_name: btn.dataset.productName,
+        product_key:  btn.dataset.productKey,
+      });
+    });
+  }
+
   function renderOnboarding(data, wf2Url, isAdmin) {
     const byStatus = data.products_by_status || {};
 
@@ -1434,6 +1479,7 @@ loadMachineProfiles();
     renderApprovalList(data.pending_approvals || [], wf2Url, isAdmin);
     renderUnknownList(data.unknown_products || []);
     renderStatusGrid(byStatus);
+    renderSlotOffenList(byStatus.slot_offen || [], isAdmin);
 
     const content = document.getElementById('onboardingContent');
     if (content) content.hidden = false;
@@ -1467,6 +1513,295 @@ loadMachineProfiles();
   }
 
   loadOnboarding();
+  window._reloadOnboarding = loadOnboarding;
+}());
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Slot-Assign Inline Drawer (#46)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+(function initSlotAssignDrawer() {
+  const backdrop    = document.getElementById('v2SaBackdrop');
+  const productName = document.getElementById('v2SaProductName');
+  const closeBtn    = document.getElementById('v2SaClose');
+
+  // Step tabs
+  const tabs = [1,2,3,4].map((n) => document.getElementById(`v2SaStepTab${n}`));
+
+  // Step panels
+  const step1 = document.getElementById('v2SaStep1');
+  const step2 = document.getElementById('v2SaStep2');
+  const step3 = document.getElementById('v2SaStep3');
+  const step4 = document.getElementById('v2SaStep4');
+
+  // Step 1 els
+  const machineSelect  = document.getElementById('v2SaMachineSelect');
+  const toStep2Btn     = document.getElementById('v2SaToStep2');
+  const readonlyNotice = document.getElementById('v2SaReadonlyNotice');
+
+  // Step 2 els
+  const back1Btn    = document.getElementById('v2SaBack1');
+  const machineCard = document.getElementById('v2SaMachineCard');
+  const mdbInput    = document.getElementById('v2SaMdbCode');
+  const qtyInput    = document.getElementById('v2SaQty');
+  const dateInput   = document.getElementById('v2SaStartDate');
+  const validErr    = document.getElementById('v2SaValidErr');
+  const toStep3Btn  = document.getElementById('v2SaToStep3');
+
+  // Step 3 els
+  const confirmSummary   = document.getElementById('v2SaConfirmSummary');
+  const backFromStep3Btn = document.getElementById('v2SaBackFromStep3');
+  const confirmBtn       = document.getElementById('v2SaConfirmBtn');
+  const btnText          = confirmBtn?.querySelector('.v2-sa-btn-text');
+  const btnSpinner       = confirmBtn?.querySelector('.v2-sa-btn-spinner');
+
+  // Step 4 els
+  const resultMsg = document.getElementById('v2SaResultMsg');
+  const doneBtn   = document.getElementById('v2SaDoneBtn');
+
+  if (!backdrop) return;
+
+  let _product = null;
+  let _pending = false;
+
+  function esc(str) {
+    return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function showStep(n) {
+    [step1,step2,step3,step4].forEach((el, i) => { if (el) el.hidden = (i + 1 !== n); });
+    tabs.forEach((tab, i) => {
+      if (!tab) return;
+      tab.classList.toggle('active', i + 1 === n);
+      tab.classList.toggle('done',   i + 1 < n);
+    });
+  }
+
+  function setPending(on) {
+    _pending = on;
+    if (confirmBtn) confirmBtn.disabled = on;
+    if (btnText)    btnText.hidden    = on;
+    if (btnSpinner) btnSpinner.hidden = !on;
+  }
+
+  function showValidErr(msg) {
+    if (!validErr) return;
+    validErr.textContent = msg;
+    validErr.removeAttribute('hidden');
+    validErr.classList.remove('v2-sa-shake');
+    void validErr.offsetWidth;
+    validErr.classList.add('v2-sa-shake');
+  }
+
+  function hideValidErr() {
+    if (validErr) { validErr.setAttribute('hidden', ''); validErr.className = 'v2-sa-validation-error'; }
+  }
+
+  function validateStep2() {
+    const mdb  = mdbInput?.value.trim();
+    const qty  = qtyInput?.value.trim();
+    const date = dateInput?.value.trim();
+    if (!mdb && mdb !== '0') return false;
+    if (qty === '' || qty === undefined) return false;
+    if (Number(qty) < 0) return false;
+    if (!date) return false;
+    return true;
+  }
+
+  function watchStep2Inputs() {
+    [mdbInput, qtyInput, dateInput].forEach((el) => {
+      el?.addEventListener('input', () => {
+        if (toStep3Btn) toStep3Btn.disabled = !validateStep2();
+        hideValidErr();
+      });
+    });
+  }
+
+  function populateMachineSelect() {
+    const profiles = _machineProfilesCache?.data || [];
+    if (!machineSelect) return;
+    machineSelect.innerHTML = '<option value="">— Automat wählen —</option>';
+    const byArea = {};
+    profiles.forEach((p) => {
+      const area = p.area || 'Sonstiges';
+      if (!byArea[area]) byArea[area] = [];
+      byArea[area].push(p);
+    });
+    Object.entries(byArea).forEach(([area, list]) => {
+      const grp = document.createElement('optgroup');
+      grp.label = area;
+      list.forEach((p) => {
+        const opt = document.createElement('option');
+        opt.value = p.machine_id;
+        opt.textContent = p.label || p.machine_id;
+        opt.dataset.label = p.label || p.machine_id;
+        opt.dataset.area  = p.area || '';
+        grp.appendChild(opt);
+      });
+      machineSelect.appendChild(grp);
+    });
+    if (profiles.length === 0) {
+      const opt = document.createElement('option');
+      opt.disabled = true;
+      opt.textContent = 'Keine Automaten-Profile hinterlegt.';
+      machineSelect.appendChild(opt);
+    }
+  }
+
+  window.openSlotAssignDrawer = function openSlotAssignDrawer(product) {
+    _product = product;
+    _pending = false;
+
+    if (productName) productName.textContent = product.product_name || product.product_key || '';
+
+    // Reset
+    if (machineSelect) machineSelect.value = '';
+    if (mdbInput)  mdbInput.value = '';
+    if (qtyInput)  qtyInput.value = '';
+    if (dateInput) dateInput.value = new Date().toISOString().slice(0, 10);
+    hideValidErr();
+    if (toStep2Btn) toStep2Btn.disabled = true;
+    if (toStep3Btn) toStep3Btn.disabled = true;
+    if (confirmBtn) { confirmBtn.disabled = false; }
+    if (btnText)    btnText.hidden    = false;
+    if (btnSpinner) btnSpinner.hidden = true;
+
+    populateMachineSelect();
+    showStep(1);
+
+    backdrop.removeAttribute('hidden');
+    machineSelect?.focus();
+  };
+
+  window.closeSlotAssignDrawer = function closeSlotAssignDrawer() {
+    backdrop.setAttribute('hidden', '');
+    _product = null;
+    _pending = false;
+  };
+
+  // Step 1: machine select → enable Weiter
+  machineSelect?.addEventListener('change', () => {
+    if (toStep2Btn) toStep2Btn.disabled = !machineSelect.value;
+  });
+
+  toStep2Btn?.addEventListener('click', () => {
+    const selectedOpt = machineSelect?.options[machineSelect.selectedIndex];
+    const label = selectedOpt?.dataset.label || machineSelect?.value || '';
+    const area  = selectedOpt?.dataset.area  || '';
+    if (machineCard) {
+      machineCard.innerHTML = `
+        <div>${esc(label)}</div>
+        ${area ? `<div class="v2-sa-machine-card-sub">${esc(area)}</div>` : ''}`;
+    }
+    showStep(2);
+    mdbInput?.focus();
+  });
+
+  back1Btn?.addEventListener('click', () => showStep(1));
+
+  watchStep2Inputs();
+
+  toStep3Btn?.addEventListener('click', () => {
+    if (!validateStep2()) {
+      const msgs = [];
+      if (!mdbInput?.value.trim() && mdbInput?.value.trim() !== '0') msgs.push('MDB-Code');
+      if (qtyInput?.value.trim() === '') msgs.push('Startmenge');
+      else if (Number(qtyInput.value) < 0) msgs.push('Startmenge (darf nicht negativ sein)');
+      if (!dateInput?.value.trim()) msgs.push('Startdatum');
+      showValidErr(`Bitte ausfüllen: ${msgs.join(', ')}.`);
+      return;
+    }
+    hideValidErr();
+    const selectedOpt = machineSelect?.options[machineSelect.selectedIndex];
+    const machineLabel = selectedOpt?.dataset.label || machineSelect?.value || '';
+    if (confirmSummary) {
+      confirmSummary.innerHTML = `
+        <div class="v2-sa-summary-row">
+          <span class="v2-sa-summary-label">Produkt</span>
+          <span class="v2-sa-summary-value">${esc(_product?.product_name || _product?.product_key || '—')}</span>
+        </div>
+        <div class="v2-sa-summary-row">
+          <span class="v2-sa-summary-label">Automat</span>
+          <span class="v2-sa-summary-value">${esc(machineLabel)}</span>
+        </div>
+        <div class="v2-sa-summary-row">
+          <span class="v2-sa-summary-label">MDB-Code</span>
+          <span class="v2-sa-summary-value">${esc(mdbInput.value)}</span>
+        </div>
+        <div class="v2-sa-summary-row">
+          <span class="v2-sa-summary-label">Startmenge</span>
+          <span class="v2-sa-summary-value">${esc(qtyInput.value)}</span>
+        </div>
+        <div class="v2-sa-summary-row">
+          <span class="v2-sa-summary-label">Ab Datum</span>
+          <span class="v2-sa-summary-value">${esc(dateInput.value)}</span>
+        </div>`;
+    }
+    showStep(3);
+  });
+
+  backFromStep3Btn?.addEventListener('click', () => showStep(2));
+
+  confirmBtn?.addEventListener('click', async () => {
+    if (_pending || !_product) return;
+    setPending(true);
+
+    const body = {
+      product_id:   Number(_product.product_id),
+      product_key:  _product.product_key || null,
+      machine_id:   machineSelect?.value || '',
+      mdb_code:     Number(mdbInput?.value ?? 0),
+      qty:          Number(qtyInput?.value ?? 0),
+      start_date:   dateInput?.value || '',
+    };
+
+    try {
+      const res  = await fetch('/api/v2/slot-assign-inline/confirm', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      const data = await res.json();
+      setPending(false);
+      showStep(4);
+
+      if (data.ok) {
+        if (resultMsg) {
+          resultMsg.className = 'v2-sa-result-card v2-sa-result-card--ok';
+          resultMsg.innerHTML = `
+            <p class="v2-sa-result-title">✓ Slot zugewiesen</p>
+            <p>${esc(data.message || 'Slot-Zuweisung erfolgreich gespeichert.')}</p>`;
+        }
+        setTimeout(() => {
+          window.closeSlotAssignDrawer();
+          if (typeof window._reloadOnboarding === 'function') window._reloadOnboarding();
+        }, 2000);
+      } else {
+        if (resultMsg) {
+          resultMsg.className = 'v2-sa-result-card v2-sa-result-card--err';
+          resultMsg.innerHTML = `
+            <p class="v2-sa-result-title">Fehler</p>
+            <p>${esc(data.error?.message || 'Slot-Zuweisung fehlgeschlagen.')}</p>`;
+        }
+      }
+    } catch (err) {
+      setPending(false);
+      showStep(4);
+      if (resultMsg) {
+        resultMsg.className = 'v2-sa-result-card v2-sa-result-card--err';
+        resultMsg.innerHTML = `<p class="v2-sa-result-title">Verbindungsfehler</p><p>${esc(err.message)}</p>`;
+      }
+    }
+  });
+
+  doneBtn?.addEventListener('click', window.closeSlotAssignDrawer);
+  closeBtn?.addEventListener('click', window.closeSlotAssignDrawer);
+  backdrop?.addEventListener('click', (e) => {
+    if (e.target === backdrop) window.closeSlotAssignDrawer();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !backdrop.hidden) window.closeSlotAssignDrawer();
+  });
 }());
 
 // ── CSV Export ────────────────────────────────────────────────────────────────
