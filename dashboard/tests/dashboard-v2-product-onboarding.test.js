@@ -12,6 +12,12 @@ const {
   buildProductOnboardingData,
 } = require('../lib/product-onboarding.js');
 
+const {
+  buildOnboardingStartPayload,
+  validateOnboardingStart,
+  buildOnboardingStartAuditEntry,
+} = require('../lib/onboarding-start.js');
+
 // ── deriveProductStatus ───────────────────────────────────────────────────────
 
 test('deriveProductStatus: product with active slot is verkaufsbereit', () => {
@@ -247,4 +253,247 @@ test('GET /api/v2/onboarding returns 503 when PG unreachable', async (t) => {
   const body = res.json();
   assert.equal(body.ok, false);
   assert.equal(body.error.code, 'PG_ERROR');
+});
+
+// ── buildOnboardingStartPayload ───────────────────────────────────────────────
+
+const UNKNOWN_CASE = {
+  case_id: 'unknown_HARIBO_GOLDB',
+  case_type: 'unknown_product',
+  product_key: 'HARIBO GOLDB',
+  machine_id: 10001,
+  mdb_code: 301,
+  affected_tx_count: 5,
+};
+
+test('buildOnboardingStartPayload: builds payload with idempotent action_key', () => {
+  const payload = buildOnboardingStartPayload(UNKNOWN_CASE);
+  assert.equal(payload.action_key, 'ONBOARDING|HARIBO GOLDB');
+  assert.equal(payload.product_key, 'HARIBO GOLDB');
+  assert.equal(payload.case_id, 'unknown_HARIBO_GOLDB');
+});
+
+test('buildOnboardingStartPayload: includes machine_id and mdb_code', () => {
+  const payload = buildOnboardingStartPayload(UNKNOWN_CASE);
+  assert.equal(payload.machine_id, 10001);
+  assert.equal(payload.mdb_code, 301);
+});
+
+test('buildOnboardingStartPayload: action_key is idempotent for same product_key', () => {
+  const p1 = buildOnboardingStartPayload(UNKNOWN_CASE);
+  const p2 = buildOnboardingStartPayload({ ...UNKNOWN_CASE, machine_id: 99999 });
+  assert.equal(p1.action_key, p2.action_key);
+});
+
+test('buildOnboardingStartPayload: handles product_key with special characters', () => {
+  const c = { ...UNKNOWN_CASE, product_key: 'Twix 50g / Riegel', case_id: 'unknown_TWIX' };
+  const payload = buildOnboardingStartPayload(c);
+  assert.equal(payload.action_key, 'ONBOARDING|Twix 50g / Riegel');
+});
+
+// ── validateOnboardingStart ───────────────────────────────────────────────────
+
+test('validateOnboardingStart: valid when product_key present', () => {
+  const result = validateOnboardingStart({ product_key: 'HARIBO GOLDB', case_id: 'unknown_HARIBO_GOLDB' });
+  assert.equal(result.valid, true);
+  assert.equal(result.errors.length, 0);
+});
+
+test('validateOnboardingStart: invalid when product_key missing', () => {
+  const result = validateOnboardingStart({ case_id: 'unknown_HARIBO_GOLDB' });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => e.field === 'product_key'));
+});
+
+test('validateOnboardingStart: invalid when product_key empty string', () => {
+  const result = validateOnboardingStart({ product_key: '', case_id: 'unknown_HARIBO_GOLDB' });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => e.field === 'product_key'));
+});
+
+// ── buildOnboardingStartAuditEntry ────────────────────────────────────────────
+
+const VIEWER_ADMIN = { login: 'patrick@example.test', role: 'admin', canTriggerActions: true };
+
+test('buildOnboardingStartAuditEntry: includes triggered_by and action_key', () => {
+  const payload = buildOnboardingStartPayload(UNKNOWN_CASE);
+  const result = { ok: true, message: 'Gestartet.' };
+  const entry = buildOnboardingStartAuditEntry(VIEWER_ADMIN, payload, result);
+
+  assert.equal(entry.triggered_by, 'patrick@example.test');
+  assert.equal(entry.action_key, 'ONBOARDING|HARIBO GOLDB');
+  assert.equal(entry.product_key, 'HARIBO GOLDB');
+  assert.equal(entry.case_id, 'unknown_HARIBO_GOLDB');
+  assert.equal(entry.ok, true);
+  assert.ok(entry.triggered_at);
+});
+
+test('buildOnboardingStartAuditEntry: records failure correctly', () => {
+  const payload = buildOnboardingStartPayload(UNKNOWN_CASE);
+  const result = { ok: false, message: 'Webhook nicht erreichbar.' };
+  const entry = buildOnboardingStartAuditEntry(VIEWER_ADMIN, payload, result);
+
+  assert.equal(entry.ok, false);
+  assert.ok(entry.message.includes('Webhook'));
+});
+
+// ── HTTP integration: POST /api/v2/onboarding/start ──────────────────────────
+
+function postRequest(port, urlPath, body, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const opts = {
+      hostname: '127.0.0.1', port, path: urlPath, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), ...headers },
+    };
+    const req = http.request(opts, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, json: () => JSON.parse(data) }));
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+function startDashboardFull(port, envOverrides = {}) {
+  const child = spawn(process.execPath, ['server.js'], {
+    cwd: require('path').join(__dirname, '..'),
+    env: {
+      ...process.env,
+      PORT: String(port),
+      N8N_BASE_URL: 'http://127.0.0.1:9',
+      N8N_API_KEY: 'test-key',
+      DASHBOARD_ADMIN_LOGIN: 'admin@example.test',
+      ...envOverrides,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { child.kill(); reject(new Error('Server timeout')); }, 10_000);
+    child.stdout.on('data', (chunk) => {
+      if (String(chunk).includes(`http://localhost:${port}`)) {
+        clearTimeout(timeout);
+        resolve(child);
+      }
+    });
+    child.stderr.resume();
+    child.on('exit', (code) => {
+      if (code !== null && code !== 0) { clearTimeout(timeout); reject(new Error(`Exit ${code}`)); }
+    });
+  });
+}
+
+test('POST /api/v2/onboarding/start returns 403 for guest', async (t) => {
+  const port = await getFreePort();
+  const child = await startDashboardFull(port);
+  t.after(() => child.kill());
+
+  const res = await postRequest(
+    port, '/api/v2/onboarding/start',
+    { product_key: 'HARIBO GOLDB', case_id: 'unknown_HARIBO_GOLDB' },
+    { 'tailscale-user-login': 'guest@example.test' },
+  );
+  assert.equal(res.status, 403);
+  const body = res.json();
+  assert.equal(body.ok, false);
+  assert.equal(body.error.code, 'READ_ONLY_FORBIDDEN');
+});
+
+test('POST /api/v2/onboarding/start returns 400 when product_key missing', async (t) => {
+  const port = await getFreePort();
+  const child = await startDashboardFull(port, { DASHBOARD_ADMIN_LOGIN: 'admin@example.test' });
+  t.after(() => child.kill());
+
+  const res = await postRequest(port, '/api/v2/onboarding/start', { case_id: 'unknown_TEST' });
+  assert.equal(res.status, 400);
+  const body = res.json();
+  assert.equal(body.ok, false);
+  assert.equal(body.error.code, 'VALIDATION_ERROR');
+});
+
+test('POST /api/v2/onboarding/start returns 200 for admin without webhook (dry-run)', async (t) => {
+  const port = await getFreePort();
+  const child = await startDashboardFull(port, { DASHBOARD_ADMIN_LOGIN: 'admin@example.test' });
+  t.after(() => child.kill());
+
+  const res = await postRequest(port, '/api/v2/onboarding/start', {
+    product_key: 'HARIBO GOLDB',
+    case_id: 'unknown_HARIBO_GOLDB',
+    affected_tx_count: 5,
+  });
+  assert.equal(res.status, 200);
+  const body = res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.product_key, 'HARIBO GOLDB');
+  assert.ok(body.action_key.startsWith('ONBOARDING|'));
+});
+
+test('POST /api/v2/onboarding/start is idempotent (same action_key for same product_key)', async (t) => {
+  const port = await getFreePort();
+  const child = await startDashboardFull(port, { DASHBOARD_ADMIN_LOGIN: 'admin@example.test' });
+  t.after(() => child.kill());
+
+  const payload = { product_key: 'TWIX', case_id: 'unknown_TWIX' };
+  const res1 = await postRequest(port, '/api/v2/onboarding/start', payload);
+  const res2 = await postRequest(port, '/api/v2/onboarding/start', payload);
+
+  assert.equal(res1.status, 200);
+  assert.equal(res2.status, 200);
+  assert.equal(res1.json().action_key, res2.json().action_key);
+});
+
+test('GET /api/v2/correction-cases annotates started product_key as onboarding_started', async (t) => {
+  const port = await getFreePort();
+  const child = await startDashboardFull(port, {
+    DASHBOARD_ADMIN_LOGIN: 'admin@example.test',
+    DASHBOARD_V2_PG_URL: 'postgresql://fake:fake@127.0.0.1:5999/fake',
+  });
+  t.after(() => child.kill());
+
+  await postRequest(port, '/api/v2/onboarding/start', {
+    product_key: 'RESOLVED_PRODUCT',
+    case_id: 'unknown_RESOLVED_PRODUCT',
+  });
+
+  const res = await request(port, '/api/v2/onboarding/started-keys');
+  assert.equal(res.status, 200);
+  const body = res.json();
+  assert.ok(body.ok);
+  assert.ok(Array.isArray(body.started_keys));
+  assert.ok(body.started_keys.includes('RESOLVED_PRODUCT'));
+});
+
+// ── Strukturtests: WF1/WF2-Referenzen ────────────────────────────────────────
+
+test('server.js referenziert WF1 (invoice-intake) mit korrektem Workflow-Namen', () => {
+  const fs = require('node:fs');
+  const serverSrc = fs.readFileSync(require('path').join(__dirname, '../server.js'), 'utf8');
+  assert.ok(serverSrc.includes("id: 'invoice-intake'"), 'WF1 action id invoice-intake muss vorhanden sein');
+  assert.ok(serverSrc.includes('WF1 - Rechnungseingang automatisch mit Claude'), 'WF1 workflow name pattern muss vorhanden sein');
+});
+
+test('server.js referenziert WF2 (invoice-approval) mit korrektem Workflow-Namen', () => {
+  const fs = require('node:fs');
+  const serverSrc = fs.readFileSync(require('path').join(__dirname, '../server.js'), 'utf8');
+  assert.ok(serverSrc.includes("id: 'invoice-approval'"), 'WF2 action id invoice-approval muss vorhanden sein');
+  assert.ok(serverSrc.includes('WF2 - Smart Product Selection - Rechnungsvorschlaege freigeben'), 'WF2 workflow name pattern muss vorhanden sein');
+});
+
+test('v2.html enthält Onboarding-Drawer mit korrekten Elementen', () => {
+  const fs = require('node:fs');
+  const html = fs.readFileSync(require('path').join(__dirname, '../public/v2.html'), 'utf8');
+  assert.ok(html.includes('id="v2ObBackdrop"'), 'Onboarding Backdrop muss vorhanden sein');
+  assert.ok(html.includes('id="v2ObMarkStartedBtn"'), 'Mark-Started-Button muss vorhanden sein');
+  assert.ok(html.includes('id="v2ObWf2Link"'), 'WF2-Link muss vorhanden sein');
+  assert.ok(html.includes('v2-ob-pipeline'), 'Pipeline-Rail muss vorhanden sein');
+});
+
+test('v2.js enthält ob-start Event-Delegation und openOnboardingDrawer', () => {
+  const fs = require('node:fs');
+  const jsSrc = fs.readFileSync(require('path').join(__dirname, '../public/v2.js'), 'utf8');
+  assert.ok(jsSrc.includes('data-action="ob-start"'), 'ob-start data-action muss in buildCaseItem vorhanden sein');
+  assert.ok(jsSrc.includes("action === 'ob-start'") || jsSrc.includes('[data-action="ob-start"]'), 'ob-start Event-Handler muss vorhanden sein');
+  assert.ok(jsSrc.includes('openOnboardingDrawer'), 'openOnboardingDrawer muss aufgerufen werden');
 });

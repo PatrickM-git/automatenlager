@@ -1502,6 +1502,7 @@ loadMachineProfiles();
           : 'Daten geladen.';
       }
 
+      window._wf2FormUrl = payload.data.wf2_form_url || '';
       renderOnboarding(
         payload.data,
         payload.data.wf2_form_url || '',
@@ -1929,8 +1930,13 @@ loadMachineProfiles();
     const meta   = TYPE_META[c.case_type] || TYPE_META.correction_warning;
     const txCls  = (c.affected_tx_count > 0) ? ' cc-tx-count--nonzero' : '';
     const txBadge = c.affected_tx_count > 0 ? `<span class="cc-tx-count${txCls}">${esc(c.affected_tx_count)} Tx</span>` : '';
+    const isObStarted = isAdmin && c.case_type === 'unknown_product' && (window._obStartedKeys || new Set()).has(c.product_key);
     const fixBtn = isAdmin
-      ? `<button class="cc-fix-btn" data-action="fix" data-case-id="${esc(c.case_id)}" aria-label="Fall beheben">Beheben ▶</button>`
+      ? (c.case_type === 'unknown_product'
+          ? (isObStarted
+              ? `<span class="cc-ob-badge"><span class="cc-ob-dot"></span>in Bearbeitung</span>`
+              : `<button class="cc-fix-btn cc-ob-start-btn" data-action="ob-start" data-case-id="${esc(c.case_id)}" data-product-key="${esc(c.product_key || '')}" aria-label="Onboarding starten">Onboarding ▶</button>`)
+          : `<button class="cc-fix-btn" data-action="fix" data-case-id="${esc(c.case_id)}" aria-label="Fall beheben">Beheben ▶</button>`)
       : '';
     return `<li class="cc-item cc-item--${meta.cls}" style="--cc-i:${idx}" data-case-id="${esc(c.case_id)}">
       <button class="cc-trigger" aria-expanded="false" aria-controls="cc-detail-${esc(c.case_id)}">
@@ -2010,6 +2016,16 @@ loadMachineProfiles();
     body.innerHTML = html;
 
     body.addEventListener('click', (e) => {
+      const obBtn = e.target.closest('[data-action="ob-start"]');
+      if (obBtn) {
+        e.stopPropagation();
+        const caseId = obBtn.dataset.caseId;
+        const productKey = obBtn.dataset.productKey;
+        const caseData = _casesData.find((c) => c.case_id === caseId) || { case_id: caseId, product_key: productKey };
+        const wf2Url = window._wf2FormUrl || '';
+        if (typeof window.openOnboardingDrawer === 'function') window.openOnboardingDrawer(caseData, wf2Url);
+        return;
+      }
       const fixBtn = e.target.closest('[data-action="fix"]');
       if (fixBtn) {
         e.stopPropagation();
@@ -2498,4 +2514,100 @@ function populateMachineSelects(profiles) {
   });
 
   loadPanel();
+}());
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Onboarding Start Drawer
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+window._obStartedKeys = new Set();
+
+(function initOnboardingDrawer() {
+  const backdrop = document.getElementById('v2ObBackdrop');
+  const caseIdEl = document.getElementById('v2ObCaseId');
+  const productKeyEl = document.getElementById('v2ObProductKey');
+  const txCountEl = document.getElementById('v2ObTxCount');
+  const wf2Link = document.getElementById('v2ObWf2Link');
+  const markBtn = document.getElementById('v2ObMarkStartedBtn');
+  const cancelBtn = document.getElementById('v2ObCancel');
+  const closeBtn = document.getElementById('v2ObClose');
+  const errorEl = document.getElementById('v2ObError');
+  const actionsEl = document.getElementById('v2ObActions');
+  const successEl = document.getElementById('v2ObSuccess');
+  if (!backdrop) return;
+
+  let _currentCase = null;
+  let _pending = false;
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.removeAttribute('hidden');
+    errorEl.classList.remove('v2-ob-error--shake');
+    void errorEl.offsetWidth;
+    errorEl.classList.add('v2-ob-error--shake');
+  }
+  function hideError() { errorEl.setAttribute('hidden', ''); }
+
+  window.openOnboardingDrawer = function (caseObj, wf2Url) {
+    _currentCase = caseObj;
+    caseIdEl.textContent = caseObj.case_id || '';
+    productKeyEl.textContent = caseObj.product_key || caseObj.case_id || '–';
+    txCountEl.textContent = caseObj.affected_tx_count
+      ? `${caseObj.affected_tx_count} Transaktionen betroffen`
+      : '';
+    wf2Link.href = wf2Url || '#';
+    wf2Link.style.opacity = wf2Url ? '' : '0.5';
+    hideError();
+    actionsEl.removeAttribute('hidden');
+    successEl.setAttribute('hidden', '');
+    backdrop.removeAttribute('hidden');
+  };
+
+  window.closeOnboardingDrawer = function () {
+    backdrop.setAttribute('hidden', '');
+    _currentCase = null;
+    _pending = false;
+  };
+
+  async function markStarted() {
+    if (_pending || !_currentCase) return;
+    _pending = true;
+    markBtn.disabled = true;
+    hideError();
+    try {
+      const res = await fetch('/api/v2/onboarding/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          case_id: _currentCase.case_id,
+          product_key: _currentCase.product_key,
+          affected_tx_count: _currentCase.affected_tx_count,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        window._obStartedKeys.add(_currentCase.product_key);
+        actionsEl.setAttribute('hidden', '');
+        successEl.removeAttribute('hidden');
+        setTimeout(() => {
+          window.closeOnboardingDrawer();
+          if (typeof window._reloadCorrectionCases === 'function') window._reloadCorrectionCases();
+        }, 2000);
+      } else {
+        _pending = false;
+        markBtn.disabled = false;
+        showError(data.error?.message || 'Markierung fehlgeschlagen.');
+      }
+    } catch (err) {
+      _pending = false;
+      markBtn.disabled = false;
+      showError(`Verbindungsfehler: ${err.message}`);
+    }
+  }
+
+  markBtn.addEventListener('click', markStarted);
+  closeBtn.addEventListener('click', window.closeOnboardingDrawer);
+  cancelBtn.addEventListener('click', window.closeOnboardingDrawer);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) window.closeOnboardingDrawer(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !backdrop.hidden) window.closeOnboardingDrawer(); });
 }());

@@ -761,6 +761,62 @@
       </div>
     </div>
 
+    <!-- Onboarding Start Drawer ─────────────────────────────────────────── -->
+    <div class="v2-ob-backdrop" id="v2ObBackdrop" hidden role="dialog" aria-modal="true" aria-label="Produkt-Onboarding starten">
+      <div class="v2-ob-drawer" id="v2ObDrawer">
+        <div class="v2-ob-head">
+          <div class="v2-ob-head-top">
+            <div>
+              <p class="v2-ob-title">Produkt-Onboarding starten</p>
+              <p class="v2-ob-case-id" id="v2ObCaseId"></p>
+            </div>
+            <button class="v2-ob-close" id="v2ObClose" aria-label="Schließen">✕</button>
+          </div>
+          <div class="v2-ob-pipeline" aria-label="Onboarding-Pfad" role="list">
+            <div class="v2-ob-pipe-step v2-ob-pipe-step--done" role="listitem"><span class="v2-ob-pipe-dot"></span><span class="v2-ob-pipe-label">Nayax</span></div>
+            <div class="v2-ob-pipe-line v2-ob-pipe-line--done"></div>
+            <div class="v2-ob-pipe-step v2-ob-pipe-step--active" role="listitem"><span class="v2-ob-pipe-dot"></span><span class="v2-ob-pipe-label">WF2</span></div>
+            <div class="v2-ob-pipe-line"></div>
+            <div class="v2-ob-pipe-step" role="listitem"><span class="v2-ob-pipe-dot"></span><span class="v2-ob-pipe-label">Moma</span></div>
+            <div class="v2-ob-pipe-line"></div>
+            <div class="v2-ob-pipe-step" role="listitem"><span class="v2-ob-pipe-dot"></span><span class="v2-ob-pipe-label">Slot</span></div>
+            <div class="v2-ob-pipe-line"></div>
+            <div class="v2-ob-pipe-step" role="listitem"><span class="v2-ob-pipe-dot"></span><span class="v2-ob-pipe-label">Verkauf</span></div>
+          </div>
+        </div>
+        <div class="v2-ob-body">
+          <div class="v2-ob-info-box">
+            <p class="v2-ob-info-label">Nayax-Produktname</p>
+            <p class="v2-ob-info-value" id="v2ObProductKey"></p>
+            <p class="v2-ob-info-meta" id="v2ObTxCount"></p>
+          </div>
+          <div class="v2-ob-explain">
+            <span class="v2-ob-explain-icon" aria-hidden="true">⚑</span>
+            <p class="v2-ob-explain-text">Dieses Produkt ist in Nayax bekannt, aber noch nicht im Stamm angelegt. Starte den Onboarding-Flow, um es anzulegen.</p>
+          </div>
+          <div class="v2-ob-error" id="v2ObError" hidden role="alert"></div>
+          <div class="v2-ob-actions" id="v2ObActions">
+            <a class="v2-ob-primary-btn" id="v2ObWf2Link" href="#" target="_blank" rel="noopener">
+              <span>WF2 Formular öffnen</span>
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true"><path d="M2 11L11 2M11 2H5.5M11 2V7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+            <button class="v2-ob-secondary-btn" id="v2ObMarkStartedBtn" type="button">Als gestartet markieren</button>
+            <button class="v2-ob-cancel-link" id="v2ObCancel" type="button">Abbrechen</button>
+          </div>
+          <div class="v2-ob-success" id="v2ObSuccess" hidden role="status">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <circle cx="9" cy="9" r="8" stroke="#16a34a" stroke-width="1.5"/>
+              <polyline points="5.5,9.5 7.8,11.5 12.5,6.5" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            </svg>
+            <div>
+              <p class="v2-ob-success-msg">Onboarding gestartet – Fall wird nach nächstem WF3-Lauf aus der Liste entfernt.</p>
+              <p class="v2-ob-success-hint">Drawer schließt in 2 s …</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script src="/v2.js"></script>
   </body>
 </html>

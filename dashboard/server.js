@@ -15,6 +15,7 @@ const { buildLocationProfile, buildLocationComparison, queryLocationsPg, upsertL
 const { buildCorrectionCases, queryCorrectionCasesPg } = require('./lib/correction-cases.js');
 const { buildMachineProfile, getMachineOptions, queryMachineProfilesPg, upsertMachineProfilePg } = require('./lib/machine-profiles.js');
 const { buildProductSuggestion, validateCorrectionAction, buildCorrectionActionPayload, buildCorrectionActionAuditEntry } = require('./lib/correction-action.js');
+const { buildOnboardingStartPayload, validateOnboardingStart, buildOnboardingStartAuditEntry } = require('./lib/onboarding-start.js');
 const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buildSlotAssignAuditEntry } = require('./lib/slot-assign-inline.js');
 
 const PORT = Number(process.env.PORT || 8787);
@@ -2526,6 +2527,86 @@ const server = http.createServer(async (req, res) => {
         message: wfResult.message,
         ...(wfResult.ok ? {} : { error: { code: 'WEBHOOK_ERROR', message: wfResult.message } }),
       });
+      return;
+    }
+
+    // ── Onboarding Start routes ───────────────────────────────────────────────
+
+    if (parsed.pathname === '/api/v2/onboarding/start' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Nur Admins können das Onboarding starten.' } });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await new Promise((resolve, reject) => {
+          let data = '';
+          req.on('data', (chunk) => { data += chunk; });
+          req.on('end', () => { try { resolve(data); } catch (e) { reject(e); } });
+          req.on('error', reject);
+        }));
+      } catch {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON.' } });
+        return;
+      }
+      const { product_key, case_id, affected_tx_count } = body || {};
+      const validation = validateOnboardingStart({ product_key });
+      if (!validation.valid) {
+        sendJson(res, 400, { ok: false, error: { code: 'VALIDATION_ERROR', message: validation.errors.map((e) => e.message).join(' '), errors: validation.errors } });
+        return;
+      }
+      const unknownCase = { case_id: case_id || `unknown_${product_key}`, product_key };
+      const payload = buildOnboardingStartPayload(unknownCase);
+      let wfResult = { ok: true, message: 'Onboarding protokolliert.' };
+      const webhookUrl = process.env.ONBOARDING_WEBHOOK_URL;
+      if (webhookUrl) {
+        try {
+          const wfResponse = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payload, triggered_by: viewer.login, affected_tx_count }),
+          });
+          const wfText = await wfResponse.text();
+          wfResult = {
+            ok: wfResponse.ok,
+            message: wfResponse.ok ? 'Webhook erfolgreich.' : `Webhook antwortete ${wfResponse.status}: ${wfText.slice(0, 200)}`,
+          };
+        } catch (err) {
+          wfResult = { ok: false, message: `Webhook nicht erreichbar: ${err.message}` };
+        }
+      }
+      const auditEntry = buildOnboardingStartAuditEntry(viewer, payload, wfResult);
+      const auditPath = path.join(__dirname, 'logs', 'onboarding-starts.jsonl');
+      try {
+        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
+        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
+      } catch { /* audit write failure must not block response */ }
+      sendJson(res, wfResult.ok ? 200 : 502, {
+        ok: wfResult.ok,
+        action_key: payload.action_key,
+        product_key: payload.product_key,
+        message: wfResult.message,
+        ...(wfResult.ok ? {} : { error: { code: 'WEBHOOK_ERROR', message: wfResult.message } }),
+      });
+      return;
+    }
+
+    if (parsed.pathname === '/api/v2/onboarding/started-keys' && req.method === 'GET') {
+      const auditPath = path.join(__dirname, 'logs', 'onboarding-starts.jsonl');
+      const started_keys = [];
+      try {
+        const lines = fs.readFileSync(auditPath, 'utf8').split('\n').filter(Boolean);
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line);
+            if (entry.ok && entry.product_key && !started_keys.includes(entry.product_key)) {
+              started_keys.push(entry.product_key);
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      } catch { /* file not yet created */ }
+      sendJson(res, 200, { ok: true, started_keys });
       return;
     }
 
