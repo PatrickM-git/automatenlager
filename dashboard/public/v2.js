@@ -125,12 +125,41 @@ function severityLabel(severity) {
   return 'Info';
 }
 
+const INVENTORY_COLLAPSE_AFTER = 5;
+
 function renderInventoryList(el, rows, emptyText, renderRow) {
   if (!rows || !rows.length) {
     el.innerHTML = `<div class="v2-inventory-empty">${emptyText}</div>`;
     return;
   }
-  el.innerHTML = rows.map(renderRow).join('');
+
+  if (rows.length <= INVENTORY_COLLAPSE_AFTER) {
+    el.innerHTML = rows.map(renderRow).join('');
+    return;
+  }
+
+  const visibleHtml = rows.slice(0, INVENTORY_COLLAPSE_AFTER).map(renderRow).join('');
+  const hiddenHtml  = rows.slice(INVENTORY_COLLAPSE_AFTER).map(renderRow).join('');
+  const remaining   = rows.length - INVENTORY_COLLAPSE_AFTER;
+
+  el.innerHTML = `
+    ${visibleHtml}
+    <div class="v2-inventory-expanded" hidden>${hiddenHtml}</div>
+    <button class="v2-inventory-expand-btn" type="button">
+      <span class="v2-expand-label">+ ${remaining} weitere anzeigen</span>
+      <span class="v2-inventory-expand-count">${rows.length} gesamt</span>
+    </button>`;
+
+  const btn       = el.querySelector('.v2-inventory-expand-btn');
+  const expandDiv = el.querySelector('.v2-inventory-expanded');
+
+  btn.addEventListener('click', () => {
+    const nowOpen = expandDiv.hidden;
+    expandDiv.hidden = !nowOpen;
+    btn.querySelector('.v2-expand-label').textContent = nowOpen
+      ? `− weniger anzeigen`
+      : `+ ${remaining} weitere anzeigen`;
+  });
 }
 
 function renderMhdRow(row) {

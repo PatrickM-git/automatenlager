@@ -198,7 +198,7 @@ h2 {
   border-top: 1px solid var(--v2-line);
   border-bottom: 1px solid var(--v2-line);
   padding: 18px 0 16px;
-  min-height: calc(100svh - 140px);
+  align-content: start;
 }
 
 .v2-overview-head {
@@ -632,6 +632,43 @@ h2 {
   border-top: 1px solid var(--v2-line);
   color: var(--v2-muted);
   font-size: 13px;
+}
+
+.v2-inventory-expand-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 13px 14px;
+  margin-top: 6px;
+  border: 1px solid var(--v2-line);
+  border-radius: 8px;
+  background: var(--v2-surface);
+  color: var(--v2-accent);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: background 130ms, border-color 130ms, color 130ms;
+  box-shadow: var(--v2-shadow-xs);
+}
+
+.v2-inventory-expand-btn:hover {
+  background: rgba(122, 31, 92, 0.04);
+  border-color: rgba(122, 31, 92, 0.3);
+}
+
+.v2-inventory-expand-count {
+  color: var(--v2-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-inventory-expanded .v2-inventory-row {
+    animation: v2-enter 180ms ease-out both;
+  }
 }
 
 .v2-indicator-legend {
