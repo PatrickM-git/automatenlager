@@ -467,6 +467,7 @@ async function buildDashboardV2Area(area, query = {}) {
                 ...overview,
                 ampels: monitoring.ampels,
                 stale: monitoring.stale,
+                warnings: monitoring.warnings,
               }
             : {
                 ...monitoring,

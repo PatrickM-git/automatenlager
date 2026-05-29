@@ -90,8 +90,11 @@ function buildMonitoringData(raw = {}) {
   const workflowsState = hasWorkflowError(raw) ? 'red' : 'green';
   const monitoringState = stale.isStale ? 'yellow' : 'green';
 
+  const warnings = (raw.warnings || []).map(buildWarningDrilldown);
+
   return {
     stale,
+    warnings,
     ampels: [
       ampel('postgres', 'PostgreSQL', postgresState, pgUnreachable > 0 ? 'Nicht erreichbar' : 'Verbindung ok'),
       ampel('n8n', 'n8n', n8nState, n8nState === 'red' ? 'Container down' : n8nState === 'yellow' ? 'Workflow-Fehler erkannt' : 'Dienst ok'),
@@ -230,8 +233,33 @@ async function queryOverviewMonitoringPg(pgUrl) {
   }
 }
 
+const CORRECTION_LINK_TYPES = new Set([
+  'UNKNOWN_PRODUCT',
+  'UNMATCHED_PRODUCT',
+  'MDB_CODE_CHANGED_FOR_PRODUCT',
+]);
+
+function buildWarningDrilldown(warning = {}) {
+  const parts = clean(warning.warning_key).split('|');
+  const entity = parts.length >= 2 ? parts[1] : null;
+  const correctionLink = CORRECTION_LINK_TYPES.has(
+    clean(warning.warning_type).toUpperCase(),
+  ) ? '#correctionCasesPanel' : null;
+
+  return {
+    warning_type: warning.warning_type ?? null,
+    severity: warning.severity ?? 'warning',
+    message: warning.message ?? null,
+    entity,
+    created_at: warning.created_at ?? null,
+    resolved: warning.resolved ?? false,
+    correction_link: correctionLink,
+  };
+}
+
 module.exports = {
   buildOverviewData,
   buildMonitoringData,
+  buildWarningDrilldown,
   queryOverviewMonitoringPg,
 };

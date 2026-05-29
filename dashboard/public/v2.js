@@ -61,6 +61,103 @@ function renderOverview(payload) {
   }
 
   renderAmpelGrid('#overviewAmpels', data.ampels || []);
+  renderWarningsDrilldown(data.warnings || []);
+}
+
+function warnIcon(type) {
+  if (!type) return '!';
+  const t = String(type).toUpperCase();
+  if (t.includes('CONTAINER') || t.includes('DOWN')) return '▼';
+  if (t.includes('BACKUP')) return '◉';
+  if (t.includes('DRIFT') || t.includes('VAL')) return '≠';
+  if (t.includes('WORKFLOW') || t.includes('ERROR')) return '✕';
+  if (t.includes('SCHEDULE') || t.includes('GAP')) return '⏱';
+  return '!';
+}
+
+function formatWarnTs(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString('de-DE', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+      timeZone: 'Europe/Berlin',
+    });
+  } catch (_) { return iso; }
+}
+
+function renderWarningsDrilldown(warnings) {
+  const el = document.querySelector('#warningsDrilldownList');
+  if (!el) return;
+
+  const open = warnings ? warnings.filter((w) => !w.resolved) : [];
+
+  if (!open.length) {
+    el.innerHTML = '<div class="v2-warn-list-empty">Keine offenen Warnungen</div>';
+    return;
+  }
+
+  const items = open.map((w, idx) => {
+    const id = `wdl-${idx}`;
+    const sev = String(w.severity || 'warning').toLowerCase();
+    const entity = escapeHtml(w.entity || w.warning_type || '—');
+    const msg = escapeHtml(w.message || '—');
+    const ts = formatWarnTs(w.created_at);
+    const icon = warnIcon(w.warning_type);
+
+    const correctionBtn = w.correction_link
+      ? `<a href="${escapeHtml(w.correction_link)}" class="v2-warn-correction-link">
+           <span>Zum Korrektur-Kreislauf →</span>
+         </a>`
+      : '';
+
+    return `
+      <div class="v2-warn-item v2-warn-item--${escapeHtml(sev)}" data-id="${id}">
+        <button class="v2-warn-trigger" aria-expanded="false" aria-controls="wdl-detail-${id}">
+          <span class="v2-warn-badge">${icon}</span>
+          <div class="v2-warn-summary">
+            <span class="v2-warn-entity">${entity}</span>
+            <span class="v2-warn-msg">${msg}</span>
+          </div>
+          <span class="v2-warn-chevron">›</span>
+        </button>
+        <div class="v2-warn-detail" id="wdl-detail-${id}" role="region" aria-hidden="true">
+          <div class="v2-warn-detail-inner">
+            <div class="v2-warn-detail-body">
+              <div class="v2-warn-field">
+                <span class="v2-warn-field-label">Typ</span>
+                <span class="v2-warn-field-value v2-warn-field-value--mono">${escapeHtml(w.warning_type || '—')}</span>
+              </div>
+              <div class="v2-warn-field">
+                <span class="v2-warn-field-label">Entität</span>
+                <span class="v2-warn-field-value">${entity}</span>
+              </div>
+              <div class="v2-warn-field">
+                <span class="v2-warn-field-label">Meldung</span>
+                <span class="v2-warn-field-value">${msg}</span>
+              </div>
+              <div class="v2-warn-field">
+                <span class="v2-warn-field-label">Zeitpunkt</span>
+                <span class="v2-warn-field-value v2-warn-field-value--ts">${escapeHtml(ts)}</span>
+              </div>
+              ${correctionBtn}
+            </div>
+          </div>
+        </div>
+      </div>`;
+  });
+
+  el.innerHTML = `<div class="v2-warn-list">${items.join('')}</div>`;
+
+  el.querySelectorAll('.v2-warn-trigger').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const expanded = btn.getAttribute('aria-expanded') === 'true';
+      const detailId = btn.getAttribute('aria-controls');
+      const detail = document.getElementById(detailId);
+      btn.setAttribute('aria-expanded', String(!expanded));
+      if (detail) detail.setAttribute('aria-hidden', String(expanded));
+    });
+  });
 }
 
 async function loadV2Overview() {

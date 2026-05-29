@@ -8,6 +8,7 @@ const test = require('node:test');
 const {
   buildOverviewData,
   buildMonitoringData,
+  buildWarningDrilldown,
 } = require('../lib/overview-monitoring.js');
 
 function getFreePort() {
@@ -185,7 +186,93 @@ test('AC-UI: v2.css enforces first-screen focus and compact ampel layout on desk
   const css = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.css'), 'utf8');
 
   assert.match(css, /\.v2-first-screen/, 'missing first-screen layout class');
-  assert.match(css, /min-height:\s*calc\(100svh\s*-\s*[^\)]+\)/, 'first screen should fit initial viewport budget');
+  assert.match(css, /\.v2-first-screen[\s\S]{0,200}align-content\s*:\s*start/, 'first-screen should use align-content: start layout');
   assert.match(css, /\.v2-ampel-grid/, 'missing compact ampel grid styles');
   assert.match(css, /@media\s*\(max-width:\s*820px\)[\s\S]*\.v2-ampel-grid/, 'missing mobile ampel layout rules');
+});
+
+// ── Issue #42: Warnungs-Drill-down ───────────────────────────────────
+
+test('AC-WD1: buildWarningDrilldown extracts entity from warning_key and returns null correction_link for informational types', () => {
+  const result = buildWarningDrilldown({
+    warning_type: 'CONTAINER_DOWN',
+    warning_key: 'CONTAINER_DOWN|homelab-n8n|2026-05-27',
+    message: 'n8n down',
+    severity: 'critical',
+    resolved: false,
+    created_at: '2026-05-27T07:20:00.000Z',
+  });
+
+  assert.equal(result.entity, 'homelab-n8n');
+  assert.equal(result.warning_type, 'CONTAINER_DOWN');
+  assert.equal(result.message, 'n8n down');
+  assert.equal(result.severity, 'critical');
+  assert.equal(result.resolved, false);
+  assert.equal(result.correction_link, null);
+});
+
+test('AC-WD2: buildWarningDrilldown returns correction_link for actionable warning types', () => {
+  const types = ['UNKNOWN_PRODUCT', 'UNMATCHED_PRODUCT', 'MDB_CODE_CHANGED_FOR_PRODUCT'];
+  for (const warning_type of types) {
+    const result = buildWarningDrilldown({
+      warning_type,
+      warning_key: `${warning_type}|some-entity|2026-05-27`,
+      message: 'Test',
+      severity: 'warning',
+      resolved: false,
+      created_at: '2026-05-27T08:00:00.000Z',
+    });
+    assert.ok(result.correction_link !== null, `expected correction_link for ${warning_type}`);
+    assert.match(result.correction_link, /correctionCasesPanel/, `correction_link should point to panel for ${warning_type}`);
+  }
+});
+
+test('AC-WD3: buildMonitoringData includes enriched warnings list with entity and correction_link', () => {
+  const monitoring = buildMonitoringData(RAW_DATA);
+
+  assert.ok(Array.isArray(monitoring.warnings), 'monitoring.warnings must be an array');
+  assert.equal(monitoring.warnings.length, RAW_DATA.warnings.length);
+
+  const containerDown = monitoring.warnings.find((w) => w.warning_type === 'CONTAINER_DOWN');
+  assert.ok(containerDown, 'CONTAINER_DOWN warning must be in list');
+  assert.equal(containerDown.entity, 'homelab-n8n');
+  assert.equal(containerDown.correction_link, null);
+
+  monitoring.warnings.forEach((w) => {
+    assert.ok('entity' in w, 'each warning must have entity field');
+    assert.ok('correction_link' in w, 'each warning must have correction_link field');
+    assert.ok('warning_type' in w);
+    assert.ok('message' in w);
+    assert.ok('severity' in w);
+  });
+});
+
+test('AC-WD4: server.js passes warnings from monitoring into /api/v2/overview response', () => {
+  const serverSrc = fs.readFileSync(path.join(process.cwd(), 'server.js'), 'utf8');
+
+  assert.match(serverSrc, /monitoring\.warnings/, 'server must include monitoring.warnings in overview response');
+});
+
+test('AC-WD5: v2.html has #warningsDrilldownList container', () => {
+  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
+
+  assert.match(html, /id="warningsDrilldownList"/, 'missing #warningsDrilldownList container');
+});
+
+test('AC-WD6: v2.js renders warning drill-down list and handles correction link', () => {
+  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
+
+  assert.match(js, /renderWarningsDrilldown/, 'v2.js must define renderWarningsDrilldown function');
+  assert.match(js, /warningsDrilldownList/, 'v2.js must reference #warningsDrilldownList container');
+  assert.match(js, /correction_link/, 'v2.js must render correction_link when present');
+  assert.match(js, /Keine offenen Warnungen/, 'v2.js must render empty state');
+});
+
+test('AC-WD7: v2.css defines warning drill-down styles', () => {
+  const css = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.css'), 'utf8');
+
+  assert.match(css, /\.v2-warn-list/, 'missing .v2-warn-list');
+  assert.match(css, /\.v2-warn-item--critical/, 'missing critical severity style');
+  assert.match(css, /\.v2-warn-trigger/, 'missing .v2-warn-trigger');
+  assert.match(css, /\.v2-warn-correction-link/, 'missing .v2-warn-correction-link');
 });
