@@ -1,6 +1,6 @@
 'use strict';
 
-const VALID_SORT_FIELDS = new Set(['revenue_net', 'db_net', 'margin_pct', 'qty']);
+const VALID_SORT_FIELDS = new Set(['revenue_net', 'db_net', 'margin_pct', 'qty', 'revenue_gross', 'gross_profit', 'margin_gross_pct']);
 
 function toNum(value) {
   const n = Number(value);
@@ -54,14 +54,19 @@ function resolvePeriod(query = {}) {
 function parseProductRow(row) {
   const revenue = round2(toNum(row.revenue_net));
   const db = round2(toNum(row.db_net));
+  const revenueGross = round2(toNum(row.revenue_gross));
+  const dbGross = round2(toNum(row.gross_profit));
   return {
     product_id: toNum(row.product_id),
     product_name: formatProductName(row.product_name) ?? String(toNum(row.product_id)),
     month: row.month,
     revenue_net: revenue,
     db_net: db,
+    revenue_gross: revenueGross,
+    gross_profit: dbGross,
     qty: toNum(row.qty),
     margin_pct: marginPct(db, revenue),
+    margin_gross_pct: marginPct(dbGross, revenueGross),
   };
 }
 
@@ -72,6 +77,8 @@ function parseSlotRow(row) {
     month: row.month,
     revenue_net: round2(toNum(row.revenue_net)),
     db_net: round2(toNum(row.db_net)),
+    revenue_gross: round2(toNum(row.revenue_gross)),
+    gross_profit: round2(toNum(row.gross_profit)),
     qty: toNum(row.qty),
   };
 }
@@ -118,9 +125,11 @@ function buildEconomicsData(pgRows, query = {}) {
     (acc, r) => ({
       revenue_net: round2(acc.revenue_net + r.revenue_net),
       db_net: round2(acc.db_net + r.db_net),
+      revenue_gross: round2(acc.revenue_gross + r.revenue_gross),
+      gross_profit: round2(acc.gross_profit + r.gross_profit),
       qty: acc.qty + r.qty,
     }),
-    { revenue_net: 0, db_net: 0, qty: 0 },
+    { revenue_net: 0, db_net: 0, revenue_gross: 0, gross_profit: 0, qty: 0 },
   );
 
   return {
@@ -155,6 +164,8 @@ async function queryEconomicsPg(pgUrl, query = {}) {
                   date_trunc('month', g.posting_date)::DATE  AS month,
                   SUM(g.quantity_sold)::int                  AS qty,
                   SUM(g.revenue_net)                         AS revenue_net,
+                  SUM(g.revenue_gross)                       AS revenue_gross,
+                  SUM(g.revenue_gross - g.cost_of_goods)     AS gross_profit,
                   SUM(g.revenue_net - g.cost_of_goods * g.revenue_net / NULLIF(g.revenue_gross, 0)) AS db_net
              FROM automatenlager.guv_daily g
              LEFT JOIN automatenlager.products p ON p.product_id = g.product_id
@@ -166,10 +177,20 @@ async function queryEconomicsPg(pgUrl, query = {}) {
           [machineFilter, dateFrom, dateTo],
         ),
         client.query(
-          `SELECT * FROM automatenlager.mv_db_per_slot_monthly
-            WHERE machine_id = $1
-              AND month >= $2::date
-              AND month <= $3::date`,
+          `SELECT g.machine_id,
+                  g.mdb_code,
+                  date_trunc('month', g.posting_date)::DATE  AS month,
+                  SUM(g.quantity_sold)::int                  AS qty,
+                  SUM(g.revenue_net)                         AS revenue_net,
+                  SUM(g.revenue_gross)                       AS revenue_gross,
+                  SUM(g.revenue_gross - g.cost_of_goods)     AS gross_profit,
+                  SUM(g.revenue_net - g.cost_of_goods * g.revenue_net / NULLIF(g.revenue_gross, 0)) AS db_net
+             FROM automatenlager.guv_daily g
+            WHERE g.source != 'historic_backfill'
+              AND g.machine_id = $1
+              AND date_trunc('month', g.posting_date) >= $2::date
+              AND date_trunc('month', g.posting_date) <= $3::date
+            GROUP BY g.machine_id, g.mdb_code, date_trunc('month', g.posting_date)::DATE`,
           [machineFilter, dateFrom, dateTo],
         ),
       ]);
@@ -183,6 +204,8 @@ async function queryEconomicsPg(pgUrl, query = {}) {
                   date_trunc('month', g.posting_date)::DATE  AS month,
                   SUM(g.quantity_sold)::int                  AS qty,
                   SUM(g.revenue_net)                         AS revenue_net,
+                  SUM(g.revenue_gross)                       AS revenue_gross,
+                  SUM(g.revenue_gross - g.cost_of_goods)     AS gross_profit,
                   SUM(g.revenue_net - g.cost_of_goods * g.revenue_net / NULLIF(g.revenue_gross, 0)) AS db_net
              FROM automatenlager.guv_daily g
              LEFT JOIN automatenlager.products p ON p.product_id = g.product_id
@@ -193,9 +216,19 @@ async function queryEconomicsPg(pgUrl, query = {}) {
           [dateFrom, dateTo],
         ),
         client.query(
-          `SELECT * FROM automatenlager.mv_db_per_slot_monthly
-            WHERE month >= $1::date
-              AND month <= $2::date`,
+          `SELECT g.machine_id,
+                  g.mdb_code,
+                  date_trunc('month', g.posting_date)::DATE  AS month,
+                  SUM(g.quantity_sold)::int                  AS qty,
+                  SUM(g.revenue_net)                         AS revenue_net,
+                  SUM(g.revenue_gross)                       AS revenue_gross,
+                  SUM(g.revenue_gross - g.cost_of_goods)     AS gross_profit,
+                  SUM(g.revenue_net - g.cost_of_goods * g.revenue_net / NULLIF(g.revenue_gross, 0)) AS db_net
+             FROM automatenlager.guv_daily g
+            WHERE g.source != 'historic_backfill'
+              AND date_trunc('month', g.posting_date) >= $1::date
+              AND date_trunc('month', g.posting_date) <= $2::date
+            GROUP BY g.machine_id, g.mdb_code, date_trunc('month', g.posting_date)::DATE`,
           [dateFrom, dateTo],
         ),
       ]);

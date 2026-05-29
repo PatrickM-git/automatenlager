@@ -567,27 +567,27 @@ function renderSortIndicators() {
 
 function renderHeroStrip(totals, period) {
   const hero = document.querySelector('#ecoHero');
-  const marginPct = totals.revenue_net > 0
-    ? ((totals.db_net / totals.revenue_net) * 100)
+  const marginPct = totals.revenue_gross > 0
+    ? ((totals.gross_profit / totals.revenue_gross) * 100)
     : 0;
   const marginClass = marginPct >= 60 ? 'v2-eco-kpi--positive' : marginPct < 50 ? 'v2-eco-kpi--warn' : '';
   const periodLabel = period ? formatMonthLabel(period.from) : '';
 
   hero.innerHTML = `
     <div class="v2-eco-kpi">
-      <div class="v2-eco-kpi-label">Umsatz netto</div>
-      <div class="v2-eco-kpi-value">${fmtEur(totals.revenue_net)}</div>
+      <div class="v2-eco-kpi-label">Umsatz (brutto)</div>
+      <div class="v2-eco-kpi-value">${fmtEur(totals.revenue_gross)}</div>
       <div class="v2-eco-kpi-sub">${periodLabel ? `${periodLabel} · ` : ''}${totals.qty} Einheiten</div>
     </div>
     <div class="v2-eco-kpi">
-      <div class="v2-eco-kpi-label">Deckungsbeitrag</div>
-      <div class="v2-eco-kpi-value">${fmtEur(totals.db_net)}</div>
+      <div class="v2-eco-kpi-label">GuV (brutto)</div>
+      <div class="v2-eco-kpi-value">${fmtEur(totals.gross_profit)}</div>
       <div class="v2-eco-kpi-sub">nach Wareneinsatz</div>
     </div>
     <div class="v2-eco-kpi ${marginClass}">
       <div class="v2-eco-kpi-label">Marge</div>
       <div class="v2-eco-kpi-value">${fmtPct(marginPct)}</div>
-      <div class="v2-eco-kpi-sub">DB / Umsatz</div>
+      <div class="v2-eco-kpi-sub">GuV / Umsatz</div>
     </div>`;
 }
 
@@ -595,13 +595,13 @@ function renderTotalsBar(totals, timestamp) {
   const bar = document.querySelector('#ecoTotalsBar');
   bar.innerHTML = `
     <span class="v2-totals-item">
-      <span class="v2-totals-label">Σ Umsatz</span>
-      <span class="v2-totals-value">${fmtEur(totals.revenue_net)}</span>
+      <span class="v2-totals-label">Σ Umsatz (brutto)</span>
+      <span class="v2-totals-value">${fmtEur(totals.revenue_gross)}</span>
     </span>
     <span class="v2-totals-sep" aria-hidden="true">·</span>
     <span class="v2-totals-item">
-      <span class="v2-totals-label">Σ DB</span>
-      <span class="v2-totals-value">${fmtEur(totals.db_net)}</span>
+      <span class="v2-totals-label">Σ GuV (brutto)</span>
+      <span class="v2-totals-value">${fmtEur(totals.gross_profit)}</span>
     </span>
     <span class="v2-totals-sep" aria-hidden="true">·</span>
     <span class="v2-totals-item">
@@ -620,9 +620,9 @@ function renderProductTable(rows) {
   tbody.innerHTML = rows.map((r) => `
     <tr>
       <td>${r.product_name}</td>
-      <td class="v2-kpi-num">${fmtEur(r.revenue_net)}</td>
-      <td class="v2-kpi-num">${fmtEur(r.db_net)}</td>
-      <td class="v2-kpi-num">${fmtPct(r.margin_pct)}</td>
+      <td class="v2-kpi-num">${fmtEur(r.revenue_gross)}</td>
+      <td class="v2-kpi-num">${fmtEur(r.gross_profit)}</td>
+      <td class="v2-kpi-num">${fmtPct(r.margin_gross_pct)}</td>
       <td class="v2-kpi-num">${r.qty}</td>
     </tr>`).join('');
 }
@@ -637,8 +637,8 @@ function renderSlotTable(rows) {
     <tr>
       <td>${r.machine_id}</td>
       <td class="v2-kpi-num">${r.mdb_code}</td>
-      <td class="v2-kpi-num">${fmtEur(r.revenue_net)}</td>
-      <td class="v2-kpi-num">${fmtEur(r.db_net)}</td>
+      <td class="v2-kpi-num">${fmtEur(r.revenue_gross)}</td>
+      <td class="v2-kpi-num">${fmtEur(r.gross_profit)}</td>
       <td class="v2-kpi-num">${r.qty}</td>
     </tr>`).join('');
 }

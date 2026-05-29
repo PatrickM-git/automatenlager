@@ -334,6 +334,42 @@ test('AC-Period: buildEconomicsData ignores invalid from/to and uses current mon
   assert.match(result.period.to, /^\d{4}-\d{2}$/);
 });
 
+// ── Issue #53: Brutto-Anzeige (wie altes Dashboard) ──────────────────────────
+
+const GROSS_ROWS = [
+  { product_id: 1, month: '2026-05-01', revenue_net: '100.00', revenue_gross: '107.00', gross_profit: '40.00', db_net: '37.38', qty: '10' },
+  { product_id: 2, month: '2026-05-01', revenue_net: '50.00', revenue_gross: '53.50', gross_profit: '15.00', db_net: '14.02', qty: '5' },
+];
+
+test('AC53: byProduct exposes revenue_gross and gross_profit as numbers', () => {
+  const result = buildEconomicsData({ byProduct: GROSS_ROWS, bySlot: [], inventoryValue: [] }, {});
+  const row = result.byProduct[0];
+  assert.equal(row.revenue_gross, 107.00);
+  assert.equal(row.gross_profit, 40.00);
+  assert.equal(typeof row.margin_gross_pct, 'number');
+});
+
+test('AC53: totals aggregate revenue_gross and gross_profit across products', () => {
+  const result = buildEconomicsData({ byProduct: GROSS_ROWS, bySlot: [], inventoryValue: [] }, {});
+  assert.equal(result.totals.revenue_gross, 160.50);
+  assert.equal(result.totals.gross_profit, 55.00);
+});
+
+test('AC53: bySlot exposes revenue_gross and gross_profit', () => {
+  const slotGross = [
+    { machine_id: 'VM01', mdb_code: 1, month: '2026-05-01', revenue_net: '80.00', revenue_gross: '85.60', gross_profit: '30.00', db_net: '28.04', qty: '8' },
+  ];
+  const result = buildEconomicsData({ byProduct: [], bySlot: slotGross, inventoryValue: [] }, {});
+  assert.equal(result.bySlot[0].revenue_gross, 85.60);
+  assert.equal(result.bySlot[0].gross_profit, 30.00);
+});
+
+test('AC-UI: v2.js renders revenue_gross/gross_profit in economics panel', () => {
+  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
+  assert.match(js, /revenue_gross/, 'v2.js must display revenue_gross');
+  assert.match(js, /gross_profit/, 'v2.js must display gross_profit');
+});
+
 test('AC-UI: v2.html has month selector with id ecoMonthSelect', () => {
   const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
   assert.match(html, /id="ecoMonthSelect"/, 'missing month selector');
