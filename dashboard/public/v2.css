@@ -150,9 +150,9 @@ body {
 .v2-eyebrow {
   margin: 0 0 6px;
   color: var(--v2-muted);
-  font-size: 12px;
-  font-weight: 760;
-  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -168,14 +168,18 @@ p {
 
 h1 {
   margin-bottom: 0;
-  font-size: 42px;
-  line-height: 1.05;
+  font-size: 40px;
+  line-height: 1.04;
+  letter-spacing: -0.025em;
+  font-weight: 700;
 }
 
 h2 {
   margin-bottom: 8px;
-  font-size: 21px;
+  font-size: 20px;
   line-height: 1.2;
+  letter-spacing: -0.015em;
+  font-weight: 700;
 }
 
 .v2-status,
@@ -268,20 +272,27 @@ h2 {
 
 .v2-priority-count {
   font-family: 'DM Mono', ui-monospace, Menlo, Consolas, monospace;
-  font-size: 18px;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--v2-ink);
+  min-width: 42px;
+  text-align: right;
 }
 
 .v2-priority-item--critical {
   border-left: 4px solid var(--v2-error);
+  background: rgba(169, 52, 63, 0.03);
 }
 
 .v2-priority-item--warning {
   border-left: 4px solid var(--v2-warn);
+  background: rgba(154, 95, 19, 0.03);
 }
 
 .v2-priority-item--info {
   border-left: 4px solid var(--v2-accent);
+  background: rgba(122, 31, 92, 0.03);
 }
 
 .v2-priority-empty {
@@ -327,17 +338,35 @@ h2 {
   background: #8a8a8a;
 }
 
+.v2-ampel-card--green {
+  background: rgba(31, 122, 90, 0.05);
+  border-color: rgba(31, 122, 90, 0.22);
+}
+.v2-ampel-card--yellow {
+  background: rgba(154, 95, 19, 0.05);
+  border-color: rgba(154, 95, 19, 0.22);
+}
+.v2-ampel-card--red {
+  background: rgba(169, 52, 63, 0.05);
+  border-color: rgba(169, 52, 63, 0.22);
+}
+
 .v2-ampel-card--green .v2-ampel-dot {
   background: var(--v2-ok);
+  box-shadow: 0 0 0 3px rgba(31,122,90,0.2);
 }
-
 .v2-ampel-card--yellow .v2-ampel-dot {
   background: var(--v2-warn);
+  box-shadow: 0 0 0 3px rgba(154,95,19,0.2);
 }
-
 .v2-ampel-card--red .v2-ampel-dot {
   background: var(--v2-error);
+  box-shadow: 0 0 0 3px rgba(169,52,63,0.2);
 }
+
+.v2-ampel-card--green .v2-ampel-state { color: var(--v2-ok); }
+.v2-ampel-card--yellow .v2-ampel-state { color: var(--v2-warn); }
+.v2-ampel-card--red .v2-ampel-state { color: var(--v2-error); }
 
 .v2-ampel-state {
   margin: 6px 0 4px;
@@ -382,7 +411,7 @@ h2 {
 
 .v2-panel {
   min-height: 150px;
-  padding: 18px 0;
+  padding: 24px 0 18px;
   border-top: 1px solid var(--v2-line);
 }
 
@@ -589,11 +618,13 @@ h2 {
   display: inline-flex;
   min-height: 24px;
   align-items: center;
-  padding: 3px 8px;
+  padding: 3px 10px;
   border-radius: 999px;
-  background: rgba(122, 31, 92, 0.08);
+  background: rgba(122, 31, 92, 0.1);
   color: var(--v2-accent);
   font-weight: 700;
+  font-size: 12px;
+  border: 1px solid rgba(122, 31, 92, 0.15);
 }
 
 .v2-inventory-empty {
@@ -878,11 +909,11 @@ h2 {
 
 .v2-eco-kpi-value {
   font-family: 'DM Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 22px;
-  font-weight: 500;
+  font-size: 26px;
+  font-weight: 600;
   color: var(--v2-ink);
   line-height: 1;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
 }
 
 .v2-eco-kpi--positive .v2-eco-kpi-value { color: var(--v2-ok); }
@@ -939,17 +970,17 @@ h2 {
 .v2-th-sort {
   padding: 0;
   text-align: left;
-  background: #f0ece8;
-  border-bottom: 1px solid var(--v2-line);
+  background: #edeae5;
+  border-bottom: 2px solid var(--v2-line);
   white-space: nowrap;
 }
 
 .v2-th-label {
-  padding: 8px 12px;
+  padding: 10px 12px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.07em;
   color: var(--v2-muted);
 }
 
