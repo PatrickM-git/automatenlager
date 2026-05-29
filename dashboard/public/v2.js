@@ -2051,8 +2051,18 @@ loadMachineProfiles();
     state.removeAttribute('hidden');
     body.setAttribute('hidden', '');
     try {
-      const res  = await fetch('/api/v2/correction-cases');
-      const data = await res.json();
+      const [casesRes, startedRes] = await Promise.all([
+        fetch('/api/v2/correction-cases'),
+        fetch('/api/v2/onboarding/started-keys').catch(() => null),
+      ]);
+      if (startedRes?.ok) {
+        const startedData = await startedRes.json().catch(() => null);
+        if (startedData?.ok && Array.isArray(startedData.started_keys)) {
+          window._obStartedKeys = window._obStartedKeys || new Set();
+          startedData.started_keys.forEach((k) => window._obStartedKeys.add(k));
+        }
+      }
+      const data = await casesRes.json();
       if (!data.ok) throw new Error(data.error?.message || 'Fehler beim Laden');
       state.setAttribute('hidden', '');
       body.removeAttribute('hidden');
