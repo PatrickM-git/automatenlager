@@ -124,7 +124,7 @@ test('AC1b: mhd_date from a pg Date object is normalized to ISO YYYY-MM-DD', () 
   assert.equal(result.mhdRisks[0].mhd_date, '2026-05-27');
 });
 
-test('AC2: low stock rows are sorted by urgency with understandable refill gap', () => {
+test('AC2: lowStock shows only qty=0 slots, sorted by refill gap descending', () => {
   const lowStockRows = [
     {
       product_id: 2,
@@ -141,9 +141,9 @@ test('AC2: low stock rows are sorted by urgency with understandable refill gap',
     {
       product_id: 1,
       product_name: 'Snickers',
-      current_machine_qty: '1',
+      current_machine_qty: '0',
       target_stock: '10',
-      backstock_qty: '12',
+      backstock_qty: '4',
       machine_id: 'VM01',
       machine_name: 'Faltrix Mini',
       location_id: 'LOC1',
@@ -166,13 +166,15 @@ test('AC2: low stock rows are sorted by urgency with understandable refill gap',
 
   const result = buildInventoryMhdData({ mhdRisks: [], lowStock: lowStockRows }, {});
 
+  assert.equal(result.lowStock.length, 2, 'Kitkat Chunky (qty=5) darf nicht enthalten sein');
   assert.deepEqual(
     result.lowStock.map((row) => row.product_name),
-    ['Snickers', 'Red Bull', 'Kitkat Chunky'],
+    ['Snickers', 'Red Bull'],
+    'sortiert nach refill_gap absteigend (10 > 4)',
   );
   assert.deepEqual(
     result.lowStock.map((row) => row.refill_gap),
-    [9, 4, 3],
+    [10, 4],
   );
   assert.equal(result.lowStock[1].urgency_label, 'leer, kein Backstock');
 });
@@ -252,4 +254,51 @@ test('AC-UI: mobile inventory uses compact list styling instead of horizontal ta
 
   assert.match(css, /\.v2-inventory-list/, 'missing compact inventory list style');
   assert.match(css, /@media\s*\(max-width:\s*820px\)[\s\S]*\.v2-inventory-row/, 'missing mobile inventory row rules');
+});
+
+test('AC-empty-slots: lowStock list contains only slots with current_machine_qty = 0', () => {
+  const rows = [
+    {
+      product_id: 1, product_name: 'Snickers', current_machine_qty: '3',
+      target_stock: '8', backstock_qty: '2', machine_id: 'VM01',
+      machine_name: 'Faltrix Mini', location_id: 'LOC1', location_name: 'Kantine', mdb_code: 10,
+    },
+    {
+      product_id: 2, product_name: 'Kitkat', current_machine_qty: '0',
+      target_stock: '4', backstock_qty: '3', machine_id: 'VM01',
+      machine_name: 'Faltrix Mini', location_id: 'LOC1', location_name: 'Kantine', mdb_code: 11,
+    },
+    {
+      product_id: 3, product_name: 'Red Bull', current_machine_qty: '0',
+      target_stock: '6', backstock_qty: '0', machine_id: 'VM01',
+      machine_name: 'Faltrix Mini', location_id: 'LOC1', location_name: 'Kantine', mdb_code: 12,
+    },
+  ];
+  const result = buildInventoryMhdData({ mhdRisks: [], lowStock: rows }, {});
+
+  assert.ok(
+    result.lowStock.every((r) => r.current_machine_qty === 0),
+    'nur qty=0-Slots erwartet',
+  );
+  assert.equal(result.lowStock.length, 2);
+  assert.ok(result.lowStock.some((r) => r.product_name === 'Kitkat'));
+  assert.ok(result.lowStock.some((r) => r.product_name === 'Red Bull'));
+});
+
+test('AC-sku-names: MHD panel converts raw SKU code to readable product name', () => {
+  const rows = [{ ...MHD_ROWS[0], product_name: 'SKU_KITKAT_CHUNKY' }];
+  const result = buildInventoryMhdData({ mhdRisks: rows, lowStock: [] }, {});
+
+  assert.equal(result.mhdRisks[0].product_name, 'Kitkat Chunky');
+});
+
+test('AC-sku-names: low stock panel converts raw SKU code to readable product name', () => {
+  const rows = [{
+    product_id: 1, product_name: 'SKU_SNICKERS', current_machine_qty: '0',
+    target_stock: '8', backstock_qty: '2', machine_id: 'VM01',
+    machine_name: 'Faltrix Mini', location_id: 'LOC1', location_name: 'Kantine', mdb_code: 10,
+  }];
+  const result = buildInventoryMhdData({ mhdRisks: [], lowStock: rows }, {});
+
+  assert.equal(result.lowStock[0].product_name, 'Snickers');
 });

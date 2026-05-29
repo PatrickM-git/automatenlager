@@ -1,5 +1,7 @@
 'use strict';
 
+const { formatProductName } = require('./economics.js');
+
 const SEVERITY_RANK = {
   critical: 0,
   error: 0,
@@ -50,7 +52,7 @@ function parseMhdRiskRow(row) {
     batch_id: toNum(row.batch_id),
     batch_key: clean(row.batch_key),
     product_id: toNum(row.product_id),
-    product_name: clean(row.product_name) || String(row.product_id ?? ''),
+    product_name: formatProductName(clean(row.product_name)) || String(row.product_id ?? ''),
     mhd_date: toIsoDate(row.mhd_date),
     remaining_qty: toNum(row.remaining_qty),
     severity: normalizeSeverity(row),
@@ -78,7 +80,7 @@ function parseLowStockRow(row) {
   const refillGap = Math.max(0, targetStock - currentMachineQty);
   return {
     product_id: toNum(row.product_id),
-    product_name: clean(row.product_name) || String(row.product_id ?? ''),
+    product_name: formatProductName(clean(row.product_name)) || String(row.product_id ?? ''),
     current_machine_qty: currentMachineQty,
     target_stock: targetStock,
     backstock_qty: backstockQty,
@@ -138,7 +140,7 @@ function buildInventoryMhdData(pgRows = {}, query = {}) {
     mhdRisks,
     lowStock: sortLowStock((pgRows.lowStock || [])
       .map(parseLowStockRow)
-      .filter((row) => matchesFilter(row, filters))),
+      .filter((row) => row.current_machine_qty === 0 && matchesFilter(row, filters))),
     filters,
     sortBy,
     sortOrder,
@@ -219,8 +221,7 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
            JOIN automatenlager.locations l ON l.location_id = m.location_id
            LEFT JOIN batch_totals bt ON bt.product_id = p.product_id
           WHERE sa.active = TRUE
-            AND sa.target_stock IS NOT NULL
-            AND sa.current_machine_qty < sa.target_stock
+            AND sa.current_machine_qty = 0
             AND ($1 = '' OR l.location_key = $1 OR l.name ILIKE '%' || $1 || '%')
             AND ($2 = '' OR m.machine_key = $2 OR m.name ILIKE '%' || $2 || '%')`,
         params,
