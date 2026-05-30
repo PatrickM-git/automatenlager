@@ -227,9 +227,278 @@
         return { status: 'error' };
       });
     }
+    if (route.path === '/lager') {
+      return fetchJson('/api/v2/inventory-mhd').then(function (res) {
+        var rows = (res && res.data && res.data.mhdRisks) || [];
+        if (rows.length === 0) { return { status: 'empty' }; }
+        /* Client-side: build lager data (same logic as lib/lager.js, no server round-trip) */
+        var cards = rows.map(function (r) {
+          var s = String(r.severity || r.warning_severity || '').toLowerCase();
+          var sev = (s === 'critical' || s === 'error') ? 'critical' :
+                    (s === 'warning'  || s === 'warn')  ? 'warning'  : 'info';
+          return {
+            batch_id:        Number(r.batch_id)      || 0,
+            product_id:      Number(r.product_id)    || 0,
+            product_name:    String(r.product_name   || r.product_id || ''),
+            mhd_date:        String(r.mhd_date       || ''),
+            remaining_qty:   Number(r.remaining_qty) || 0,
+            severity:        sev,
+            machine_id:      String(r.machine_id     || ''),
+            machine_name:    String(r.machine_name   || ''),
+            location_name:   String(r.location_name  || ''),
+            mdb_code:        String(r.mdb_code       || ''),
+            slow_mover_class: r.slow_mover_class != null ? String(r.slow_mover_class) : null,
+          };
+        });
+        _lagerAllCards = cards;
+        var crit = cards.filter(function (c) { return c.severity === 'critical'; }).length;
+        var warn = cards.filter(function (c) { return c.severity === 'warning';  }).length;
+        return { status: 'ok', lager: { cards: cards, summary: { total: cards.length, critical: crit, warning: warn } } };
+      }).catch(function () {
+        return { status: 'error' };
+      });
+    }
     return new Promise(function (resolve) {
       setTimeout(function () { resolve({ status: 'ok', route: route }); }, 260);
     });
+  }
+
+  /* ---- Lager-Seite (Bestand & MHD / /lager) ----------------------------- */
+
+  /* Berechnet Dringlichkeit-Farbe und MHD-Balken-Füllstand */
+  function mhdUrgency(mhdDate) {
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var mhd   = new Date(mhdDate + 'T00:00:00');
+    var days  = Math.round((mhd - today) / 86400000);
+    var pct   = days <= 0 ? 100 : days >= 30 ? 8 : Math.round((1 - days / 30) * 92 + 8);
+    var label = days < 0  ? 'Abgelaufen (' + Math.abs(days) + ' Tage)' :
+                days === 0 ? 'Läuft heute ab' :
+                days === 1 ? 'Noch 1 Tag' :
+                'Noch ' + days + ' Tage';
+    return { days: days, pct: pct, label: label };
+  }
+
+  function renderLagerCard(card) {
+    var sev   = card.severity || 'info';
+    var mod   = sev === 'critical' ? ' v3-lager-card--crit' : sev === 'warning' ? ' v3-lager-card--warn' : ' v3-lager-card--info';
+    var bMod  = sev === 'critical' ? 'v3-badge--crit' : sev === 'warning' ? 'v3-badge--warn' : 'v3-badge--info';
+    var bTxt  = sev === 'critical' ? 'Kritisch' : sev === 'warning' ? 'Warnung' : 'OK';
+    var slow  = card.slow_mover_class ? '<span class="v3-badge v3-badge--slow-mover">Slow-Mover</span>' : '';
+    var vMod  = sev === 'critical' ? ' v3-lager-card__stat-value--crit' : sev === 'warning' ? ' v3-lager-card__stat-value--warn' : '';
+    var urg   = card.mhd_date ? mhdUrgency(card.mhd_date) : { pct: 0, label: '—' };
+    var expiryBar = card.mhd_date
+      ? '<div class="v3-lager-card__expiry">' +
+          '<div class="v3-lager-card__expiry-track">' +
+            '<div class="v3-lager-card__expiry-fill" style="width:' + urg.pct + '%"></div>' +
+          '</div>' +
+          '<span class="v3-lager-card__expiry-label">' + esc(urg.label) + '</span>' +
+        '</div>'
+      : '';
+    return '<article class="v3-lager-card' + mod + '">' +
+      '<div class="v3-lager-card__head">' +
+        '<span class="v3-lager-card__product">' + esc(card.product_name) + '</span>' +
+        '<div class="v3-lager-card__badges">' +
+          '<span class="v3-badge ' + bMod + '">' + bTxt + '</span>' +
+          slow +
+        '</div>' +
+      '</div>' +
+      '<div class="v3-lager-card__stats">' +
+        '<div>' +
+          '<div class="v3-lager-card__stat-label">MHD</div>' +
+          '<div class="v3-lager-card__stat-value' + vMod + '">' + esc(card.mhd_date || '—') + '</div>' +
+        '</div>' +
+        '<div>' +
+          '<div class="v3-lager-card__stat-label">Bestand</div>' +
+          '<div class="v3-lager-card__stat-value">' + esc(String(card.remaining_qty)) + ' Stk.</div>' +
+        '</div>' +
+        '<div>' +
+          '<div class="v3-lager-card__stat-label">Automat</div>' +
+          '<div class="v3-lager-card__stat-value">' + esc(card.machine_name || card.machine_id || '—') + '</div>' +
+        '</div>' +
+        '<div>' +
+          '<div class="v3-lager-card__stat-label">Slot</div>' +
+          '<div class="v3-lager-card__stat-value">' + esc(card.mdb_code || '—') + '</div>' +
+        '</div>' +
+      '</div>' +
+      expiryBar +
+    '</article>';
+  }
+
+  function renderBarChartSvg(cards) {
+    if (!cards || cards.length === 0) {
+      return '<p class="v3-lager-chart-empty">Keine Daten</p>';
+    }
+    var items = cards
+      .slice()
+      .sort(function (a, b) { return b.remaining_qty - a.remaining_qty; })
+      .slice(0, 8);
+    var max = items[0].remaining_qty || 1;
+    var ROW = 32, PAD_LEFT = 96, PAD_RIGHT = 42, BAR_MAX = 140;
+    var h = items.length * ROW + 8;
+    var rows = items.map(function (c, i) {
+      var barW  = Math.max(4, Math.round((c.remaining_qty / max) * BAR_MAX));
+      var sev   = c.severity || 'info';
+      var cls   = sev === 'critical' ? 'v3-chart-bar--crit' : sev === 'warning' ? 'v3-chart-bar--warn' : 'v3-chart-bar--info';
+      var y     = i * ROW + 4;
+      var label = c.product_name.length > 12 ? c.product_name.slice(0, 11) + '…' : c.product_name;
+      return '<g role="img" aria-label="' + esc(c.product_name) + ': ' + c.remaining_qty + '">' +
+        '<text class="v3-chart-label" x="' + (PAD_LEFT - 6) + '" y="' + (y + 13) + '" text-anchor="end" font-size="11">' + esc(label) + '</text>' +
+        '<rect class="v3-chart-bar ' + cls + '" x="' + PAD_LEFT + '" y="' + (y + 2) + '" width="' + barW + '" height="18" rx="4"/>' +
+        '<text class="v3-chart-value" x="' + (PAD_LEFT + barW + 5) + '" y="' + (y + 14) + '" font-size="11">' + esc(String(c.remaining_qty)) + '</text>' +
+      '</g>';
+    }).join('');
+    var totalW = PAD_LEFT + BAR_MAX + PAD_RIGHT;
+    return '<svg viewBox="0 0 ' + totalW + ' ' + h + '" aria-label="Restmengen im Überblick" role="img" ' +
+      'style="width:100%;display:block;overflow:visible">' + rows + '</svg>';
+  }
+
+  /* Summary KPI strip for lager page */
+  function renderLagerKpis(summary) {
+    var total = summary.total || 0;
+    var crit  = summary.critical || 0;
+    var warn  = summary.warning  || 0;
+    function kpi(label, value, mod) {
+      return '<div class="v3-cockpit-kpi' + (mod ? ' v3-cockpit-kpi--' + mod : '') + '">' +
+        '<span class="v3-cockpit-kpi__label">' + label + '</span>' +
+        '<span class="v3-cockpit-kpi__value">' + value + '</span>' +
+      '</div>';
+    }
+    return '<div class="v3-cockpit-kpis" style="margin-bottom:18px">' +
+      kpi('Einträge gesamt', total, '') +
+      kpi('Kritisch', crit, crit > 0 ? 'crit' : '') +
+      kpi('Warnung', warn, warn > 0 ? 'warn' : '') +
+    '</div>';
+  }
+
+  /* Filter-Bar HTML — machines + products populated from data */
+  function renderLagerBar(cards) {
+    var machines = {}, products = {};
+    cards.forEach(function (c) {
+      if (c.machine_id) machines[c.machine_id] = c.machine_name || c.machine_id;
+      if (c.product_id) products[c.product_id] = c.product_name;
+    });
+    var machOpts = '<option value="">Alle Automaten</option>' +
+      Object.keys(machines).sort().map(function (id) {
+        return '<option value="' + esc(id) + '">' + esc(machines[id]) + '</option>';
+      }).join('');
+    var prodOpts = '<option value="">Alle Produkte</option>' +
+      Object.keys(products).sort(function (a, b) {
+        return products[a].localeCompare(products[b]);
+      }).map(function (id) {
+        return '<option value="' + esc(id) + '">' + esc(products[id]) + '</option>';
+      }).join('');
+    return '<div class="v3-lager-bar" role="search" aria-label="Bestand filtern">' +
+      '<div class="v3-lager-bar__group">' +
+        '<span class="v3-lager-bar__label">Dringlichkeit</span>' +
+        '<button class="v3-chip v3-chip--active" data-lager-sev="" aria-pressed="true">Alle</button>' +
+        '<button class="v3-chip v3-chip--crit" data-lager-sev="critical" aria-pressed="false">Kritisch</button>' +
+        '<button class="v3-chip v3-chip--warn" data-lager-sev="warning" aria-pressed="false">Warnung</button>' +
+      '</div>' +
+      '<div class="v3-lager-bar__group">' +
+        '<span class="v3-lager-bar__label">Automat</span>' +
+        '<select data-lager-machine aria-label="Automat wählen">' + machOpts + '</select>' +
+      '</div>' +
+      '<div class="v3-lager-bar__group">' +
+        '<span class="v3-lager-bar__label">Produkt</span>' +
+        '<select data-lager-product aria-label="Produkt wählen">' + prodOpts + '</select>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderLagerPage(data) {
+    var allCards = (data && data.cards) || [];
+    var summary  = (data && data.summary) || { total: 0, critical: 0, warning: 0 };
+
+    var cardsHtml = allCards.length === 0
+      ? '<div class="v3-lager-empty">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4"/><path d="M12 11v10"/></svg>' +
+          '<p style="margin:0;font-weight:600">Keine Einträge</p>' +
+          '<p style="margin:0;font-size:13px">Alle Bestände sind in Ordnung.</p>' +
+        '</div>'
+      : allCards.map(renderLagerCard).join('');
+
+    return renderLagerKpis(summary) +
+      renderLagerBar(allCards) +
+      '<div class="v3-lager-layout">' +
+        '<div class="v3-lager-grid v3-lager-grid--fresh" data-lager-grid>' + cardsHtml + '</div>' +
+        '<aside class="v3-lager-chart-panel" aria-label="Restmengen-Übersicht">' +
+          '<p class="v3-lager-chart-panel__title">Restmengen im Überblick</p>' +
+          '<div data-lager-chart>' + renderBarChartSvg(allCards) + '</div>' +
+        '</aside>' +
+      '</div>';
+  }
+
+  /* Bind interactive filter events after lager page renders */
+  var _lagerAllCards = [];
+  function bindLagerFilters() {
+    var grid    = viewEl.querySelector('[data-lager-grid]');
+    var chart   = viewEl.querySelector('[data-lager-chart]');
+    var sevBtns = viewEl.querySelectorAll('[data-lager-sev]');
+    var machSel = viewEl.querySelector('[data-lager-machine]');
+    var prodSel = viewEl.querySelector('[data-lager-product]');
+    if (!grid) { return; }
+
+    var filters = { severity: null, machine_id: null, product_id: null };
+
+    function applyFilter() {
+      var filtered = _lagerAllCards.filter(function (c) {
+        if (filters.severity   && c.severity   !== filters.severity)              return false;
+        if (filters.machine_id && c.machine_id !== filters.machine_id)             return false;
+        if (filters.product_id && c.product_id !== Number(filters.product_id))     return false;
+        return true;
+      });
+      var critF = filtered.filter(function (c) { return c.severity === 'critical'; }).length;
+      var warnF = filtered.filter(function (c) { return c.severity === 'warning'; }).length;
+      /* Update summary KPIs */
+      var kpiEl = viewEl.querySelector('.v3-cockpit-kpis');
+      if (kpiEl) {
+        var vals = kpiEl.querySelectorAll('.v3-cockpit-kpi__value');
+        if (vals[0]) { vals[0].textContent = String(filtered.length); }
+        if (vals[1]) { vals[1].textContent = String(critF); }
+        if (vals[2]) { vals[2].textContent = String(warnF); }
+      }
+      /* Re-render cards */
+      grid.classList.remove('v3-lager-grid--fresh');
+      void grid.offsetWidth; /* reflow to retrigger animation */
+      grid.classList.add('v3-lager-grid--fresh');
+      grid.innerHTML = filtered.length === 0
+        ? '<div class="v3-lager-empty">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4"/><path d="M12 11v10"/></svg>' +
+            '<p style="margin:0;font-weight:600">Kein Treffer</p>' +
+            '<p style="margin:0;font-size:13px">Filter anpassen, um Einträge anzuzeigen.</p>' +
+          '</div>'
+        : filtered.map(renderLagerCard).join('');
+      /* Re-render chart with same filtered set */
+      if (chart) { chart.innerHTML = renderBarChartSvg(filtered); }
+      /* Navigation links are handled by global click delegation — no rebind needed */
+    }
+
+    sevBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var sev = btn.getAttribute('data-lager-sev') || null;
+        filters.severity = sev || null;
+        sevBtns.forEach(function (b) {
+          var active = b === btn;
+          b.setAttribute('aria-pressed', active ? 'true' : 'false');
+          if (active) { b.classList.add('v3-chip--active'); }
+          else { b.classList.remove('v3-chip--active'); }
+        });
+        applyFilter();
+      });
+    });
+    if (machSel) {
+      machSel.addEventListener('change', function () {
+        filters.machine_id = machSel.value || null;
+        applyFilter();
+      });
+    }
+    if (prodSel) {
+      prodSel.addEventListener('change', function () {
+        filters.product_id = prodSel.value || null;
+        applyFilter();
+      });
+    }
   }
 
   function placeholderContent(route) {
@@ -271,6 +540,9 @@
       } else if (result.status === 'empty') {
         viewEl.innerHTML = pageHead(route) +
           renderState('empty', { message: 'Für „' + route.title + '" liegen aktuell keine Einträge vor.' });
+      } else if (route.path === '/lager' && result.lager) {
+        viewEl.innerHTML = pageHead(route) + renderLagerPage(result.lager);
+        bindLagerFilters();
       } else if (route.path === '/' && result.cockpit) {
         viewEl.innerHTML = pageHead(route) + renderCockpitPage(result.cockpit);
       } else {
