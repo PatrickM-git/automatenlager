@@ -43,9 +43,46 @@ function currentBerlinMonth() {
   }).format(new Date()).slice(0, 7);
 }
 
+// Robuster Monatsschlüssel 'YYYY-MM'. PostgreSQL liefert date_trunc('month')::DATE
+// als Berlin-Mitternacht, das JSON-serialisiert als UTC-Vortag erscheint
+// (z. B. '2026-04-30T22:00:00.000Z' = Mai). Reine 'YYYY-MM[-DD]'-Strings ohne
+// Zeitanteil werden direkt zugeschnitten; alles mit Zeit wird in Europe/Berlin
+// interpretiert, damit der fachliche Monat stimmt.
+function monthKeyBerlin(value) {
+  if (value == null) return '';
+  if (typeof value === 'string' && /^\d{4}-\d{2}/.test(value) && value.indexOf('T') === -1) {
+    return value.slice(0, 7);
+  }
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric',
+    month: '2-digit',
+  }).format(d).slice(0, 7);
+}
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
 function resolvePeriod(query = {}) {
   const current = currentBerlinMonth();
   const validMonth = /^\d{4}-\d{2}$/;
+  const year = parseInt(query.year, 10);
+
+  if (query.mode === 'quarter' && Number.isInteger(year)) {
+    const q = parseInt(query.quarter, 10);
+    if (q >= 1 && q <= 4) {
+      const startMonth = (q - 1) * 3 + 1;
+      return { from: `${year}-${pad2(startMonth)}`, to: `${year}-${pad2(startMonth + 2)}` };
+    }
+  }
+
+  if (query.mode === 'year' && Number.isInteger(year)) {
+    return { from: `${year}-01`, to: `${year}-12` };
+  }
+
   const from = validMonth.test(query.from || '') ? query.from : current;
   const to = validMonth.test(query.to || '') ? query.to : current;
   return { from, to };
@@ -101,10 +138,43 @@ function sortRows(rows, sortBy, sortOrder) {
   });
 }
 
+const VALID_MODES = new Set(['month', 'quarter', 'year', 'custom']);
+
+// Verdichtet die (bereits geparsten) Produktzeilen zu einer Monats-Zeitreihe
+// für die Diagramme – aufsteigend nach Monat, je Monat brutto/netto + Marge.
+function buildSeries(productRows) {
+  const byMonth = new Map();
+  for (const r of productRows) {
+    const month = monthKeyBerlin(r.month);
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    const acc = byMonth.get(month) ||
+      { month, revenue_net: 0, db_net: 0, revenue_gross: 0, gross_profit: 0, qty: 0 };
+    acc.revenue_net += r.revenue_net;
+    acc.db_net += r.db_net;
+    acc.revenue_gross += r.revenue_gross;
+    acc.gross_profit += r.gross_profit;
+    acc.qty += r.qty;
+    byMonth.set(month, acc);
+  }
+  return [...byMonth.values()]
+    .map((m) => ({
+      month: m.month,
+      revenue_net: round2(m.revenue_net),
+      db_net: round2(m.db_net),
+      revenue_gross: round2(m.revenue_gross),
+      gross_profit: round2(m.gross_profit),
+      qty: m.qty,
+      margin_pct: marginPct(m.db_net, m.revenue_net),
+      margin_gross_pct: marginPct(m.gross_profit, m.revenue_gross),
+    }))
+    .sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : 0));
+}
+
 function buildEconomicsData(pgRows, query = {}) {
   const sortBy = query.sort || 'revenue_net';
   const sortOrder = query.order === 'asc' ? 'asc' : 'desc';
   const machineFilter = query.machine || null;
+  const mode = VALID_MODES.has(query.mode) ? query.mode : 'month';
   const period = resolvePeriod(query);
 
   const byProduct = sortRows(
@@ -132,12 +202,16 @@ function buildEconomicsData(pgRows, query = {}) {
     { revenue_net: 0, db_net: 0, revenue_gross: 0, gross_profit: 0, qty: 0 },
   );
 
+  const series = buildSeries(byProduct);
+
   return {
     byProduct,
     bySlot,
     inventoryValue,
     totals,
+    series,
     period,
+    mode,
     sortBy,
     sortOrder,
     machineFilter,
