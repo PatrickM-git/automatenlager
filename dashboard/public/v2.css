@@ -301,6 +301,29 @@ h2 {
   font-size: 13px;
 }
 
+.v2-priority-item--toggleable {
+  cursor: pointer;
+  user-select: none;
+}
+.v2-priority-item--toggleable:focus-visible {
+  outline: 2px solid #c47a00;
+  outline-offset: 2px;
+}
+.v2-priority-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.v2-priority-chevron {
+  font-size: 1rem;
+  color: var(--v2-muted);
+  transition: transform 0.2s;
+  line-height: 1;
+}
+.v2-priority-item--toggleable[aria-expanded="true"] .v2-priority-chevron {
+  transform: rotate(90deg);
+}
+
 .v2-ampel-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

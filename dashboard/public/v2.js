@@ -48,19 +48,43 @@ function renderOverview(payload) {
     if (!priorities.length) {
       prioritiesEl.innerHTML = '<div class="v2-priority-empty">Keine offenen Prioritaeten fuer heute.</div>';
     } else {
-      prioritiesEl.innerHTML = priorities.map((item) => `
-        <div class="v2-priority-item v2-priority-item--${escapeHtml(item.severity)}">
-          <div class="v2-priority-main">
-            <strong>${escapeHtml(item.title)}</strong>
-            <span>${escapeHtml(item.message)}</span>
-          </div>
-          <span class="v2-priority-count">${escapeHtml(item.count)}</span>
-        </div>
-      `).join('');
+      prioritiesEl.innerHTML = priorities.map((item) => {
+        const isWarn = item.id === 'warnings-open';
+        const toggle = isWarn ? `data-toggle="warningsDrilldownList" aria-expanded="false" role="button" tabindex="0"` : '';
+        const chevron = isWarn ? `<span class="v2-priority-chevron" aria-hidden="true">›</span>` : '';
+        return `
+          <div class="v2-priority-item v2-priority-item--${escapeHtml(item.severity)}${isWarn ? ' v2-priority-item--toggleable' : ''}" ${toggle}>
+            <div class="v2-priority-main">
+              <strong>${escapeHtml(item.title)}</strong>
+              <span>${escapeHtml(item.message)}</span>
+            </div>
+            <div class="v2-priority-right">
+              <span class="v2-priority-count">${escapeHtml(String(item.count))}</span>
+              ${chevron}
+            </div>
+          </div>`;
+      }).join('');
+
+      // Wire toggle for warnings-open card
+      const warnCard = prioritiesEl.querySelector('[data-toggle="warningsDrilldownList"]');
+      if (warnCard) {
+        const drilldown = document.getElementById('warningsDrilldownList');
+        const toggle = () => {
+          const expanded = warnCard.getAttribute('aria-expanded') === 'true';
+          warnCard.setAttribute('aria-expanded', String(!expanded));
+          if (drilldown) drilldown.hidden = expanded;
+        };
+        warnCard.addEventListener('click', toggle);
+        warnCard.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+      }
     }
   }
 
   renderAmpelGrid('#overviewAmpels', data.ampels || []);
+
+  // Drilldown starts hidden — user opens it by clicking the warnings card
+  const drilldownEl = document.getElementById('warningsDrilldownList');
+  if (drilldownEl) drilldownEl.hidden = true;
   renderWarningsDrilldown(data.warnings || []);
 }
 
@@ -103,10 +127,10 @@ function renderWarningsDrilldown(warnings) {
 
   function warnTypeInfo(type) {
     const t = String(type || '').toUpperCase();
-    if (t === 'MHD_NEAR')    return { label: 'MHD-Risiko',        action: { label: 'Lager prüfen',   target: 'mhdPanel' } };
-    if (t === 'MHD_EXPIRED') return { label: 'Abgelaufen',        action: { label: 'Lager prüfen',   target: 'mhdPanel' } };
-    if (t === 'LOW_BATCH')   return { label: 'Niedriger Bestand', action: { label: 'Bestand prüfen', target: 'inventoryPanel' } };
-    if (t === 'EMPTY_BATCH') return { label: 'Lager leer',        action: { label: 'Bestand prüfen', target: 'inventoryPanel' } };
+    if (t === 'MHD_NEAR')    return { label: 'MHD-Risiko',        action: { label: 'Lager prüfen',   target: 'inventory' } };
+    if (t === 'MHD_EXPIRED') return { label: 'Abgelaufen',        action: { label: 'Lager prüfen',   target: 'inventory' } };
+    if (t === 'LOW_BATCH')   return { label: 'Niedriger Bestand', action: { label: 'Bestand prüfen', target: 'inventory' } };
+    if (t === 'EMPTY_BATCH') return { label: 'Lager leer',        action: { label: 'Bestand prüfen', target: 'inventory' } };
     if (['UNKNOWN_PRODUCT', 'UNMATCHED_PRODUCT', 'MDB_CODE_CHANGED_FOR_PRODUCT'].includes(t))
       return { label: 'Produkt-Konflikt', action: { label: 'Korrigieren', target: 'link' } };
     if (t === 'CONTAINER_DOWN') return { label: 'Container ausgefallen', action: null };
