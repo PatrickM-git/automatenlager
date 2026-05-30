@@ -200,6 +200,16 @@
     });
   }
 
+  function postJson(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      return r.json().then(function (json) { return { ok: r.ok, status: r.status, json: json }; });
+    });
+  }
+
   function loadPage(route) {
     if (route.path === '/') {
       return Promise.all([
@@ -262,6 +272,26 @@
       return loadGuvData(_guvQuery)
         .then(function (data) { return { status: 'ok', guv: data }; })
         .catch(function () { return { status: 'error' }; });
+    }
+    if (route.path === '/slots') {
+      return Promise.all([
+        fetchJson('/api/v2/assortment-slots'),
+        fetchJson('/api/v2/refill/search?q='),
+        fetchJson('/api/dashboard').catch(function () { return {}; }),
+      ]).then(function (results) {
+        var slots   = (results[0] && results[0].data && results[0].data.slots) || [];
+        var search  = (results[1] && results[1].results) || [];
+        var viewer  = (results[2] && results[2].viewer) || {};
+        if (slots.length === 0) { return { status: 'empty' }; }
+        return {
+          status: 'ok',
+          slots: {
+            machines: groupSlotsByMachine(slots),
+            palette:  slotBuildPalette(search),
+            canEdit:  !!viewer.canTriggerActions,
+          },
+        };
+      }).catch(function () { return { status: 'error' }; });
     }
     return new Promise(function (resolve) {
       setTimeout(function () { resolve({ status: 'ok', route: route }); }, 260);
@@ -857,6 +887,699 @@
     bindTable();
   }
 
+  /* ---- Sortiment & Slots: Etagen-Slot-Editor (/slots) ------------------ */
+  /* Client-Spiegel der getesteten lib/slot-editor.js (Quelle der Wahrheit).
+     Schreibt ausschliesslich ueber den bestehenden Slot-Assign-Vorgang
+     (/api/v2/slot-assign-inline/confirm) – kein neuer Roh-Schreibpfad. */
+
+  function slotParseCode(mdbCode) {
+    var raw = String(mdbCode == null ? '' : mdbCode).replace(/[^0-9]/g, '');
+    return {
+      floor:    raw.length ? Number(raw[0]) : 0,
+      position: raw.length > 1 ? Number(raw.slice(1)) : 0,
+      raw:      raw,
+    };
+  }
+
+  function slotFloorLayout(slots) {
+    var byFloor = {};
+    var order = [];
+    (slots || []).forEach(function (slot) {
+      var p = slotParseCode(slot.mdb_code);
+      var enriched = Object.assign({}, slot, { floor: p.floor, position: p.position });
+      if (!byFloor[p.floor]) { byFloor[p.floor] = []; order.push(p.floor); }
+      byFloor[p.floor].push(enriched);
+    });
+    return order
+      .sort(function (a, b) { return a - b; })
+      .map(function (floor) {
+        return {
+          floor: floor,
+          slots: byFloor[floor].sort(function (a, b) { return a.position - b.position; }),
+        };
+      });
+  }
+
+  function slotBuildPalette(searchResults) {
+    var seen = {};
+    var items = [];
+    (searchResults || []).forEach(function (row) {
+      var pid = Number(row.product_id);
+      if (!pid || seen[pid]) { return; }
+      seen[pid] = true;
+      var name = String(row.product_name == null ? '' : row.product_name).trim();
+      items.push({ product_id: pid, product_key: row.product_key != null ? row.product_key : null, name: name, label: name });
+    });
+    return items;
+  }
+
+  function slotBuildPreview(item, slot, machineId, qty, startDate) {
+    var p = slotParseCode(slot.mdb_code);
+    return {
+      product: { product_id: item.product_id, product_key: item.product_key != null ? item.product_key : null, name: item.name || '' },
+      slot: { mdb_code: Number(slot.mdb_code), floor: p.floor, position: p.position, machine_id: machineId },
+      assign: {
+        product_id:  item.product_id,
+        product_key: item.product_key != null ? item.product_key : null,
+        machine_id:  machineId,
+        mdb_code:    Number(slot.mdb_code),
+        qty:         Number(qty),
+        start_date:  startDate,
+      },
+      assign_key: 'SLOTASSIGN|' + item.product_id + '|' + machineId + '|' + Number(slot.mdb_code),
+    };
+  }
+
+  function groupSlotsByMachine(slots) {
+    var byMachine = {};
+    var order = [];
+    (slots || []).forEach(function (slot) {
+      var id = String(slot.machine_id || '');
+      if (!byMachine[id]) {
+        byMachine[id] = { machine_id: id, machine_name: slot.machine_name || id, location_name: slot.location_name || '', rows: [] };
+        order.push(id);
+      }
+      byMachine[id].rows.push(slot);
+    });
+    return order.map(function (id) {
+      var m = byMachine[id];
+      return { machine_id: m.machine_id, machine_name: m.machine_name, location_name: m.location_name, floors: slotFloorLayout(m.rows) };
+    });
+  }
+
+  function todayIso() {
+    var d = new Date();
+    var mm = String(d.getMonth() + 1);
+    var dd = String(d.getDate());
+    return d.getFullYear() + '-' + (mm.length < 2 ? '0' + mm : mm) + '-' + (dd.length < 2 ? '0' + dd : dd);
+  }
+
+  /* Eine einzelne Slot-Zelle (Drop-Ziel bzw. Tap-Ziel) */
+  function renderSlotCell(slot, canEdit) {
+    var occupied = Number(slot.product_id) > 0;
+    var occ      = slot.occupancy || {};
+    var fillPct  = typeof occ.fill_pct === 'number' ? occ.fill_pct : null;
+    var curQty   = occ.current_machine_qty != null ? occ.current_machine_qty : (slot.current_machine_qty != null ? slot.current_machine_qty : 0);
+    var cap      = occ.machine_capacity != null ? occ.machine_capacity : (slot.machine_capacity != null ? slot.machine_capacity : 0);
+    var product  = occupied ? esc(slot.product_name || ('#' + slot.product_id)) : 'Frei';
+    var cls = 'v3-slot' + (occupied ? ' v3-slot--occupied' : ' v3-slot--empty');
+    // Belegte Slots sind selbst Ziehquelle (zum Tauschen); alle Slots sind Drop-/Tap-Ziel.
+    return '' +
+      '<button type="button" class="' + cls + '"' +
+        ' data-slot' +
+        (canEdit && occupied ? ' data-draggable="slot"' : '') +
+        ' data-slot-mdb="' + esc(slot.mdb_code) + '"' +
+        ' data-slot-floor="' + esc(slot.floor) + '"' +
+        ' data-slot-pos="' + esc(slot.position) + '"' +
+        ' data-slot-pid="' + esc(slot.product_id || 0) + '"' +
+        ' data-slot-said="' + esc(slot.slot_assignment_id || 0) + '"' +
+        ' data-slot-qty="' + esc(curQty) + '"' +
+        ' data-slot-cap="' + esc(cap) + '"' +
+        (canEdit ? '' : ' disabled') +
+        ' aria-label="Slot ' + esc(slot.mdb_code) + ' – ' + product + (occupied ? ' (' + esc(curQty) + (cap ? '/' + esc(cap) : '') + ')' : '') + '">' +
+        '<span class="v3-slot__code">' + esc(slot.mdb_code) + '</span>' +
+        '<span class="v3-slot__product">' + product + '</span>' +
+        (occupied
+          ? '<span class="v3-slot__meta">' + esc(curQty) + (cap ? ' / ' + esc(cap) : '') + ' Stk.</span>'
+          : '') +
+        (fillPct != null
+          ? '<span class="v3-slot__fill"><span class="v3-slot__fillbar" style="width:' + Math.max(0, Math.min(100, fillPct)) + '%"></span></span>'
+          : '') +
+      '</button>';
+  }
+
+  function renderMachineStage(machine, canEdit) {
+    var floorsHtml = machine.floors.map(function (f) {
+      return '' +
+        '<div class="v3-slots-floor">' +
+          '<span class="v3-slots-floor__label">Etage ' + esc(f.floor) + '</span>' +
+          '<div class="v3-slots-floor__row">' +
+            f.slots.map(function (s) { return renderSlotCell(s, canEdit); }).join('') +
+          '</div>' +
+        '</div>';
+    }).join('');
+    return '' +
+      '<div class="v3-slots-stage" data-slots-stage>' +
+        '<div class="v3-slots-stage__top">' +
+          '<span class="v3-slots-stage__name">' + esc(machine.machine_name) + '</span>' +
+          (machine.location_name ? '<span class="v3-slots-stage__loc">' + esc(machine.location_name) + '</span>' : '') +
+        '</div>' +
+        '<div class="v3-slots-stage__body">' + floorsHtml + '</div>' +
+        '<div class="v3-slots-stage__tray" aria-hidden="true"></div>' +
+      '</div>';
+  }
+
+  function renderPaletteTiles(items) {
+    if (!items.length) {
+      return '<p class="v3-slots-palette__empty">Keine Produkte gefunden.</p>';
+    }
+    return items.map(function (it) {
+      return '' +
+        '<button type="button" class="v3-slot-tile"' +
+          ' data-tile data-draggable="palette" data-product-id="' + esc(it.product_id) + '"' +
+          ' data-product-key="' + esc(it.product_key == null ? '' : it.product_key) + '"' +
+          ' data-product-name="' + esc(it.name) + '">' +
+          '<span class="v3-slot-tile__grip" aria-hidden="true">⠿</span>' +
+          '<span class="v3-slot-tile__name">' + esc(it.name) + '</span>' +
+        '</button>';
+    }).join('');
+  }
+
+  function renderSlotsPage(data) {
+    var machines = (data && data.machines) || [];
+    var palette  = (data && data.palette)  || [];
+    var canEdit  = !!(data && data.canEdit);
+
+    var machineChips = machines.length > 1
+      ? '<div class="v3-slots__machines" role="tablist" aria-label="Automat wählen">' +
+          machines.map(function (m, i) {
+            return '<button type="button" class="v3-chip v3-chip--brand' + (i === 0 ? ' v3-chip--active' : '') + '"' +
+              ' role="tab" data-slots-machine="' + i + '" aria-selected="' + (i === 0 ? 'true' : 'false') + '">' +
+              esc(m.machine_name) + '</button>';
+          }).join('') +
+        '</div>'
+      : '';
+
+    var palettePanel = canEdit
+      ? '<aside class="v3-slots-palette" aria-label="Produkt-Palette">' +
+          '<p class="v3-slots-palette__title">Produkt-Palette</p>' +
+          '<p class="v3-slots-hint" data-slots-hint>' +
+            '<b>Ziehen:</b> Kachel auf einen Slot = bestücken/wechseln · Slot auf Slot = tauschen.<br>' +
+            '<b>Antippen:</b> belegten Slot antippen zum Nachfüllen.' +
+          '</p>' +
+          '<div class="v3-slots-palette__search">' +
+            '<input type="search" class="v3-input" data-palette-search placeholder="Produkt suchen …" aria-label="Produkt suchen">' +
+          '</div>' +
+          '<div class="v3-slots-palette__list" data-palette-list>' + renderPaletteTiles(palette) + '</div>' +
+        '</aside>'
+      : '<aside class="v3-slots-palette v3-slots-palette--ro" aria-label="Hinweis">' +
+          '<p class="v3-slots-palette__title">Nur Lesezugriff</p>' +
+          '<p class="v3-slots-hint">Das Bestücken der Slots ist Admins vorbehalten. Die Etagen-Übersicht ist hier nur zur Ansicht.</p>' +
+        '</aside>';
+
+    return '' +
+      machineChips +
+      '<div class="v3-slots-layout" data-slots-root>' +
+        '<div class="v3-slots-stagewrap" data-slots-stagewrap>' +
+          (machines.length ? renderMachineStage(machines[0], canEdit) : '') +
+        '</div>' +
+        palettePanel +
+      '</div>';
+    // Dialog + Toast werden auf document.body portiert (mountSlotDialog/showSlotToast),
+    // damit position:fixed am Viewport haftet (Vorfahren der View tragen ein transform).
+  }
+
+  /* Client-Spiegel der getesteten lib/slot-editor.js (Swap + Refill) */
+  function slotQtyOf(s) {
+    return Number(s.current_machine_qty != null ? s.current_machine_qty : (s.qty != null ? s.qty : 0));
+  }
+  function writeMachineId(slot) { return slot.machine_ref || slot.machine_id; }
+  function slotBuildSwap(a, b, date) {
+    var valid = Number(a.product_id) > 0 && Number(b.product_id) > 0
+      && !(String(a.machine_id) === String(b.machine_id) && String(a.mdb_code) === String(b.mdb_code));
+    return {
+      valid: valid,
+      changes: valid ? [
+        { slot_assignment_id: a.slot_assignment_id, machine_id: writeMachineId(a), mdb_code: Number(a.mdb_code), old_product_id: Number(a.product_id), new_product_id: Number(b.product_id), new_qty: slotQtyOf(b), start_date: date },
+        { slot_assignment_id: b.slot_assignment_id, machine_id: writeMachineId(b), mdb_code: Number(b.mdb_code), old_product_id: Number(b.product_id), new_product_id: Number(a.product_id), new_qty: slotQtyOf(a), start_date: date },
+      ] : [],
+    };
+  }
+  function slotFillToCapacity(details) {
+    var s = (details && details.slot) || {};
+    if (s.free_capacity != null) { return Math.max(0, Number(s.free_capacity)); }
+    return Math.max(0, Number(s.capacity || 0) - Number(s.current_machine_qty || 0));
+  }
+  function slotRefillWarnings(details, qty) {
+    var s = (details && details.slot) || {};
+    var bs = (details && details.backstock) || {};
+    var w = [];
+    var free = s.free_capacity != null ? Number(s.free_capacity) : Math.max(0, Number(s.capacity || 0) - Number(s.current_machine_qty || 0));
+    if (qty > free) { w.push('Menge übersteigt freie Kapazität (' + free + ' frei).'); }
+    if (bs.total_qty != null && qty > Number(bs.total_qty)) { w.push('Menge übersteigt verfügbaren Backstock (' + bs.total_qty + ' Stk.).'); }
+    return w;
+  }
+
+  /* ---- Dialog-Hülle (auf document.body portiert) ----------------------- */
+  function slotsBodyHost(id, className) {
+    var el = document.getElementById(id);
+    if (!el) { el = document.createElement('div'); el.id = id; document.body.appendChild(el); }
+    el.className = className;
+    return el;
+  }
+
+  function mountSlotDialog(bodyHtml, ariaLabel) {
+    var dialog = slotsBodyHost('v3-slots-dialog-host', 'v3-slots-dialog');
+    dialog.innerHTML = '' +
+      '<div class="v3-slots-dialog__backdrop" data-dialog-cancel></div>' +
+      '<div class="v3-slots-dialog__card" role="dialog" aria-modal="true" aria-label="' + esc(ariaLabel) + '">' + bodyHtml + '</div>';
+    dialog.hidden = false;
+    dialog.classList.add('is-open');
+    function close() { dialog.remove(); }
+    dialog.querySelectorAll('[data-dialog-cancel]').forEach(function (el) { el.addEventListener('click', close); });
+    return { dialog: dialog, card: dialog.querySelector('.v3-slots-dialog__card'), close: close };
+  }
+
+  function dialogError(card, msg) {
+    var errEl = card.querySelector('[data-pv-error]');
+    if (errEl) { errEl.textContent = msg; errEl.hidden = false; }
+  }
+
+  /* ---- Bestücken / Produktwechsel (Palette -> Slot) -------------------- */
+  function openPlacePreview(item, slotData, machineId) {
+    var occupied = Number(slotData.product_id) > 0;
+    var pos = slotParseCode(slotData.mdb_code);
+    var body = '' +
+      '<p class="v3-slots-dialog__eyebrow">' + (occupied ? 'Produktwechsel' : 'Bestücken') + '</p>' +
+      '<div class="v3-slots-dialog__flow">' +
+        '<span class="v3-slots-dialog__product">' + esc(item.name) + '</span>' +
+        '<span class="v3-slots-dialog__arrow" aria-hidden="true">→</span>' +
+        '<span class="v3-slots-dialog__target">Slot ' + esc(slotData.mdb_code) +
+          ' <small>(Etage ' + esc(pos.floor) + ', Pos. ' + esc(pos.position) + ')</small></span>' +
+      '</div>' +
+      (occupied ? '<p class="v3-slots-dialog__note">Ersetzt aktuell: <b>' + esc(slotData.product_name || '') + '</b></p>' : '') +
+      '<div class="v3-slots-dialog__fields">' +
+        '<label class="v3-field"><span>Startmenge</span>' +
+          '<input type="number" min="0" step="1" class="v3-input" data-pv-qty value="1"></label>' +
+        '<label class="v3-field"><span>Startdatum</span>' +
+          '<input type="date" class="v3-input" data-pv-date value="' + esc(todayIso()) + '"></label>' +
+      '</div>' +
+      '<p class="v3-slots-dialog__error" data-pv-error hidden></p>' +
+      '<div class="v3-slots-dialog__actions">' +
+        '<button type="button" class="v3-btn" data-dialog-cancel>Abbrechen</button>' +
+        '<button type="button" class="v3-btn v3-btn--brand" data-pv-confirm>' + (occupied ? 'Wechsel bestätigen' : 'Zuordnung bestätigen') + '</button>' +
+      '</div>';
+    var d = mountSlotDialog(body, 'Slot bestücken');
+    if (!d) { return; }
+    var qtyEl = d.card.querySelector('[data-pv-qty]');
+    var dateEl = d.card.querySelector('[data-pv-date]');
+    var confirmEl = d.card.querySelector('[data-pv-confirm]');
+
+    confirmEl.addEventListener('click', function () {
+      var qty = Number(qtyEl.value);
+      var date = dateEl.value;
+      var wmid = writeMachineId(slotData);
+      var url, payload;
+      if (occupied) {
+        url = '/api/v2/slot-change/confirm';
+        payload = { slot_assignment_id: slotData.slot_assignment_id, machine_id: wmid, mdb_code: Number(slotData.mdb_code), new_product_id: item.product_id, new_qty: qty, start_date: date };
+      } else {
+        url = '/api/v2/slot-assign-inline/confirm';
+        payload = slotBuildPreview(item, slotData, wmid, qty, date).assign;
+      }
+      confirmEl.disabled = true;
+      confirmEl.textContent = 'Wird gespeichert …';
+      postJson(url, payload).then(function (res) {
+        if (res.ok && res.json && res.json.ok) {
+          updateSlotCellFull(machineId, slotData.mdb_code, { product_id: item.product_id, product_name: item.name, qty: qty });
+          showSlotToast('„' + item.name + '" auf Slot ' + slotData.mdb_code + (occupied ? ' gewechselt.' : ' zugeordnet.'));
+          d.close();
+        } else {
+          dialogError(d.card, (res.json && res.json.error && res.json.error.message) || (res.json && res.json.message) || 'Vorgang fehlgeschlagen.');
+          confirmEl.disabled = false; confirmEl.textContent = occupied ? 'Wechsel bestätigen' : 'Zuordnung bestätigen';
+        }
+      }).catch(function () {
+        dialogError(d.card, 'Netzwerkfehler – bitte erneut versuchen.');
+        confirmEl.disabled = false; confirmEl.textContent = occupied ? 'Wechsel bestätigen' : 'Zuordnung bestätigen';
+      });
+    });
+  }
+
+  /* ---- Tauschen (Slot -> Slot, beide belegt) --------------------------- */
+  function openSwapPreview(srcSlot, dstSlot, machineId) {
+    var date = todayIso();
+    var plan = slotBuildSwap(srcSlot, dstSlot, date);
+    if (!plan.valid) { showSlotToast('Diese beiden Slots lassen sich nicht tauschen.'); return; }
+    var body = '' +
+      '<p class="v3-slots-dialog__eyebrow">Slots tauschen</p>' +
+      '<div class="v3-slots-dialog__swap">' +
+        '<div class="v3-slots-dialog__swapside"><span class="v3-slots-dialog__swapcode">Slot ' + esc(srcSlot.mdb_code) + '</span>' +
+          '<b>' + esc(srcSlot.product_name || '') + '</b><small>' + esc(slotQtyOf(srcSlot)) + ' Stk.</small></div>' +
+        '<span class="v3-slots-dialog__swapicon" aria-hidden="true">⇄</span>' +
+        '<div class="v3-slots-dialog__swapside"><span class="v3-slots-dialog__swapcode">Slot ' + esc(dstSlot.mdb_code) + '</span>' +
+          '<b>' + esc(dstSlot.product_name || '') + '</b><small>' + esc(slotQtyOf(dstSlot)) + ' Stk.</small></div>' +
+      '</div>' +
+      '<p class="v3-slots-dialog__note">Die Produkte (inkl. Bestand) wechseln die Plätze.</p>' +
+      '<p class="v3-slots-dialog__error" data-pv-error hidden></p>' +
+      '<div class="v3-slots-dialog__actions">' +
+        '<button type="button" class="v3-btn" data-dialog-cancel>Abbrechen</button>' +
+        '<button type="button" class="v3-btn v3-btn--brand" data-pv-confirm>Tausch bestätigen</button>' +
+      '</div>';
+    var d = mountSlotDialog(body, 'Slots tauschen');
+    if (!d) { return; }
+    var confirmEl = d.card.querySelector('[data-pv-confirm]');
+    confirmEl.addEventListener('click', function () {
+      confirmEl.disabled = true; confirmEl.textContent = 'Wird getauscht …';
+      // Zwei Slot-Change-Vorgänge nacheinander.
+      postJson('/api/v2/slot-change/confirm', plan.changes[0]).then(function (r1) {
+        if (!(r1.ok && r1.json && r1.json.ok)) { throw new Error((r1.json && r1.json.error && r1.json.error.message) || 'Erster Tauschschritt fehlgeschlagen.'); }
+        return postJson('/api/v2/slot-change/confirm', plan.changes[1]);
+      }).then(function (r2) {
+        if (!(r2.ok && r2.json && r2.json.ok)) { throw new Error((r2.json && r2.json.error && r2.json.error.message) || 'Zweiter Tauschschritt fehlgeschlagen.'); }
+        updateSlotCellFull(machineId, srcSlot.mdb_code, { product_id: dstSlot.product_id, product_name: dstSlot.product_name, qty: slotQtyOf(dstSlot) });
+        updateSlotCellFull(machineId, dstSlot.mdb_code, { product_id: srcSlot.product_id, product_name: srcSlot.product_name, qty: slotQtyOf(srcSlot) });
+        showSlotToast('Slot ' + srcSlot.mdb_code + ' und ' + dstSlot.mdb_code + ' getauscht.');
+        d.close();
+      }).catch(function (err) {
+        dialogError(d.card, (err && err.message) || 'Tausch fehlgeschlagen.');
+        confirmEl.disabled = false; confirmEl.textContent = 'Tausch bestätigen';
+      });
+    });
+  }
+
+  /* ---- Slot-Steuerkarte: Nachfüllen (Tap auf Slot) --------------------- */
+  function openSlotControl(slotData, machineId) {
+    var occupied = Number(slotData.product_id) > 0;
+    if (!occupied) {
+      mountSlotDialog(
+        '<p class="v3-slots-dialog__eyebrow">Slot ' + esc(slotData.mdb_code) + '</p>' +
+        '<p class="v3-slots-dialog__note">Dieser Slot ist frei. Ziehe eine Produkt-Kachel aus der Palette hierher, um ihn zu bestücken.</p>' +
+        '<div class="v3-slots-dialog__actions"><button type="button" class="v3-btn v3-btn--brand" data-dialog-cancel>Verstanden</button></div>',
+        'Slot ' + slotData.mdb_code,
+      );
+      return;
+    }
+    var d = mountSlotDialog(
+      '<p class="v3-slots-dialog__eyebrow">Nachfüllen</p>' +
+      '<div class="v3-slots-dialog__flow"><span class="v3-slots-dialog__product">' + esc(slotData.product_name || '') + '</span>' +
+        '<span class="v3-slots-dialog__target">Slot ' + esc(slotData.mdb_code) + '</span></div>' +
+      '<div data-refill-body><div class="v3-state v3-state--loading" style="min-height:120px"><span class="v3-spinner"></span><p class="v3-state__msg">Bestand wird geladen …</p></div></div>',
+      'Slot ' + slotData.mdb_code + ' nachfüllen',
+    );
+    if (!d) { return; }
+
+    fetchJson('/api/v2/refill/details?machine_id=' + encodeURIComponent(writeMachineId(slotData)) + '&mdb_code=' + encodeURIComponent(slotData.mdb_code))
+      .then(function (res) {
+        var details = res && res.data;
+        if (!details) { throw new Error('Keine Bestandsdaten.'); }
+        renderRefillControl(d, details, slotData, machineId);
+      })
+      .catch(function () {
+        var bodyEl = d.card.querySelector('[data-refill-body]');
+        if (bodyEl) {
+          bodyEl.innerHTML = '<p class="v3-slots-dialog__error" hidden="false">Bestand konnte nicht geladen werden.</p>' +
+            '<div class="v3-slots-dialog__actions"><button type="button" class="v3-btn" data-dialog-cancel>Schließen</button></div>';
+          bodyEl.querySelectorAll('[data-dialog-cancel]').forEach(function (el) { el.addEventListener('click', d.close); });
+        }
+      });
+  }
+
+  function renderRefillControl(d, details, slotData, machineId) {
+    var slot = details.slot || {};
+    var cur = Number(slot.current_machine_qty || 0);
+    var cap = Number(slot.capacity || 0);
+    var bs = (details.backstock && details.backstock.total_qty) || 0;
+    var maxFill = slotFillToCapacity(details);
+    var qty = 1;
+
+    var bodyEl = d.card.querySelector('[data-refill-body]');
+    bodyEl.innerHTML = '' +
+      '<div class="v3-slots-refill">' +
+        '<div class="v3-slots-refill__stat"><span>Bestand</span><b data-rf-cur>' + cur + (cap ? ' / ' + cap : '') + '</b></div>' +
+        '<div class="v3-slots-refill__stat"><span>Backstock</span><b>' + bs + ' Stk.</b></div>' +
+      '</div>' +
+      '<div class="v3-slots-refill__stepper">' +
+        '<button type="button" class="v3-btn v3-slots-refill__step" data-rf-dec aria-label="weniger">−</button>' +
+        '<span class="v3-slots-refill__qty" data-rf-qty>1</span>' +
+        '<button type="button" class="v3-btn v3-slots-refill__step" data-rf-inc aria-label="mehr">+</button>' +
+        '<button type="button" class="v3-btn v3-slots-refill__full" data-rf-full>Voll auffüllen</button>' +
+      '</div>' +
+      '<p class="v3-slots-refill__hint" data-rf-warn></p>' +
+      '<p class="v3-slots-dialog__error" data-pv-error hidden></p>' +
+      '<div class="v3-slots-dialog__actions">' +
+        '<button type="button" class="v3-btn" data-dialog-cancel>Abbrechen</button>' +
+        '<button type="button" class="v3-btn v3-btn--brand" data-rf-confirm>Nachfüllen bestätigen</button>' +
+      '</div>';
+    bodyEl.querySelectorAll('[data-dialog-cancel]').forEach(function (el) { el.addEventListener('click', d.close); });
+
+    var qtyEl = bodyEl.querySelector('[data-rf-qty]');
+    var warnEl = bodyEl.querySelector('[data-rf-warn]');
+    var confirmEl = bodyEl.querySelector('[data-rf-confirm]');
+
+    function refresh() {
+      if (qty < 1) { qty = 1; }
+      qtyEl.textContent = String(qty);
+      var w = slotRefillWarnings(details, qty);
+      warnEl.textContent = w.join(' ');
+      warnEl.classList.toggle('is-warn', w.length > 0);
+    }
+    bodyEl.querySelector('[data-rf-dec]').addEventListener('click', function () { qty = Math.max(1, qty - 1); refresh(); });
+    bodyEl.querySelector('[data-rf-inc]').addEventListener('click', function () { qty = qty + 1; refresh(); });
+    bodyEl.querySelector('[data-rf-full]').addEventListener('click', function () { qty = Math.max(1, maxFill); refresh(); });
+    refresh();
+
+    confirmEl.addEventListener('click', function () {
+      var params = { machine_id: writeMachineId(slotData), mdb_code: Number(slotData.mdb_code), product_id: Number(slotData.product_id), product_name: slotData.product_name || '', qty: qty };
+      confirmEl.disabled = true; confirmEl.textContent = 'Wird nachgefüllt …';
+      postJson('/api/v2/refill/trigger', params).then(function (res) {
+        if (res.ok && res.json && res.json.ok) {
+          updateSlotCellFull(machineId, slotData.mdb_code, { product_id: slotData.product_id, product_name: slotData.product_name, qty: cur + qty });
+          showSlotToast('Slot ' + slotData.mdb_code + ' um ' + qty + ' Stk. nachgefüllt.');
+          d.close();
+        } else {
+          dialogError(d.card, (res.json && res.json.error && res.json.error.message) || (res.json && res.json.message) || 'Nachfüllen fehlgeschlagen.');
+          confirmEl.disabled = false; confirmEl.textContent = 'Nachfüllen bestätigen';
+        }
+      }).catch(function () {
+        dialogError(d.card, 'Netzwerkfehler – bitte erneut versuchen.');
+        confirmEl.disabled = false; confirmEl.textContent = 'Nachfüllen bestätigen';
+      });
+    });
+  }
+
+  /* ---- Zustand + Hilfsfunktionen --------------------------------------- */
+  var _slotsState = { machines: [], palette: [], canEdit: false, activeMachine: 0 };
+
+  function machineById(id) {
+    return (_slotsState.machines || []).filter(function (x) { return String(x.machine_id) === String(id); })[0];
+  }
+  function findSlotData(machineId, mdbCode) {
+    var m = machineById(machineId);
+    if (!m) { return null; }
+    var found = null;
+    m.floors.forEach(function (f) { f.slots.forEach(function (s) { if (String(s.mdb_code) === String(mdbCode)) { found = s; } }); });
+    return found;
+  }
+  function activeMachineId() {
+    var m = _slotsState.machines[_slotsState.activeMachine];
+    return m ? m.machine_id : '';
+  }
+
+  function updateSlotCellFull(machineId, mdbCode, info) {
+    var slot = findSlotData(machineId, mdbCode);
+    if (slot) {
+      slot.product_id = info.product_id;
+      slot.product_name = info.product_name;
+      slot.current_machine_qty = info.qty;
+      var cap = (slot.occupancy && slot.occupancy.machine_capacity) || slot.machine_capacity || 0;
+      slot.occupancy = Object.assign({}, slot.occupancy, {
+        current_machine_qty: info.qty,
+        machine_capacity: cap,
+        fill_pct: cap > 0 ? Math.round((info.qty / cap) * 100) : (slot.occupancy ? slot.occupancy.fill_pct : null),
+      });
+    }
+    var cell = viewEl.querySelector('[data-slots-stagewrap] [data-slot-mdb="' + mdbCode + '"]');
+    if (slot && cell) {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = renderSlotCell(slot, _slotsState.canEdit);
+      var nc = tmp.firstChild;
+      nc.classList.add('v3-slot--justset');
+      cell.replaceWith(nc);
+    }
+  }
+
+  function showSlotToast(message) {
+    var toast = slotsBodyHost('v3-slots-toast-host', 'v3-toast');
+    toast.textContent = message;
+    toast.hidden = false;
+    toast.classList.add('is-show');
+    window.clearTimeout(showSlotToast._t);
+    showSlotToast._t = window.setTimeout(function () {
+      toast.classList.remove('is-show');
+      window.setTimeout(function () { toast.hidden = true; }, 240);
+    }, 2600);
+  }
+
+  /* ---- Echtes Drag&Drop via Pointer-Events (Maus + Touch) -------------- */
+  var _drag = null;
+
+  function dragPayloadFromEl(el) {
+    var kind = el.getAttribute('data-draggable');
+    if (kind === 'palette') {
+      return { kind: 'palette', label: el.getAttribute('data-product-name') || '', item: {
+        product_id:  Number(el.getAttribute('data-product-id')),
+        product_key: el.getAttribute('data-product-key') || null,
+        name:        el.getAttribute('data-product-name') || '',
+      } };
+    }
+    if (kind === 'slot') {
+      var slot = findSlotData(activeMachineId(), el.getAttribute('data-slot-mdb'));
+      return { kind: 'slot', label: (slot && slot.product_name) || ('Slot ' + el.getAttribute('data-slot-mdb')), slot: slot };
+    }
+    return null;
+  }
+
+  function slotsRootHasEl(el) {
+    var root = viewEl.querySelector('[data-slots-root]');
+    return root && el && root.contains(el);
+  }
+
+  function onSlotsPointerDown(e) {
+    if (!_slotsState.canEdit || _drag) { return; }
+    if (e.button != null && e.button > 0) { return; }
+    var dragEl = e.target.closest && e.target.closest('[data-draggable]');
+    var slotEl = e.target.closest && e.target.closest('[data-slot]');
+    var el = dragEl || slotEl;
+    if (!el || !slotsRootHasEl(el)) { return; }
+    _drag = { srcEl: el, draggable: !!dragEl, payload: dragEl ? dragPayloadFromEl(dragEl) : null, startX: e.clientX, startY: e.clientY, moved: false, ghost: null, pointerId: e.pointerId, lastTarget: null };
+  }
+
+  // Hebt den Slot unter dem Zeiger hervor (Drop-Ziel).
+  function updateDropHighlight(x, y) {
+    if (!_drag) { return; }
+    var under = document.elementFromPoint(x, y);
+    var slotEl = under && under.closest ? under.closest('[data-slot]') : null;
+    if (_drag.lastTarget && _drag.lastTarget !== slotEl) { _drag.lastTarget.classList.remove('v3-slot--drop'); }
+    if (slotEl) { slotEl.classList.add('v3-slot--drop'); }
+    _drag.lastTarget = slotEl;
+  }
+
+  // Auto-Scroll: zieht man an den oberen/unteren Viewport-Rand, scrollt das
+  // Fenster mit (sonst sind tiefer liegende Etagen beim Ziehen unerreichbar,
+  // da das native Scrollen während des Drags unterdrückt wird).
+  function autoScrollTick() {
+    if (!_drag || !_drag.moved) { return; }
+    var vh = window.innerHeight;
+    var y = _drag.lastClientY;
+    var EDGE = 90, MAX = 22;
+    var speed = 0;
+    if (y < EDGE) { speed = -MAX * (1 - Math.max(0, y) / EDGE); }
+    else if (y > vh - EDGE) { speed = MAX * (1 - Math.max(0, vh - y) / EDGE); }
+    if (speed !== 0) {
+      window.scrollBy(0, speed);
+      updateDropHighlight(_drag.lastClientX, _drag.lastClientY);
+    }
+    _drag.autoScroll = window.requestAnimationFrame(autoScrollTick);
+  }
+
+  function onSlotsPointerMove(e) {
+    if (!_drag || _drag.pointerId !== e.pointerId) { return; }
+    var dx = e.clientX - _drag.startX, dy = e.clientY - _drag.startY;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    // Nicht ziehbare Slots (leere): Bewegung bricht nur den Tap ab, kein Drag.
+    if (!_drag.draggable) { if (dist >= 8) { _drag.moved = true; } return; }
+    if (!_drag.moved) {
+      if (dist < 6) { return; }
+      _drag.moved = true;
+      try { _drag.srcEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      _drag.ghost = document.createElement('div');
+      _drag.ghost.className = 'v3-slots-ghost';
+      _drag.ghost.textContent = _drag.payload ? _drag.payload.label : '';
+      document.body.appendChild(_drag.ghost);
+      _drag.srcEl.classList.add('is-dragging');
+      var root = viewEl.querySelector('[data-slots-root]');
+      if (root) { root.classList.add('is-dragging-active'); }
+      _drag.autoScroll = window.requestAnimationFrame(autoScrollTick);
+    }
+    e.preventDefault();
+    _drag.lastClientX = e.clientX;
+    _drag.lastClientY = e.clientY;
+    _drag.ghost.style.left = e.clientX + 'px';
+    _drag.ghost.style.top = e.clientY + 'px';
+    updateDropHighlight(e.clientX, e.clientY);
+  }
+
+  function onSlotsPointerUp(e) {
+    if (!_drag || _drag.pointerId !== e.pointerId) { return; }
+    var d = _drag; _drag = null;
+    if (d.autoScroll) { window.cancelAnimationFrame(d.autoScroll); }
+    if (d.ghost) { d.ghost.remove(); }
+    d.srcEl.classList.remove('is-dragging');
+    var root = viewEl.querySelector('[data-slots-root]');
+    if (root) { root.classList.remove('is-dragging-active'); }
+    if (d.lastTarget) { d.lastTarget.classList.remove('v3-slot--drop'); }
+    try { d.srcEl.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+
+    if (!d.moved) {
+      // Reiner Tap/Klick -> Slot-Steuerkarte
+      var tapSlotEl = d.srcEl.closest('[data-slot]');
+      if (tapSlotEl) {
+        var sd = findSlotData(activeMachineId(), tapSlotEl.getAttribute('data-slot-mdb'));
+        if (sd) { openSlotControl(sd, activeMachineId()); }
+      }
+      return;
+    }
+    var under = document.elementFromPoint(e.clientX, e.clientY);
+    var targetEl = under && under.closest ? under.closest('[data-slot]') : null;
+    if (!targetEl || !d.payload) { return; }
+    var targetSlot = findSlotData(activeMachineId(), targetEl.getAttribute('data-slot-mdb'));
+    if (!targetSlot) { return; }
+
+    if (d.payload.kind === 'palette') {
+      openPlacePreview(d.payload.item, targetSlot, activeMachineId());
+    } else if (d.payload.kind === 'slot' && d.payload.slot) {
+      if (String(d.payload.slot.mdb_code) === String(targetSlot.mdb_code)) { return; }
+      if (Number(targetSlot.product_id) > 0) {
+        openSwapPreview(d.payload.slot, targetSlot, activeMachineId());
+      } else {
+        showSlotToast('Nur Tauschen zwischen zwei belegten Slots möglich – leere Slots aus der Palette bestücken.');
+      }
+    }
+  }
+
+  function bindSlotEditor(data) {
+    _slotsState = {
+      machines: (data && data.machines) || [],
+      palette:  (data && data.palette)  || [],
+      canEdit:  !!(data && data.canEdit),
+      activeMachine: 0,
+    };
+    var root = viewEl.querySelector('[data-slots-root]');
+    if (!root) { return; }
+
+    // Maschinenwahl
+    viewEl.querySelectorAll('[data-slots-machine]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _slotsState.activeMachine = Number(btn.getAttribute('data-slots-machine')) || 0;
+        viewEl.querySelectorAll('[data-slots-machine]').forEach(function (b) {
+          var active = b === btn;
+          b.classList.toggle('v3-chip--active', active);
+          b.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        var stagewrap = viewEl.querySelector('[data-slots-stagewrap]');
+        if (stagewrap) { stagewrap.innerHTML = renderMachineStage(_slotsState.machines[_slotsState.activeMachine], _slotsState.canEdit); }
+      });
+    });
+
+    if (!_slotsState.canEdit) { return; }
+
+    // Palette-Suche (nutzt vorhandene Produkt-/Refill-Suche)
+    var searchEl = viewEl.querySelector('[data-palette-search]');
+    var listEl   = viewEl.querySelector('[data-palette-list]');
+    if (searchEl && listEl) {
+      var t = null;
+      searchEl.addEventListener('input', function () {
+        window.clearTimeout(t);
+        t = window.setTimeout(function () {
+          fetchJson('/api/v2/refill/search?q=' + encodeURIComponent(searchEl.value || '')).then(function (res) {
+            var items = slotBuildPalette((res && res.results) || []);
+            _slotsState.palette = items;
+            listEl.innerHTML = renderPaletteTiles(items);
+          }).catch(function () { /* Suche still ignorieren */ });
+        }, 220);
+      });
+    }
+
+    // Pointer-Drag global einmalig binden (No-Op solange kein Drag läuft).
+    if (!bindSlotEditor._pointerBound) {
+      document.addEventListener('pointerdown', onSlotsPointerDown);
+      document.addEventListener('pointermove', onSlotsPointerMove, { passive: false });
+      document.addEventListener('pointerup', onSlotsPointerUp);
+      document.addEventListener('pointercancel', onSlotsPointerUp);
+      bindSlotEditor._pointerBound = true;
+    }
+  }
+
   function placeholderContent(route) {
     return '' +
       '<section class="v3-card" aria-label="Vorschau ' + route.title + '">' +
@@ -872,6 +1595,10 @@
   /* ---- Rendering einer Route ------------------------------------------- */
   function renderRoute(route) {
     var token = ++loadToken;
+
+    // Etwaige offene Slot-Editor-Overlays (auf body portiert) aufräumen.
+    var staleDialog = document.getElementById('v3-slots-dialog-host');
+    if (staleDialog) { staleDialog.remove(); }
 
     // Titel / aktive Navigation sofort aktualisieren
     document.title = route.title + ' · Dashboard v3 · Faltrix';
@@ -902,6 +1629,9 @@
       } else if (route.path === '/guv') {
         viewEl.innerHTML = pageHead(route) + renderGuvPage(result.guv);
         bindGuvControls();
+      } else if (route.path === '/slots' && result.slots) {
+        viewEl.innerHTML = pageHead(route) + renderSlotsPage(result.slots);
+        bindSlotEditor(result.slots);
       } else if (route.path === '/' && result.cockpit) {
         viewEl.innerHTML = pageHead(route) + renderCockpitPage(result.cockpit);
       } else {

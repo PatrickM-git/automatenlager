@@ -150,6 +150,27 @@ test('AC4: current slot occupancy is visible and understandable', () => {
   });
 });
 
+test('AC-machine-ref: slot exposes internal machine_ref (sa.machine_id) for write operations', () => {
+  // Die Anzeige nutzt machine_id (= machine_key), Schreib-/Refill-Endpunkte
+  // brauchen aber die interne sa.machine_id. Diese muss als machine_ref
+  // zusätzlich durchgereicht werden.
+  const rows = [{
+    slot_assignment_id: 47,
+    machine_id: '457107528', // machine_key (Anzeige)
+    machine_ref: '1',        // interne sa.machine_id (für Writes)
+    machine_name: 'Snackautomat',
+    location_name: 'Standort',
+    mdb_code: 10,
+    product_id: 66,
+    product_name: 'Pick Up',
+    current_machine_qty: '12',
+    machine_capacity: '12',
+  }];
+  const result = buildAssortmentSlotsData({ slots: rows }, {});
+  assert.equal(result.slots[0].machine_id, '457107528');
+  assert.equal(result.slots[0].machine_ref, '1');
+});
+
 test('AC-HTTP: /api/v2/assortment-slots returns PG_ERROR when connection fails', async (t) => {
   const port = await getFreePort();
   const dashboard = await startDashboard(port, {
