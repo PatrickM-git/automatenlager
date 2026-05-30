@@ -3634,6 +3634,7 @@ h2 {
 #v2CaBackdrop [hidden] { display: none !important; }
 
 /* ── Warning Drill-down List (#42) ───────────────────────────────────── */
+/* Warning drilldown list – type chips + inline action buttons */
 .v2-warn-list {
   display: flex;
   flex-direction: column;
@@ -3641,11 +3642,27 @@ h2 {
   margin-top: 8px;
 }
 
-.v2-warn-list-empty {
-  padding: 10px 0;
+.v2-warn-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 8px;
+  font-family: 'DM Sans', sans-serif;
   font-size: 0.82rem;
-  color: var(--v2-muted);
-  font-style: italic;
+  color: #16a34a;
+}
+.v2-warn-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #dcfce7;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #16a34a;
+  flex-shrink: 0;
 }
 
 .v2-warn-item {
@@ -3653,13 +3670,12 @@ h2 {
   overflow: hidden;
   border: 1px solid var(--v2-line);
   background: var(--v2-surface);
-  border-left: 3px solid var(--v2-line);
+  border-left: 4px solid var(--v2-line);
   transition: box-shadow 0.15s;
 }
 .v2-warn-item:hover { box-shadow: var(--v2-shadow-sm); }
-
 .v2-warn-item--critical { border-left-color: #dc2626; }
-.v2-warn-item--warning  { border-left-color: #d97706; }
+.v2-warn-item--warning  { border-left-color: #c47a00; }
 .v2-warn-item--info     { border-left-color: #2563eb; }
 
 .v2-warn-item--critical:not(.v2-warn-item--resolved) {
@@ -3670,13 +3686,20 @@ h2 {
   50%       { border-left-color: #f87171; }
 }
 
+.v2-warn-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 10px;
+}
+
 .v2-warn-trigger {
-  display: grid;
-  grid-template-columns: 28px 1fr 16px;
+  display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  padding: 9px 10px 9px 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 9px 0 9px 10px;
   background: none;
   border: none;
   cursor: pointer;
@@ -3685,39 +3708,39 @@ h2 {
 }
 .v2-warn-trigger:hover { background: rgba(23,20,29,0.02); }
 
-.v2-warn-badge {
+.v2-warn-type-chip {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 0.7rem;
-  font-weight: 700;
-  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
-.v2-warn-item--critical .v2-warn-badge { background: rgba(220,38,38,0.10); color: #dc2626; }
-.v2-warn-item--warning  .v2-warn-badge { background: rgba(217,119,6,0.10);  color: #d97706; }
-.v2-warn-item--info     .v2-warn-badge { background: rgba(37,99,235,0.10);  color: #2563eb; }
+.v2-warn-type-chip--critical { background: rgba(220,38,38,.10); color: #dc2626; }
+.v2-warn-type-chip--warning  { background: rgba(196,122,0,.10);  color: #c47a00; }
+.v2-warn-type-chip--info     { background: rgba(37,99,235,.10);  color: #2563eb; }
 
 .v2-warn-summary {
   display: flex;
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+  flex: 1;
 }
 .v2-warn-entity {
-  font-size: 0.78rem;
-  font-weight: 600;
-  font-family: 'Courier New', Courier, monospace;
+  font-family: 'DM Serif Display', serif;
+  font-size: 0.875rem;
   color: var(--v2-ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .v2-warn-msg {
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   color: var(--v2-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -3729,9 +3752,30 @@ h2 {
   color: var(--v2-muted);
   transition: transform 0.2s;
   flex-shrink: 0;
+  margin-left: 4px;
   line-height: 1;
 }
 .v2-warn-trigger[aria-expanded="true"] .v2-warn-chevron { transform: rotate(90deg); }
+
+.v2-warn-action-wrap { flex-shrink: 0; }
+
+.v2-warn-action-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1.5px solid #c47a00;
+  border-radius: 20px;
+  background: transparent;
+  color: #c47a00;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.14s, color 0.14s;
+}
+.v2-warn-action-btn:hover { background: #c47a00; color: #fff; }
 
 .v2-warn-detail {
   display: grid;
@@ -3742,7 +3786,7 @@ h2 {
 .v2-warn-detail-inner { overflow: hidden; }
 
 .v2-warn-detail-body {
-  padding: 10px 12px 12px 46px;
+  padding: 10px 12px 12px 14px;
   border-top: 1px solid var(--v2-line);
   background: rgba(23,20,29,0.02);
   display: flex;
@@ -3760,52 +3804,24 @@ h2 {
   flex-shrink: 0;
   width: 68px;
   color: var(--v2-muted);
-  font-family: 'Courier New', Courier, monospace;
+  font-family: 'DM Mono', monospace;
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding-top: 1px;
 }
-.v2-warn-field-value { color: var(--v2-ink); word-break: break-word; }
-.v2-warn-field-value--mono {
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 0.72rem;
-  color: var(--v2-accent);
-}
+.v2-warn-field-value { color: var(--v2-ink); word-break: break-word; font-size: 0.78rem; }
 .v2-warn-field-value--ts {
-  font-family: 'Courier New', Courier, monospace;
+  font-family: 'DM Mono', monospace;
   font-size: 0.7rem;
   color: var(--v2-muted);
-}
-
-.v2-warn-correction-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 4px;
-  padding: 4px 10px;
-  border: 1px solid #d97706;
-  border-radius: 4px;
-  background: transparent;
-  color: #d97706;
-  font-size: 0.73rem;
-  font-weight: 600;
-  text-decoration: none;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  transition: color 0.2s, background 0.2s;
-  align-self: flex-start;
-}
-.v2-warn-correction-link:hover {
-  background: #d97706;
-  color: #fff;
 }
 
 @media (max-width: 820px) {
   .v2-warn-detail-body { padding-left: 10px; }
   .v2-warn-field { flex-direction: column; gap: 1px; }
   .v2-warn-field-label { width: auto; }
+  .v2-warn-action-btn { font-size: 0.6rem; padding: 3px 8px; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -93,45 +93,63 @@ function renderWarningsDrilldown(warnings) {
   const open = warnings ? warnings.filter((w) => !w.resolved) : [];
 
   if (!open.length) {
-    el.innerHTML = '<div class="v2-warn-list-empty">Keine offenen Warnungen</div>';
+    el.innerHTML = `
+      <div class="v2-warn-empty">
+        <span class="v2-warn-empty-icon">✓</span>
+        <span>Keine offenen Warnungen</span>
+      </div>`;
     return;
   }
 
-  const items = open.map((w, idx) => {
-    const id = `wdl-${idx}`;
-    const sev = String(w.severity || 'warning').toLowerCase();
-    const entity = escapeHtml(w.entity || w.warning_type || '—');
-    const msg = escapeHtml(w.message || '—');
-    const ts = formatWarnTs(w.created_at);
-    const icon = warnIcon(w.warning_type);
+  function warnTypeInfo(type) {
+    const t = String(type || '').toUpperCase();
+    if (t === 'MHD_NEAR')    return { label: 'MHD-Risiko',        action: { label: 'Lager prüfen',   target: 'mhdPanel' } };
+    if (t === 'MHD_EXPIRED') return { label: 'Abgelaufen',        action: { label: 'Lager prüfen',   target: 'mhdPanel' } };
+    if (t === 'LOW_BATCH')   return { label: 'Niedriger Bestand', action: { label: 'Bestand prüfen', target: 'inventoryPanel' } };
+    if (t === 'EMPTY_BATCH') return { label: 'Lager leer',        action: { label: 'Bestand prüfen', target: 'inventoryPanel' } };
+    if (['UNKNOWN_PRODUCT', 'UNMATCHED_PRODUCT', 'MDB_CODE_CHANGED_FOR_PRODUCT'].includes(t))
+      return { label: 'Produkt-Konflikt', action: { label: 'Korrigieren', target: 'link' } };
+    if (t === 'CONTAINER_DOWN') return { label: 'Container ausgefallen', action: null };
+    if (t === 'SCHEDULE_GAP')   return { label: 'Workflow-Lücke',        action: null };
+    if (t === 'VALIDATION_DRIFT_SHEETS_PG') return { label: 'Datendrift', action: null };
+    if (t === 'BACKUP_STALE' || t === 'BACKUP_FAIL') return { label: 'Backup-Problem', action: null };
+    return { label: type || '—', action: null };
+  }
 
-    const correctionBtn = w.correction_link
-      ? `<a href="${escapeHtml(w.correction_link)}" class="v2-warn-correction-link">
-           <span>Zum Korrektur-Kreislauf →</span>
-         </a>`
-      : '';
+  const items = open.map((w, idx) => {
+    const id  = `wdl-${idx}`;
+    const sev = String(w.severity || 'warning').toLowerCase();
+    const info   = warnTypeInfo(w.warning_type);
+    const entity = escapeHtml(w.entity || w.warning_type || '—');
+    const msg    = escapeHtml(w.message || '—');
+    const ts     = formatWarnTs(w.created_at);
+
+    let actionBtn = '';
+    if (info.action) {
+      const aLabel = escapeHtml(info.action.label);
+      if (info.action.target === 'link' && w.correction_link) {
+        actionBtn = `<button class="v2-warn-action-btn" data-action="link" data-href="${escapeHtml(w.correction_link)}">→ ${aLabel}</button>`;
+      } else if (info.action.target && info.action.target !== 'link') {
+        actionBtn = `<button class="v2-warn-action-btn" data-action="scroll" data-target="${escapeHtml(info.action.target)}">→ ${aLabel}</button>`;
+      }
+    }
 
     return `
       <div class="v2-warn-item v2-warn-item--${escapeHtml(sev)}" data-id="${id}">
-        <button class="v2-warn-trigger" aria-expanded="false" aria-controls="wdl-detail-${id}">
-          <span class="v2-warn-badge">${icon}</span>
-          <div class="v2-warn-summary">
-            <span class="v2-warn-entity">${entity}</span>
-            <span class="v2-warn-msg">${msg}</span>
-          </div>
-          <span class="v2-warn-chevron">›</span>
-        </button>
+        <div class="v2-warn-row">
+          <button class="v2-warn-trigger" aria-expanded="false" aria-controls="wdl-detail-${id}">
+            <span class="v2-warn-type-chip v2-warn-type-chip--${escapeHtml(sev)}">${escapeHtml(info.label)}</span>
+            <div class="v2-warn-summary">
+              <span class="v2-warn-entity">${entity}</span>
+              <span class="v2-warn-msg">${msg}</span>
+            </div>
+            <span class="v2-warn-chevron" aria-hidden="true">›</span>
+          </button>
+          ${actionBtn ? `<div class="v2-warn-action-wrap">${actionBtn}</div>` : ''}
+        </div>
         <div class="v2-warn-detail" id="wdl-detail-${id}" role="region" aria-hidden="true">
           <div class="v2-warn-detail-inner">
             <div class="v2-warn-detail-body">
-              <div class="v2-warn-field">
-                <span class="v2-warn-field-label">Typ</span>
-                <span class="v2-warn-field-value v2-warn-field-value--mono">${escapeHtml(w.warning_type || '—')}</span>
-              </div>
-              <div class="v2-warn-field">
-                <span class="v2-warn-field-label">Entität</span>
-                <span class="v2-warn-field-value">${entity}</span>
-              </div>
               <div class="v2-warn-field">
                 <span class="v2-warn-field-label">Meldung</span>
                 <span class="v2-warn-field-value">${msg}</span>
@@ -140,7 +158,6 @@ function renderWarningsDrilldown(warnings) {
                 <span class="v2-warn-field-label">Zeitpunkt</span>
                 <span class="v2-warn-field-value v2-warn-field-value--ts">${escapeHtml(ts)}</span>
               </div>
-              ${correctionBtn}
             </div>
           </div>
         </div>
@@ -152,10 +169,23 @@ function renderWarningsDrilldown(warnings) {
   el.querySelectorAll('.v2-warn-trigger').forEach((btn) => {
     btn.addEventListener('click', () => {
       const expanded = btn.getAttribute('aria-expanded') === 'true';
-      const detailId = btn.getAttribute('aria-controls');
-      const detail = document.getElementById(detailId);
+      const detail   = document.getElementById(btn.getAttribute('aria-controls'));
       btn.setAttribute('aria-expanded', String(!expanded));
       if (detail) detail.setAttribute('aria-hidden', String(expanded));
+    });
+  });
+
+  el.querySelectorAll('.v2-warn-action-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (btn.dataset.action === 'scroll') {
+        document.getElementById(btn.dataset.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else if (btn.dataset.action === 'link') {
+        const href = btn.dataset.href;
+        if (href?.startsWith('#')) {
+          document.querySelector(href)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
     });
   });
 }
