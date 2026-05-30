@@ -431,7 +431,10 @@
                 <p class="v2-eyebrow">Produkt-Onboarding</p>
                 <h2 class="v2-ob-title">Produkte auf dem Weg in den Automaten</h2>
               </div>
-              <p id="onboardingState" class="v2-panel-state" aria-live="polite">Noch keine PG-Antwort geladen.</p>
+              <div style="display:flex;align-items:center;gap:0.75rem;">
+                <p id="onboardingState" class="v2-panel-state" aria-live="polite">Noch keine PG-Antwort geladen.</p>
+                <button id="onboardingRefreshBtn" style="white-space:nowrap;padding:4px 10px;font-size:12px;border:1px solid var(--v2-border,#d6cfbf);border-radius:6px;background:transparent;cursor:pointer;color:var(--v2-muted,#888);" title="Daten aktualisieren">&#8635; Aktualisieren</button>
+              </div>
             </div>
 
             <!-- Pipeline rail -->

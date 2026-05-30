@@ -1515,6 +1515,17 @@ loadMachineProfiles();
 
   loadOnboarding();
   window._reloadOnboarding = loadOnboarding;
+
+  const refreshBtn = document.getElementById('onboardingRefreshBtn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = '… Lädt';
+      await loadOnboarding();
+      refreshBtn.disabled = false;
+      refreshBtn.innerHTML = '&#8635; Aktualisieren';
+    });
+  }
 }());
 
 /* ═══════════════════════════════════════════════════════════════════════════
