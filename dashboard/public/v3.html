@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#F6F3EC" />
+  <title>Dashboard v3 · Faltrix</title>
+  <meta name="description" content="Faltrix Dashboard v3 – mobile-first Betreiber-Cockpit für die Verkaufsautomaten." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="/v3.css" />
+</head>
+<body class="v3" data-app="dashboard-v3">
+  <a class="v3-skiplink" href="#v3-main">Zum Inhalt springen</a>
+
+  <div class="v3-shell">
+    <!-- Desktop: Seitenleiste -->
+    <aside class="v3-sidebar" aria-label="Hauptnavigation">
+      <a class="v3-brand" href="/v3" data-route-link="/" aria-label="Faltrix Dashboard v3 – Startseite">
+        <span class="v3-brand__mark" aria-hidden="true">F</span>
+        <span class="v3-brand__text">
+          <span class="v3-brand__name">Faltrix</span>
+          <span class="v3-brand__sub">Dashboard v3</span>
+        </span>
+      </a>
+      <nav class="v3-nav v3-nav--side" data-nav="side" aria-label="Bereiche"></nav>
+      <div class="v3-sidebar__foot">
+        <a class="v3-legacy-link" href="/v2">v2-Cockpit öffnen →</a>
+      </div>
+    </aside>
+
+    <!-- Mobile: obere App-Leiste -->
+    <header class="v3-topbar">
+      <a class="v3-brand v3-brand--compact" href="/v3" data-route-link="/" aria-label="Faltrix Dashboard v3 – Startseite">
+        <span class="v3-brand__mark" aria-hidden="true">F</span>
+        <span class="v3-brand__name">Faltrix</span>
+      </a>
+      <span class="v3-topbar__title" data-page-title>Heute</span>
+    </header>
+
+    <!-- Gemeinsamer Inhaltsbereich -->
+    <main id="v3-main" class="v3-main" tabindex="-1">
+      <div class="v3-view" data-view role="region" aria-live="polite" aria-busy="true">
+        <!-- Router rendert hier die aktive Ansicht inkl. Lade-/Leer-/Fehlerzustand -->
+      </div>
+    </main>
+
+    <!-- Mobile: Bottom-Navigation -->
+    <nav class="v3-nav v3-nav--bottom" data-nav="bottom" aria-label="Bereiche (mobil)"></nav>
+  </div>
+
+  <noscript>
+    <p class="v3-noscript">Dashboard v3 benötigt aktiviertes JavaScript. Das klassische
+      <a href="/v2">v2-Cockpit</a> funktioniert auch ohne.</p>
+  </noscript>
+
+  <script src="/v3.js" defer></script>
+</body>
+</html>
