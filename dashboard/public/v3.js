@@ -77,11 +77,156 @@
       '</header>';
   }
 
-  /* ---- Daten-Lader pro Seite ------------------------------------------- *
-   * Grundgerüst: jede Seite "lädt" beim Öffnen (kurze Latenz, damit der
-   * Ladezustand sichtbar ist) und liefert einen Platzhalter. Spätere Issues
-   * ersetzen loadPage() durch echte /api/v2/*-Aufrufe pro Bereich.            */
+  /* ---- HTML-Escape --------------------------------------------------------- */
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  /* ---- Cockpit-Seite (Heute / /) ----------------------------------------- */
+  var COCKPIT_LINKS = {
+    'warnings-open': '/monitoring',
+    'mhd-risk':      '/lager',
+    'low-stock':     '/lager',
+    'economics':     '/guv',
+  };
+
+  function renderCockpitSkeleton() {
+    return '<div class="v3-cockpit">' +
+      '<div class="v3-cockpit-skel-kpis">' +
+        '<div class="v3-cockpit-skel-kpi v3-skel"></div>' +
+        '<div class="v3-cockpit-skel-kpi v3-skel"></div>' +
+        '<div class="v3-cockpit-skel-kpi v3-skel"></div>' +
+        '<div class="v3-cockpit-skel-kpi v3-skel"></div>' +
+      '</div>' +
+      '<div class="v3-skel" style="height:96px;border-radius:18px"></div>' +
+      '<div>' +
+        '<div class="v3-skel" style="height:16px;width:100px;border-radius:6px;margin-bottom:12px"></div>' +
+        '<div class="v3-skel" style="height:66px;border-radius:12px;margin-bottom:8px"></div>' +
+        '<div class="v3-skel" style="height:66px;border-radius:12px;margin-bottom:8px"></div>' +
+        '<div class="v3-skel" style="height:66px;border-radius:12px"></div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderCockpitPage(data) {
+    var kpis         = data.kpis         || [];
+    var ampelState   = data.ampelState   || 'green';
+    var topPriorities = data.topPriorities || [];
+
+    /* KPI strip */
+    var kpiHtml = kpis.map(function (kpi) {
+      var mod = kpi.key === 'warnings' && kpi.value > 0 ? ' v3-cockpit-kpi--crit' :
+                (kpi.key === 'mhd-risk' || kpi.key === 'low-stock') && kpi.value > 0 ? ' v3-cockpit-kpi--warn' : '';
+      var valStr = kpi.unit === 'EUR'
+        ? kpi.value.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : String(kpi.value);
+      return '<div class="v3-cockpit-kpi' + mod + '">' +
+        '<span class="v3-cockpit-kpi__label">' + esc(kpi.label) + '</span>' +
+        '<span class="v3-cockpit-kpi__value">' + esc(valStr) +
+          (kpi.unit ? '<span class="v3-cockpit-kpi__unit"> ' + esc(kpi.unit) + '</span>' : '') +
+        '</span>' +
+      '</div>';
+    }).join('');
+
+    /* Ampel */
+    var ampelClass = 'v3-cockpit-ampel--' + (ampelState === 'red' ? 'red' : ampelState === 'yellow' ? 'yellow' : 'green');
+    var ampelLabel = ampelState === 'red' ? 'Kritisch' : ampelState === 'yellow' ? 'Warnung' : 'Alles OK';
+    var ampelTitle = ampelState === 'red' ? 'Systeme kritisch' : ampelState === 'yellow' ? 'Hinweise vorhanden' : 'Systeme stabil';
+    var ampelMsg   = ampelState === 'red'
+      ? 'Dringende Eingriffe erforderlich—offene Fehler prüfen.'
+      : ampelState === 'yellow'
+      ? 'Einzelne Bereiche benötigen Aufmerksamkeit.'
+      : 'Alle Systeme laufen stabil. Kein sofortiger Handlungsbedarf.';
+    var ampelHtml = '<div class="v3-cockpit-ampel ' + ampelClass + '">' +
+      '<div class="v3-cockpit-ampel__orb"><div class="v3-cockpit-ampel__dot"></div></div>' +
+      '<div class="v3-cockpit-ampel__body">' +
+        '<div class="v3-cockpit-ampel__state">' + esc(ampelLabel) + '</div>' +
+        '<p class="v3-cockpit-ampel__title">' + esc(ampelTitle) + '</p>' +
+        '<p class="v3-cockpit-ampel__msg">' + esc(ampelMsg) + '</p>' +
+      '</div>' +
+    '</div>';
+
+    /* Actions */
+    var actionsInner;
+    if (topPriorities.length === 0) {
+      actionsInner = '<div class="v3-cockpit-empty">' +
+        '<div class="v3-cockpit-empty__icon">&#10003;</div>' +
+        '<p style="margin:0 0 4px;font-weight:600;color:var(--v3-ok)">Kein Handlungsbedarf</p>' +
+        '<p style="margin:0">Alle Automaten laufen reibungslos.</p>' +
+      '</div>';
+    } else {
+      actionsInner = '<ul class="v3-cockpit-action-list">' +
+        topPriorities.map(function (p) {
+          var mod   = p.severity === 'critical' ? 'v3-cockpit-action--critical' :
+                      p.severity === 'warning'  ? 'v3-cockpit-action--warning'  : 'v3-cockpit-action--info';
+          var badge = p.severity === 'critical' ? 'Kritisch' : p.severity === 'warning' ? 'Warnung' : 'Info';
+          var dest  = COCKPIT_LINKS[p.id] || '/';
+          var href  = dest === '/' ? BASE : BASE + dest;
+          return '<li><a class="v3-cockpit-action ' + mod + '" href="' + href + '" data-route-link="' + dest + '">' +
+            '<div class="v3-cockpit-action__body">' +
+              '<div class="v3-cockpit-action__top">' +
+                '<span class="v3-cockpit-action__badge">' + esc(badge) + '</span>' +
+                '<span class="v3-cockpit-action__title">' + esc(p.title) + '</span>' +
+              '</div>' +
+              '<div class="v3-cockpit-action__msg">' + esc(p.message) + '</div>' +
+            '</div>' +
+            '<div class="v3-cockpit-action__arrow">&#8594;</div>' +
+          '</a></li>';
+        }).join('') +
+      '</ul>';
+    }
+
+    return '<div class="v3-cockpit">' +
+      '<div class="v3-cockpit-kpis">' + kpiHtml + '</div>' +
+      '<div class="v3-cockpit__lower">' +
+        ampelHtml +
+        '<div class="v3-cockpit-actions">' +
+          '<div class="v3-cockpit-actions__head">' +
+            '<span class="v3-cockpit-actions__title">Jetzt handeln</span>' +
+          '</div>' +
+          actionsInner +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ---- Daten-Lader pro Seite ------------------------------------------- */
+  function fetchJson(url) {
+    return fetch(url).then(function (r) {
+      if (!r.ok) { throw new Error(r.status); }
+      return r.json();
+    });
+  }
+
   function loadPage(route) {
+    if (route.path === '/') {
+      return Promise.all([
+        fetchJson('/api/v2/overview'),
+        fetchJson('/api/v2/monitoring'),
+      ]).then(function (results) {
+        var ov  = results[0] && results[0].data ? results[0].data : {};
+        var mon = results[1] && results[1].data ? results[1].data : {};
+        /* buildCockpitData runs server-side; here we reconstruct the shape from API */
+        var kpis = [
+          { key: 'warnings',  label: 'Offene Warnungen', value: (ov.metrics && ov.metrics.openWarningsCount) || 0, unit: null  },
+          { key: 'mhd-risk',  label: 'MHD-Risiko',       value: (ov.metrics && ov.metrics.mhdRiskCount)      || 0, unit: null  },
+          { key: 'low-stock', label: 'Niedriger Bestand', value: (ov.metrics && ov.metrics.lowStockCount)     || 0, unit: null  },
+          { key: 'revenue',   label: 'Umsatz heute',      value: (ov.metrics && ov.metrics.revenueNetToday)   || 0, unit: 'EUR' },
+        ];
+        var ampels = (mon.ampels || []);
+        var ampelState = 'green';
+        for (var i = 0; i < ampels.length; i++) {
+          if (ampels[i].state === 'red')    { ampelState = 'red'; break; }
+          if (ampels[i].state === 'yellow') { ampelState = 'yellow'; }
+        }
+        var topPriorities = (ov.priorities || []).slice(0, 3);
+        return { status: 'ok', cockpit: { kpis: kpis, ampelState: ampelState, topPriorities: topPriorities } };
+      }).catch(function () {
+        return { status: 'error' };
+      });
+    }
     return new Promise(function (resolve) {
       setTimeout(function () { resolve({ status: 'ok', route: route }); }, 260);
     });
@@ -108,9 +253,11 @@
     if (titleEl) { titleEl.textContent = route.nav; }
     setActiveNav(route.path);
 
-    // 1) Ladezustand
+    // 1) Ladezustand — Cockpit zeigt eigenes Skeleton, andere Seiten den Standard-Spinner
     viewEl.setAttribute('aria-busy', 'true');
-    viewEl.innerHTML = pageHead(route) + renderState('loading', { title: route.title + ' wird geladen …' });
+    viewEl.innerHTML = route.path === '/'
+      ? pageHead(route) + renderCockpitSkeleton()
+      : pageHead(route) + renderState('loading', { title: route.title + ' wird geladen …' });
     viewEl.scrollIntoView ? window.scrollTo(0, 0) : null;
 
     // 2) Daten der Seite laden, dann Inhalt / Leer / Fehler
@@ -124,6 +271,8 @@
       } else if (result.status === 'empty') {
         viewEl.innerHTML = pageHead(route) +
           renderState('empty', { message: 'Für „' + route.title + '" liegen aktuell keine Einträge vor.' });
+      } else if (route.path === '/' && result.cockpit) {
+        viewEl.innerHTML = pageHead(route) + renderCockpitPage(result.cockpit);
       } else {
         viewEl.innerHTML = pageHead(route) + placeholderContent(route);
       }
