@@ -179,8 +179,13 @@ async function queryOverviewMonitoringPg(pgUrl) {
         `SELECT COUNT(*)::int AS count FROM (
            SELECT DISTINCT ON (warning_type, COALESCE(product_id::text, warning_key))
              warning_id
-           FROM automatenlager.warnings
-           WHERE resolved = FALSE
+           FROM automatenlager.warnings w
+           WHERE w.resolved = FALSE
+             AND NOT (
+               w.warning_type = 'MDB_CODE_CHANGED_FOR_PRODUCT'
+               AND w.product_id IS NOT NULL
+               AND (SELECT COUNT(*) FROM automatenlager.slot_assignments sa WHERE sa.active = TRUE AND sa.product_id = w.product_id) > 1
+             )
            ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
          ) d`,
       ),
@@ -215,18 +220,26 @@ async function queryOverviewMonitoringPg(pgUrl) {
           LIMIT 80`,
       ),
       client.query(
-        `SELECT warning_type, severity, resolved, created_at, warning_key, message
-           FROM (
-             SELECT DISTINCT ON (warning_type, COALESCE(product_id::text, warning_key))
-               warning_type, severity, resolved, created_at, warning_key, message
-             FROM automatenlager.warnings
-             WHERE created_at >= now() - INTERVAL '7 days'
-               AND warning_type != 'BACKUP_OK'
-               AND resolved = FALSE
-             ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
-           ) deduped
-           ORDER BY created_at DESC
-           LIMIT 40`,
+        `WITH filtered AS (
+           SELECT DISTINCT ON (warning_type, COALESCE(product_id::text, warning_key))
+             warning_type, severity, resolved, created_at, warning_key, message
+           FROM automatenlager.warnings w
+           WHERE w.created_at >= now() - INTERVAL '7 days'
+             AND w.warning_type != 'BACKUP_OK'
+             AND w.resolved = FALSE
+             AND NOT (
+               w.warning_type = 'MDB_CODE_CHANGED_FOR_PRODUCT'
+               AND w.product_id IS NOT NULL
+               AND (SELECT COUNT(*) FROM automatenlager.slot_assignments sa WHERE sa.active = TRUE AND sa.product_id = w.product_id) > 1
+             )
+           ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
+         )
+         SELECT warning_type, severity, resolved, created_at, warning_key, message
+         FROM filtered
+         ORDER BY
+           CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+           created_at DESC
+         LIMIT 40`,
       ),
     ]);
 
@@ -266,6 +279,8 @@ function buildWarningDrilldown(warning = {}) {
       entity = msg.substring(0, colonIdx).trim();
     }
   }
+  // Strip leading [TYPE_TAG] prefix from entity (e.g. "[EMPTY_BATCH] 7 Days Croissant" → "7 Days Croissant")
+  if (entity) entity = entity.replace(/^\[[^\]]+\]\s*/, '').trim() || entity;
   const correctionLink = CORRECTION_LINK_TYPES.has(
     clean(warning.warning_type).toUpperCase(),
   ) ? '#correctionCasesPanel' : null;
