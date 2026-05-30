@@ -1420,49 +1420,108 @@ loadMachineProfiles();
     }).join('');
   }
 
+  let _slotOffenProducts = [];
+  let _slotOffenIsAdmin  = false;
+  let _slotSearchReady   = false;
+
   function renderSlotOffenList(products, isAdmin) {
     const section = document.getElementById('obSlotOffenSection');
-    const list    = document.getElementById('obSlotOffenList');
     const badge   = document.getElementById('obSlotOffenCount');
-    if (!section || !list) return;
+    if (!section) return;
+
+    _slotOffenProducts = products;
+    _slotOffenIsAdmin  = isAdmin;
 
     if (badge) badge.textContent = String(products.length);
 
-    if (!products.length) {
-      section.hidden = true;
-      return;
-    }
+    if (!products.length) { section.hidden = true; return; }
     section.hidden = false;
 
-    list.innerHTML = products.map((p) => {
-      const assignBtn = isAdmin
-        ? `<button class="v2-ob-assign-btn"
-             data-product-id="${esc(p.product_id)}"
-             data-product-name="${esc(p.name)}"
-             data-product-key="${esc(p.product_key || '')}"
-             aria-label="Slot zuweisen für ${esc(p.name)}">
-             ＋ Slot zuweisen
-           </button>`
-        : `<span class="v2-ob-assign-btn" style="opacity:.4;cursor:not-allowed" aria-disabled="true">Nur Admin</span>`;
-      return `
-        <div class="v2-ob-slot-offen-row" role="listitem">
-          <div>
-            <div class="v2-ob-slot-offen-name">${esc(p.name || p.product_key || '—')}</div>
-            ${p.product_key ? `<div class="v2-ob-slot-offen-key">${esc(p.product_key)}</div>` : ''}
-          </div>
-          ${assignBtn}
-        </div>`;
-    }).join('');
+    if (_slotSearchReady) return;
+    _slotSearchReady = true;
 
-    list.addEventListener('click', (e) => {
-      const btn = e.target.closest('.v2-ob-assign-btn[data-product-id]');
-      if (!btn) return;
-      window.openSlotAssignDrawer({
-        product_id:   btn.dataset.productId,
-        product_name: btn.dataset.productName,
-        product_key:  btn.dataset.productKey,
+    const input   = document.getElementById('obSlotSearch');
+    const results = document.getElementById('obSlotSearchResults');
+    if (!input || !results) return;
+
+    let activeIdx = -1;
+
+    function items() { return Array.from(results.querySelectorAll('[role="option"]')); }
+
+    function setActive(idx) {
+      items().forEach((el, i) => {
+        const on = i === idx;
+        el.classList.toggle('v2-ob-slot-search-active', on);
+        el.setAttribute('aria-selected', String(on));
       });
+      activeIdx = idx;
+    }
+
+    function pick(p) {
+      input.value = '';
+      results.hidden = true;
+      activeIdx = -1;
+      if (_slotOffenIsAdmin) {
+        window.openSlotAssignDrawer({ product_id: p.product_id, product_name: p.name, product_key: p.product_key || '' });
+      }
+    }
+
+    function showResults(query) {
+      const q = query.trim().toLowerCase();
+      if (!q) { results.hidden = true; results.innerHTML = ''; activeIdx = -1; return; }
+
+      const matched = _slotOffenProducts.filter(p =>
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.product_key || '').toLowerCase().includes(q)
+      ).slice(0, 8);
+
+      results._matched = matched;
+
+      if (!matched.length) {
+        results.innerHTML = `<div class="v2-ob-slot-search-empty">Kein Produkt gefunden</div>`;
+        results.hidden = false;
+        activeIdx = -1;
+        return;
+      }
+
+      results.innerHTML = matched.map((p, i) => {
+        const disabled = !_slotOffenIsAdmin ? 'v2-ob-slot-search-item--disabled' : '';
+        const action   = _slotOffenIsAdmin
+          ? `<span class="v2-ob-slot-search-action">&#8629; zuweisen</span>`
+          : `<span class="v2-ob-slot-search-action" style="opacity:.4">Nur Admin</span>`;
+        return `<div class="v2-ob-slot-search-item ${disabled}" role="option" aria-selected="false" data-idx="${i}">
+          <span class="v2-ob-slot-search-name">${esc(p.name || p.product_key || '—')}</span>
+          ${p.product_key ? `<span class="v2-ob-slot-search-key">${esc(p.product_key)}</span>` : ''}
+          ${action}
+        </div>`;
+      }).join('');
+
+      results.hidden = false;
+      activeIdx = -1;
+    }
+
+    input.addEventListener('input', () => showResults(input.value));
+
+    input.addEventListener('keydown', (e) => {
+      if (results.hidden) return;
+      const els = items();
+      if (!els.length) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(activeIdx + 1, els.length - 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(activeIdx - 1, 0)); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (activeIdx >= 0 && results._matched?.[activeIdx]) pick(results._matched[activeIdx]); }
+      else if (e.key === 'Escape') { results.hidden = true; activeIdx = -1; }
     });
+
+    results.addEventListener('click', (e) => {
+      const item = e.target.closest('[role="option"]');
+      if (!item || item.classList.contains('v2-ob-slot-search-item--disabled')) return;
+      const idx = parseInt(item.dataset.idx, 10);
+      if (!isNaN(idx) && results._matched?.[idx]) pick(results._matched[idx]);
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!section.contains(e.target)) { results.hidden = true; activeIdx = -1; }
+    }, true);
   }
 
   function renderOnboarding(data, wf2Url, isAdmin) {

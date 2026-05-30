@@ -3812,61 +3812,102 @@ h2 {
    Slot-offen list (#46) — actionable product rows in onboarding panel
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.v2-ob-slot-offen-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* Slot-Zuordnung offen – search-first UI */
+.v2-ob-slot-search-wrap {
+  position: relative;
+  margin-top: 8px;
 }
 
-.v2-ob-slot-offen-row {
+.v2-ob-slot-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 14px 9px 38px;
+  border: 1.5px solid var(--v2-line);
+  border-radius: 8px;
+  background: var(--v2-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23c47a00' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E") no-repeat 12px center;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.875rem;
+  color: var(--v2-ink);
+  transition: border-color 0.14s, box-shadow 0.14s;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.v2-ob-slot-search-input:focus {
+  outline: none;
+  border-color: #c47a00;
+  box-shadow: 0 0 0 3px rgba(196,122,0,.12);
+}
+.v2-ob-slot-search-input::placeholder { color: var(--v2-muted); }
+.v2-ob-slot-search-input::-webkit-search-cancel-button { -webkit-appearance: none; }
+
+.v2-ob-slot-search-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--v2-surface);
+  border: 1.5px solid var(--v2-line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.12), 0 2px 6px rgba(0,0,0,.06);
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 100;
+  animation: slotSearchDrop 0.14s ease;
+}
+@keyframes slotSearchDrop {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.v2-ob-slot-search-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   padding: 10px 14px;
-  border: 1px solid var(--v2-line);
-  border-radius: 8px;
-  background: var(--v2-surface);
-  transition: box-shadow 0.14s;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.1s, border-color 0.1s;
 }
-.v2-ob-slot-offen-row:hover { box-shadow: var(--v2-shadow-sm); }
+.v2-ob-slot-search-item:hover,
+.v2-ob-slot-search-active {
+  background: rgba(196,122,0,.06);
+  border-left-color: #c47a00;
+}
+.v2-ob-slot-search-item--disabled { cursor: not-allowed; opacity: 0.5; }
 
-.v2-ob-slot-offen-name {
+.v2-ob-slot-search-name {
   font-family: 'DM Serif Display', serif;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   color: var(--v2-ink);
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.v2-ob-slot-offen-key {
+.v2-ob-slot-search-key {
   font-family: 'DM Mono', monospace;
-  font-size: 0.67rem;
+  font-size: 0.65rem;
   color: var(--v2-muted);
-  margin-top: 1px;
-}
-
-.v2-ob-assign-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 12px;
-  border: 1.5px solid #c47a00;
-  border-radius: 6px;
-  background: transparent;
-  color: #c47a00;
-  font-family: 'DM Mono', monospace;
-  font-size: 0.7rem;
-  font-weight: 500;
-  letter-spacing: 0.03em;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.14s, color 0.14s;
   flex-shrink: 0;
 }
-.v2-ob-assign-btn:hover  { background: rgba(196,122,0,.1); }
-.v2-ob-assign-btn:active { background: rgba(196,122,0,.2); }
+.v2-ob-slot-search-action {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.65rem;
+  color: #c47a00;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.v2-ob-slot-search-item:hover .v2-ob-slot-search-action,
+.v2-ob-slot-search-active .v2-ob-slot-search-action { opacity: 1; }
+
+.v2-ob-slot-search-empty {
+  padding: 12px 14px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+  color: var(--v2-muted);
+  text-align: center;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Slot-Assign Inline Drawer (#46)

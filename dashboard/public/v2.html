@@ -510,13 +510,20 @@
                 <div class="v2-ob-status-grid" id="obStatusGrid" aria-label="Produkte nach Status"></div>
               </div>
 
-              <!-- Slot offen – actionable list -->
+              <!-- Slot offen – search-first UI -->
               <div class="v2-ob-section" id="obSlotOffenSection" hidden>
                 <div class="v2-ob-section-head">
                   <p class="v2-eyebrow v2-section-gap">Slot-Zuordnung offen <span id="obSlotOffenCount" class="v2-ob-count-badge v2-ob-count-badge--warn"></span></p>
-                  <p class="v2-ob-section-hint">Diese Produkte haben einen Nayax-Alias, aber noch keinen aktiven Automaten-Slot. Slot direkt hier zuweisen.</p>
+                  <p class="v2-ob-section-hint">Produkt suchen und Slot direkt zuweisen.</p>
                 </div>
-                <div id="obSlotOffenList" class="v2-ob-slot-offen-list" role="list" aria-label="Produkte ohne Slot"></div>
+                <div class="v2-ob-slot-search-wrap">
+                  <input type="search" id="obSlotSearch" class="v2-ob-slot-search-input"
+                         placeholder="Produkt suchen…" autocomplete="off"
+                         aria-label="Produkt ohne Slot suchen"
+                         aria-autocomplete="list" aria-controls="obSlotSearchResults">
+                  <div id="obSlotSearchResults" class="v2-ob-slot-search-results"
+                       role="listbox" aria-label="Produkte ohne Slot" hidden></div>
+                </div>
               </div>
             </div>
           </article>
