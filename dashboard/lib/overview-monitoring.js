@@ -175,7 +175,15 @@ async function queryOverviewMonitoringPg(pgUrl) {
       workflowRunsResult,
       warningsResult,
     ] = await Promise.all([
-      client.query('SELECT COUNT(*)::int AS count FROM automatenlager.v_warnings_open'),
+      client.query(
+        `SELECT COUNT(*)::int AS count FROM (
+           SELECT DISTINCT ON (warning_type, COALESCE(product_id::text, warning_key))
+             warning_id
+           FROM automatenlager.warnings
+           WHERE resolved = FALSE
+           ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
+         ) d`,
+      ),
       client.query(
         `SELECT COUNT(*)::int AS count
            FROM automatenlager.stock_batches sb
@@ -208,10 +216,17 @@ async function queryOverviewMonitoringPg(pgUrl) {
       ),
       client.query(
         `SELECT warning_type, severity, resolved, created_at, warning_key, message
-           FROM automatenlager.warnings
-          WHERE created_at >= now() - INTERVAL '3 days'
-          ORDER BY created_at DESC
-          LIMIT 120`,
+           FROM (
+             SELECT DISTINCT ON (warning_type, COALESCE(product_id::text, warning_key))
+               warning_type, severity, resolved, created_at, warning_key, message
+             FROM automatenlager.warnings
+             WHERE created_at >= now() - INTERVAL '7 days'
+               AND warning_type != 'BACKUP_OK'
+               AND resolved = FALSE
+             ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
+           ) deduped
+           ORDER BY created_at DESC
+           LIMIT 40`,
       ),
     ]);
 
