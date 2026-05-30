@@ -1795,7 +1795,7 @@ const server = http.createServer(async (req, res) => {
           const n8nExtUrl = dashboardConfig().n8nExternalUrl;
           const wf2 = workflowFiles
             .filter((fn) => fn.includes('WF2') && fs.existsSync(path.join(ROOT, fn)))
-            .map((fn) => { try { return summarizeWorkflow(fn); } catch { return null; } })
+            .map((fn) => { try { return summarizeN8nWorkflow(readJson(fn)); } catch { return null; } })
             .filter(Boolean)[0];
           wf2FormUrl = firstFormUrl(n8nExtUrl, wf2 || {});
         } catch { /* wf2 url optional */ }
