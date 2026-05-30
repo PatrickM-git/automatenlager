@@ -283,7 +283,7 @@ function buildWarningDrilldown(warning = {}) {
   if (entity) entity = entity.replace(/^\[[^\]]+\]\s*/, '').trim() || entity;
   const correctionLink = CORRECTION_LINK_TYPES.has(
     clean(warning.warning_type).toUpperCase(),
-  ) ? '#correctionCases' : null;
+  ) ? '#correctionCasesPanel' : null;
 
   return {
     warning_type: warning.warning_type ?? null,

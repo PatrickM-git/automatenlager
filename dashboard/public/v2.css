@@ -3800,6 +3800,24 @@ h2 {
 }
 .v2-warn-action-btn:hover { background: #c47a00; color: #fff; }
 
+.v2-warn-correction-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1.5px solid #c47a00;
+  border-radius: 20px;
+  background: transparent;
+  color: #c47a00;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.14s, color 0.14s;
+}
+.v2-warn-correction-link:hover { background: #c47a00; color: #fff; }
+
 .v2-warn-detail {
   display: grid;
   grid-template-rows: 0fr;
