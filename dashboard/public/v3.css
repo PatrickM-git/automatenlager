@@ -1,7 +1,7 @@
 /* =========================================================================
    Dashboard v3 – "Warm-Paper Operational Clarity"
-   Grundgerüst-Styling (Issue v3-A). Das ausführliche globale CSS inkl.
-   tabellarischer Ziffern / Strich-Null-Fix folgt in Issue v3-B.
+   v3-A: Grundgerüst-Styling
+   v3-B: Tabularziffern/Strich-Null-Fix + KPI-Card, Table, Chip, Filter-Bar
    ========================================================================= */
 
 :root {
@@ -346,4 +346,374 @@ a { color: inherit; }
   .v3-topbar { display: none; }
   .v3-nav--bottom { display: none; }
   .v3-main { padding: 30px 34px 40px; }
+}
+
+/* =========================================================================
+   v3-B: Tabularziffern + Strich-Null-Fix
+   ========================================================================= */
+
+body.v3 {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 0;
+}
+
+/* =========================================================================
+   v3-B: KPI-Card
+   Kennzahl-Kachel mit Titel, großem Display-Wert, optionalem Delta-Pill
+   und statusbedingter Farbakzentuierung über den linken Signalbalken.
+   ========================================================================= */
+
+.v3-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+@media (min-width: 600px) {
+  .v3-kpi-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+}
+
+.v3-kpi-card {
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: 18px 20px 20px 24px;
+  overflow: hidden;
+  transition: box-shadow 0.2s var(--ease), transform 0.2s var(--ease);
+}
+
+/* Linker Signalbalken – floatend durch border-radius */
+.v3-kpi-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 18px;
+  bottom: 18px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--brand);
+  opacity: 0.55;
+}
+
+/* Subtile Radiance oben rechts */
+.v3-kpi-card::after {
+  content: "";
+  position: absolute;
+  top: -24px;
+  right: -24px;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--brand-tint) 0%, transparent 68%);
+  pointer-events: none;
+}
+
+.v3-kpi-card:hover {
+  box-shadow: var(--shadow-pop);
+  transform: translateY(-2px);
+}
+
+.v3-kpi-card__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 10px;
+  line-height: 1;
+}
+
+.v3-kpi-card__value {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(28px, 5vw, 38px);
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 0;
+  margin: 0 0 12px;
+}
+
+.v3-kpi-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.v3-kpi-card__delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 0;
+  padding: 3px 8px 3px 6px;
+  border-radius: 999px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.v3-kpi-card__delta--up   { background: rgba(21,128,61,0.10);  color: var(--ok);   }
+.v3-kpi-card__delta--down { background: rgba(180,83,9,0.11);   color: var(--warn); }
+.v3-kpi-card__delta--crit { background: rgba(185,28,28,0.10);  color: var(--crit); }
+
+.v3-kpi-card__sub {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+/* Status-Varianten: Balken + Rahmen-Akzent */
+.v3-kpi-card--warn { border-color: rgba(180,83,9,0.20); }
+.v3-kpi-card--warn::before { background: var(--warn); opacity: 0.7; }
+.v3-kpi-card--warn::after  { background: radial-gradient(circle, rgba(180,83,9,0.08) 0%, transparent 68%); }
+
+.v3-kpi-card--crit { border-color: rgba(185,28,28,0.22); }
+.v3-kpi-card--crit::before { background: var(--crit); opacity: 0.8; }
+.v3-kpi-card--crit::after  { background: radial-gradient(circle, rgba(185,28,28,0.08) 0%, transparent 68%); }
+
+.v3-kpi-card--ok::before { background: var(--ok); opacity: 0.6; }
+.v3-kpi-card--ok::after  { background: radial-gradient(circle, rgba(21,128,61,0.07) 0%, transparent 68%); }
+
+/* =========================================================================
+   v3-B: Table
+   Operationale Datentabelle. Sticky frosted Header. Zebra-Striping über
+   --paper. Scroll-Schatten via CSS background-attachment-Trick.
+   ========================================================================= */
+
+.v3-table-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  -webkit-overflow-scrolling: touch;
+  /* Scroll-Schatten: sichtbar nur wenn Overflow existiert */
+  background:
+    linear-gradient(to right, var(--card) 1px, transparent 1px) left  / 28px 100% no-repeat,
+    linear-gradient(to left,  var(--card) 1px, transparent 1px) right / 28px 100% no-repeat,
+    linear-gradient(to right, rgba(23,24,28,0.07), transparent) left  / 28px 100% no-repeat,
+    linear-gradient(to left,  rgba(23,24,28,0.07), transparent) right / 28px 100% no-repeat;
+  background-color: var(--card);
+  background-attachment: local, local, scroll, scroll;
+}
+
+.v3-table {
+  width: 100%;
+  min-width: 480px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.v3-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.v3-table thead th {
+  padding: 11px 14px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--paper) 75%, var(--card));
+  backdrop-filter: saturate(1.2) blur(8px);
+  -webkit-backdrop-filter: saturate(1.2) blur(8px);
+  border-bottom: 1px solid var(--line-strong);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 0;
+}
+.v3-table thead th:first-child { padding-left: 20px; border-radius: calc(var(--radius) - 1px) 0 0 0; }
+.v3-table thead th:last-child  { padding-right: 20px; border-radius: 0 calc(var(--radius) - 1px) 0 0; }
+
+/* Sortier-Indikator */
+.v3-table thead th[aria-sort="ascending"]::after  { content: " ↑"; opacity: 0.5; }
+.v3-table thead th[aria-sort="descending"]::after { content: " ↓"; opacity: 0.5; }
+
+.v3-table tbody tr { transition: background 0.1s var(--ease); }
+
+.v3-table tbody tr td { background: var(--card); }
+.v3-table tbody tr:nth-child(even) td { background: var(--paper); }
+.v3-table tbody tr:hover td { background: var(--brand-tint) !important; }
+
+.v3-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 0;
+}
+.v3-table td:first-child { padding-left: 20px; }
+.v3-table td:last-child  { padding-right: 20px; }
+
+.v3-table tbody tr:last-child td { border-bottom: none; }
+.v3-table tbody tr:last-child td:first-child { border-radius: 0 0 0 calc(var(--radius) - 1px); }
+.v3-table tbody tr:last-child td:last-child  { border-radius: 0 0 calc(var(--radius) - 1px) 0; }
+
+/* Nummerische Spalten – rechts ausrichten */
+.v3-num {
+  text-align: right;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 0;
+}
+.v3-num--ok   { color: var(--ok);   }
+.v3-num--warn { color: var(--warn); }
+.v3-num--crit { color: var(--crit); font-weight: 700; }
+
+/* =========================================================================
+   v3-B: Chip
+   Status- und Filter-Label. Pillenform. Semantische Varianten mit jeweils
+   bespoke Opazitätsmischung aus der Ampelpalette. Active = gefüllt.
+   ========================================================================= */
+
+.v3-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-deep);
+  color: var(--ink-soft);
+  transition: background 0.14s var(--ease), color 0.14s var(--ease),
+              border-color 0.14s var(--ease), box-shadow 0.14s var(--ease);
+  cursor: default;
+  user-select: none;
+}
+
+.v3-chip__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.65;
+  flex: none;
+}
+
+/* Semantische Varianten */
+.v3-chip--ok    { background: rgba(21,128,61,0.09);  color: var(--ok);   border-color: rgba(21,128,61,0.22);  }
+.v3-chip--warn  { background: rgba(180,83,9,0.09);   color: var(--warn); border-color: rgba(180,83,9,0.22);  }
+.v3-chip--crit  { background: rgba(185,28,28,0.09);  color: var(--crit); border-color: rgba(185,28,28,0.22); }
+.v3-chip--brand { background: var(--brand-tint);      color: var(--brand); border-color: rgba(109,58,156,0.22); }
+
+/* Aktiver Zustand – ausgefüllt */
+.v3-chip--active,
+.v3-chip[aria-pressed="true"],
+.v3-chip[aria-selected="true"] {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+  box-shadow: 0 2px 8px -3px rgba(23,24,28,0.35);
+}
+.v3-chip--ok.v3-chip--active    { background: var(--ok);    border-color: var(--ok);    color: #fff; }
+.v3-chip--warn.v3-chip--active  { background: var(--warn);  border-color: var(--warn);  color: #fff; }
+.v3-chip--crit.v3-chip--active  { background: var(--crit);  border-color: var(--crit);  color: #fff; }
+.v3-chip--brand.v3-chip--active { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+
+/* Interaktives Chip (button / a) */
+button.v3-chip,
+a.v3-chip {
+  appearance: none;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+button.v3-chip:hover,
+a.v3-chip:hover {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+button.v3-chip--brand:hover,
+a.v3-chip--brand:hover { background: var(--brand-tint-strong); }
+
+button.v3-chip:focus-visible,
+a.v3-chip:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* =========================================================================
+   v3-B: Filter-Bar
+   Horizontale Chip-Leiste. Scroll-Snap auf Mobilgeräten. CSS-Mask-Fade
+   an beiden Rändern – ohne JS, ohne Overflow-Pfeile.
+   ========================================================================= */
+
+.v3-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: visible;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 2px 2px 6px;
+  /* Sanfter Fade-out an beiden Kanten */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 14px,
+    black calc(100% - 14px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 14px,
+    black calc(100% - 14px),
+    transparent 100%
+  );
+}
+
+.v3-filter-bar::-webkit-scrollbar { display: none; }
+
+.v3-filter-bar > * {
+  scroll-snap-align: start;
+  flex: 0 0 auto;
+}
+
+/* Optional: Label vor der Bar */
+.v3-filter-bar__label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding-right: 4px;
+  scroll-snap-align: none;
+  align-self: center;
+}
+
+/* Sticky-Variante: bleibt beim Scrollen oben */
+.v3-filter-bar--sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: saturate(1.3) blur(10px);
+  -webkit-backdrop-filter: saturate(1.3) blur(10px);
+  padding-top: 8px;
+  padding-bottom: 10px;
+  margin-inline: -16px;
+  padding-inline: 16px;
+  border-bottom: 1px solid var(--line);
 }
