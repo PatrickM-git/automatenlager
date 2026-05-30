@@ -140,9 +140,12 @@ function dashboardConfig() {
   // Priority: process.env > config file (UI-saved) > .env.local files
   const n8nBaseUrl = process.env.N8N_BASE_URL || fileConfig.n8nBaseUrl || localEnv.N8N_BASE_URL || 'http://127.0.0.1:5678';
   const n8nApiKey  = process.env.N8N_API_KEY  || fileConfig.n8nApiKey  || localEnv.N8N_API_KEY  || '';
+  // External URL for browser-facing links (form URLs, editor URLs). Falls back to n8nBaseUrl.
+  const n8nExternalUrl = process.env.N8N_EXTERNAL_URL || fileConfig.n8nExternalUrl || localEnv.N8N_EXTERNAL_URL || n8nBaseUrl;
   const source = process.env.N8N_API_KEY ? 'env' : fileConfig.n8nApiKey ? 'config_file' : localEnv.N8N_API_KEY ? 'env_file' : 'none';
   return {
     n8nBaseUrl: n8nBaseUrl.replace(/\/+$/, ''),
+    n8nExternalUrl: n8nExternalUrl.replace(/\/+$/, ''),
     n8nApiKey,
     hasN8nApiKey: Boolean(n8nApiKey),
     source,
@@ -944,14 +947,16 @@ function pickWorkflowForAction(workflows, matcher) {
 }
 
 function buildWorkflowActions(n8n) {
-  const baseUrl = n8n.baseUrl || dashboardConfig().n8nBaseUrl;
+  const config = dashboardConfig();
+  const baseUrl = n8n.baseUrl || config.n8nBaseUrl;
+  const externalUrl = config.n8nExternalUrl;
   return workflowActions.map((action) => {
     const workflow = pickWorkflowForAction(n8n.workflows || [], action.workflowName);
     const editorUrl = workflowEditorUrl(baseUrl, workflow?.id);
     const webhookUrl = workflow ? firstProductionWebhookUrl(baseUrl, workflow) : '';
     const webhookNode = workflow ? firstProductionWebhook(workflow) : null;
     const webhookMethod = webhookNode?.method || 'GET';
-    const formUrl = workflow ? firstFormUrl(baseUrl, workflow) : '';
+    const formUrl = workflow ? firstFormUrl(externalUrl, workflow) : '';
     const hasWebhook = Boolean(workflow?.webhooks?.length);
     const hasForm = Boolean(workflow?.formTriggers?.length);
     let triggerType = 'unavailable';
@@ -1641,7 +1646,7 @@ const server = http.createServer(async (req, res) => {
           ORDER BY p.name, sa.machine_id, sa.mdb_code
         `);
         await client.end();
-        const results = searchRefillTargets(q, rows);
+        const results = searchRefillTargets(q, rows.map((r) => ({ ...r, product_name: formatProductName(r.product_name || '') })));
         sendJson(res, 200, { ok: true, results });
       } catch (err) {
         sendJson(res, 503, { ok: false, results: [], error: { code: 'PG_ERROR', message: err.message } });
@@ -1787,15 +1792,12 @@ const server = http.createServer(async (req, res) => {
         const data = buildProductOnboardingData(rawData);
         let wf2FormUrl = '';
         try {
-          const n8nBaseUrl = dashboardConfig().n8nBaseUrl;
-          const workflows = workflowFiles
-            .filter((fn) => fn.includes('WF2'))
-            .map((fn) => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, fn), 'utf8')); } catch { return null; } })
-            .filter(Boolean);
-          const wf2 = workflows[0];
-          if (wf2?.active && wf2?.formTriggers?.length) {
-            wf2FormUrl = `${n8nBaseUrl}/form/${encodeURIComponent(wf2.formTriggers[0].formPath)}`;
-          }
+          const n8nExtUrl = dashboardConfig().n8nExternalUrl;
+          const wf2 = workflowFiles
+            .filter((fn) => fn.includes('WF2') && fs.existsSync(path.join(ROOT, fn)))
+            .map((fn) => { try { return summarizeWorkflow(fn); } catch { return null; } })
+            .filter(Boolean)[0];
+          wf2FormUrl = firstFormUrl(n8nExtUrl, wf2 || {});
         } catch { /* wf2 url optional */ }
         sendJson(res, 200, {
           ok: true,

@@ -1,6 +1,6 @@
 'use strict';
 
-const { resolvePeriod } = require('./economics.js');
+const { resolvePeriod, formatProductName } = require('./economics.js');
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -85,7 +85,7 @@ function parseSlotRow(row) {
     machine_name: clean(row.machine_name),
     mdb_code: toNum(row.mdb_code),
     product_id: toNum(row.product_id),
-    product_name: clean(row.product_name) || String(row.product_id ?? ''),
+    product_name: formatProductName(clean(row.product_name)) || String(row.product_id ?? ''),
     current_machine_qty: current,
     target_stock: target,
     machine_capacity: capacity,

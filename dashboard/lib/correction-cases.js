@@ -131,6 +131,8 @@ async function queryCorrectionCasesPg(pgUrl) {
         WHERE st.product_id IS NULL
           AND st.product_name_raw IS NOT NULL
           AND st.product_name_raw <> ''
+          AND st.product_name_raw <> 'Unbekannt'
+          AND st.settlement_at > '2020-01-01'
         GROUP BY st.product_name_raw
         ORDER BY tx_count DESC
         LIMIT 100
