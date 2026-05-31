@@ -1325,6 +1325,62 @@ a.v3-chip:focus-visible {
 .v3-badge--turnover-langsam_dreher { background: rgba(180,83,9,.1);   color: var(--warn); border-color: rgba(180,83,9,.22); }
 .v3-badge--turnover-ladenhueter    { background: rgba(185,28,28,.1);  color: var(--crit); border-color: rgba(185,28,28,.22); }
 
+/* Kompaktes Drehzahl-Badge in der engen Slot-Zelle (/slots) */
+.v3-badge.v3-slot__turnover {
+  align-self: flex-start;
+  font-size: 8.5px;
+  padding: 1px 5px;
+  letter-spacing: .04em;
+}
+
+/* Drehzahl-Filterleiste über der Etagen-Bühne (/slots, User Story 37) */
+.v3-slots-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+.v3-slots-filter__label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--ink-faint);
+  margin-right: 2px;
+}
+
+/* Farbiger Klassen-Punkt auf den Drehzahl-Chips (Lager + Slots) */
+.v3-chip--turnover-renner::before,
+.v3-chip--turnover-normal::before,
+.v3-chip--turnover-langsam_dreher::before,
+.v3-chip--turnover-ladenhueter::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.v3-chip--turnover-renner::before         { background: var(--ok); }
+.v3-chip--turnover-normal::before         { background: var(--ink-faint); }
+.v3-chip--turnover-langsam_dreher::before { background: var(--warn); }
+.v3-chip--turnover-ladenhueter::before    { background: var(--crit); }
+
+/* Drehzahl-Filter im Slot-Editor: Nicht-Treffer dimmen, Treffer hervorheben.
+   Wirkt auf den beim Automatenwechsel bestehenbleibenden Stage-Wrapper. */
+[data-slots-stagewrap][data-turnover-filter] .v3-slot {
+  opacity: .26;
+  transition: opacity .15s var(--ease);
+}
+[data-slots-stagewrap][data-turnover-filter="renner"]         .v3-slot[data-slot-turnover="renner"],
+[data-slots-stagewrap][data-turnover-filter="normal"]         .v3-slot[data-slot-turnover="normal"],
+[data-slots-stagewrap][data-turnover-filter="langsam_dreher"] .v3-slot[data-slot-turnover="langsam_dreher"],
+[data-slots-stagewrap][data-turnover-filter="ladenhueter"]    .v3-slot[data-slot-turnover="ladenhueter"] {
+  opacity: 1;
+}
+
 /* Einstellungen-Seite */
 .v3-set-title    { font-size: 16px; font-weight: 800; margin: 0 0 4px; color: var(--ink); }
 .v3-set-subtitle { font-size: 12.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-faint); margin: 22px 0 10px; }

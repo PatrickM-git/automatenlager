@@ -29,6 +29,10 @@ function parseCard(row) {
     location_name:  clean(row.location_name),
     mdb_code:       clean(row.mdb_code),
     slow_mover_class: row.slow_mover_class != null ? clean(row.slow_mover_class) : null,
+    // Drehzahl-Klasse (lib/slow-mover.js) — wird im Frontend per Slot-Join
+    // (machine_id+mdb_code) aus den Sortiment-Slots angereichert und hier nur
+    // durchgereicht, wenn die Zeile sie bereits trägt.
+    turnover_class: row.turnover_class != null ? clean(row.turnover_class) : null,
   };
 }
 

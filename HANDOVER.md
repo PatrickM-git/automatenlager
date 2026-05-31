@@ -2,55 +2,55 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-05-31 (Session 24 — WF1 Dedup-Guard + Upload→Drive-Konvergenz, Task #6)
+## Stand: 2026-05-31 (Session 25 — Slow-Mover-Klassifikation in den Datenpfad eingeklinkt, Issue v3-H/#8)
 
 ### Aktueller Stand
 
-- **Task #6 ist fertig und live auf der HP Mini.** WF1 (`wnGAwHhgfXq2ATM8`) hat jetzt **30 Nodes** (vorher 25), aktiv, alle Bestands-Nodes intakt.
-- **445/445 Dashboard-Tests grün** (`cd dashboard; npm test`).
-- Produktiver Host bleibt der **HP Mini** (Dashboard + n8n laufen dort).
+- **Drehzahl-/Slow-Mover-Klassifikation ist jetzt serverseitig in den Datenpfad eingeklinkt** und im v3-Frontend sichtbar (Badges + Filter). Issue v3-H/#8 ist damit funktional fertig.
+- **476/476 Dashboard-Tests grün** (`cd dashboard; npm test`).
+- **Live verifiziert gegen die echte Produktions-DB** (SSH-Tunnel Port 15432): API liefert `turnover_class` für alle 40 realen Slots, Drift-Guard lief live durch und ist grün.
+- Produktiver Host bleibt der **HP Mini** (Dashboard + n8n laufen dort). Diese Session war reine Dashboard-Code-Arbeit (kein n8n).
 
 ### Was diese Session gemacht wurde
 
-1. **WF1 Dedup-Guard (Mini, additiv):**
-   - Neue Nodes: `GS - Pruefung lesen (Dedup)` (liest `Rechnungseingang_Pruefung` parallel von „Code - erste Rechnung auswählen") und `Code - Dedup Filter` (`runOnceForAllItems`).
-   - Flow: `Code - Rechnung gegen Stammdaten prüfen → [Google Drive - Rechnung verschieben (IMMER), Code - Dedup Filter]`; `Code - Dedup Filter → Google Sheets - Prüfung anhängen → [Code - WF2 Start vorbereiten, Prepare PGW]`.
-   - **Move ist von Append entkoppelt** → die Datei wird auch dann aus dem Ordner verschoben, wenn **alle** Positionen Duplikate sind. **WF2 + PGW laufen nur bei neuen Vorschlägen** (Append bekommt 0 Items ⇒ läuft nicht).
-   - Dedup-Key: `approval_id` (= `APP_<drive_file_id>_<line>`) primär, Fallback `invoice_id|supplier|line_number` (fängt Re-Uploads mit neuer Drive-File-ID). Das Pruefung-Sheet **hat** die Spalte `approval_id` (das Node-Schema war nur veraltet).
-   - **Getestet:** 6/6 Szenarien gegen *echte* Sheet-Daten mit dem *real deployten* Filter-Code (gleiche Rechnung 2× → 0 neu; Re-Upload neue File-ID → Fallback; Teil-Duplikat → nur neue Zeilen; Neu-Rechnung → alle; leeres Sheet). Kein Schreibzugriff auf Produktion ⇒ keine Testreste.
+Vorarbeit war bereits committet (`fbd9cf6` Klassifikationsmodul + `/einstellungen` + Glossar, `7ce0aa4` Einstellungen-Icon). Diese Session hat die **Verdrahtung** ergänzt:
 
-2. **Upload→Drive-Konvergenz:**
-   - Neuer self-contained Branch in WF1: `Webhook - Rechnung Upload` (POST, Pfad `wf1-rechnung-upload`, `responseMode: lastNode`) → `Code - Upload Binary normalisieren` (mappt das Multipart-File auf Binary-Key `file`) → `Google Drive - Upload Rechnungseingang` (Ordner `15_5fYaCgnR2pUFpXs6hXJRjvu1jsnS3H`, Cred `kOLyDv48afTu5P9q`). Der **bestehende Drive-Trigger** verarbeitet die Datei danach (mit Dedup). Kein Doppel-Processing.
-   - Der alte GET-Webhook (Ordner-Scan-Action) bleibt **erster** Webhook im Node-Array → die „Rechnungseingang starten"-Action ist unverändert.
-   - Webhook-Liveness verifiziert: POST ohne Datei ⇒ Normalisier-Guard wirft „Kein Binary…", Drive-Node wird nicht erreicht (kein Drive-Schreibzugriff im Test).
-3. **Dashboard (Code, `dashboard/server.js`):**
-   - `/api/v2/uploads/invoice` postet die Datei direkt an einen festen Webhook, wenn **`INVOICE_UPLOAD_WEBHOOK_URL`** gesetzt ist (gezielter Override; nur ein echter `http(s)`-Wert greift, Prozess-Env vor `.env.local`). In `dashboard/.env.local` auf `https://hp-mini-server.tail573a13.ts.net/webhook/wf1-rechnung-upload` gesetzt (gitignored).
-   - `resolveV2UploadWorkflow` wählt jetzt gezielt den **POST**-Webhook (statt nur den ersten), da WF1 nun GET + POST hat. Resolution bleibt Fallback (und für Pickliste).
-   - Neuer Test `INVOICE_UPLOAD_WEBHOOK_URL leitet Rechnung direkt …`; bestehender Resolution-Test neutralisiert den Override Windows-sicher (Nicht-URL-Wert = aus).
-   - Doku: `dashboard/.env.example` ergänzt.
-   - **Hinweis:** Dashboard zeigt n8n weiterhin auf `localhost:5678` (`.dashboard-config.json`); nur der Rechnungs-Upload geht gezielt an die Mini. Alternative (ganzes Dashboard auf Mini) wurde verworfen.
+1. **Server-Datenpfad — `lib/assortment-slots.js` ist die kanonische, populationsweite Klassifikationsquelle:**
+   - Neue `last_sale`-CTE: `MAX(settlement_at)` je `machine_id+mdb_code` aus `automatenlager.sales_transactions` (`source != 'historic_backfill'`, identisch zur `v_slot_turnover`-Semantik) → neue Spalte `days_since_last_sale` (Tage seit letztem echten Verkauf, NULL = nie verkauft).
+   - `parseSlotRow` reicht `daysSinceLastSale` durch — **null bleibt null** (nicht 0, sonst kippt die Ladenhüter-Regel).
+   - `buildAssortmentSlotsData` wendet `classifyTurnover` (aus `lib/slow-mover.js`) auf die Slot-Liste an → jeder Slot trägt `turnover_class` ∈ {renner, normal, langsam_dreher, ladenhueter} im API-Result. Quartile werden über die gezeigte (ggf. gefilterte) Slot-Population gebildet.
+   - `lib/lager.js` (`buildLagerData`): `turnover_class`-Passthrough additiv neben `slow_mover_class`.
 
-### Backups / Artefakte (homelab)
+2. **Frontend (`public/v3.js` + `public/v3.css`, Vanilla-JS, v3-Tokens wiederverwendet):**
+   - Gemeinsamer `turnoverBadge()`-Helfer; **Lager-Karten** zeigen jetzt das Klassen-Badge `v3-badge--turnover-<key>` statt des generischen „Slow-Mover". „normal" bleibt bewusst ohne Badge (Grundzustand), ist aber filterbar.
+   - **Slot-Zellen** tragen `data-slot-turnover` + ein kompaktes Klassen-Badge (`.v3-slot__turnover`).
+   - **Drehzahl-Filter (User Story 37)** auf beiden Seiten: Lager (Chip-Gruppe in der Filterleiste, wertet `filters.turnover_class` aus), Slots (Chips setzen `data-turnover-filter` auf den beim Automatenwechsel bestehenbleibenden `[data-slots-stagewrap]`; CSS dimmt Nicht-Treffer auf Opacity 0.26).
+   - **`/lager` joint die Klasse client-seitig** per `(machine_id, mdb_code)` aus `/api/v2/assortment-slots` (zusätzlicher Fetch, `.catch` → graceful ohne Badge). Bewusste Entscheidung: Quartile müssen über **alle aktiven Slots** gebildet werden, nicht über die gefilterte MHD-Teilmenge → eine einzige Klassifikationsquelle, garantiert konsistent zwischen `/slots` und `/lager`, keine doppelte Quartil-Logik.
 
-- `homelab/wf1_wnGAwHhgfXq2ATM8_backup.json` = aktueller Live-Stand (30 Nodes).
-- Verlaufs-Backups: `wf1_backup_pre_dedup_20260531_125540.json` (25 Nodes, Original), `wf1_backup_pre_upload_20260531_130218.json` (27 Nodes, post-dedup).
-- Lokaler Export `WF1 - Rechnungseingang automatisch mit Claude.json` aktualisiert.
+3. **Tests:** `AC-T1..T5` (Klassifikation/`daysSinceLastSale` im API-Result), `AC-L7c/d` (Lager-Passthrough), neue Datei `dashboard-v3-turnover-badges.test.js` (`AC-TB1..TB8`: Badge-/Filter-Verdrahtung in v3.js + v3.css).
+
+### Live-Verifikation (echte DB, read-only)
+
+- API `/api/v2/assortment-slots`: 40 Slots klassifiziert (renner 15 · langsam_dreher 15 · normal 8 · ladenhüter 2); nie verkauft → ladenhüter, 25 Verk./2 Tage → renner, 2 Verk./24 Tage → langsam_dreher.
+- Slots-Seite: farbige Klassen-Badges in den Zellen; Filter „Ladenhüter" dimmt Nicht-Treffer, „Alle" setzt zurück.
+- Lager-Seite: Join trifft beide MHD-Karten (beide `normal` → ohne Badge); Filter `renner`→0 (+Leerzustand), `normal`→2, `Alle`→2.
+- **Drift-Guard lief live (nicht übersprungen) und ist grün** — neue `sales_transactions`-Spaltenrefs (`machine_id/mdb_code/settlement_at/source`) gegen reales `automatenlager`-Schema verifiziert.
 
 ### n8n-Instanz-Regel (unverändert kritisch)
 
 - **n8n-Arbeit ausschließlich auf der HP Mini, nie lokal.** Mini-REST-API: `https://hp-mini-server.tail573a13.ts.net/api/v1/`, Header `X-N8N-API-KEY`.
 - **Gültiger Mini-Key = `N8N_API_KEY` in `C:\Users\patri\Documents\homelab\.env.local`** (Mini → HTTP 200).
-- **NICHT** für den Mini: `C:\Users\patri\.n8n-api-key` und `ELITEBOOK_N8N_API_KEY` (= lokal, Mini → 401). Die n8n-MCP nutzt aktuell den lokalen Key → sieht nur die lokale Instanz mit abweichenden IDs. Vor jeder Aktion Instanz/ID gegenprüfen.
+- **NICHT** für den Mini: `C:\Users\patri\.n8n-api-key` und `ELITEBOOK_N8N_API_KEY` (= lokal, Mini → 401). Vor jeder Aktion Instanz/ID gegenprüfen.
 
 ### Offene / nächste Schritte
 
-1. **Echter End-to-End-Live-Test** beim nächsten realen Rechnungseingang oder bewusst: PDF über das Dashboard hochladen → erscheint im Drive-Ordner → Drive-Trigger → WF1 verarbeitet (mit Dedup) → Datei wandert nach „Erledigt". (Wurde diese Session bewusst NICHT live gemacht, um die Produktions-Sheets/Drive sauber zu halten; Dedup-Logik + Webhook sind isoliert verifiziert.)
-2. Issue #7 ([v3-G]) — Code fertig+gepusht; Ready-Kommentar + Close in dieser Session.
+1. **Issue v3-H/#8 schließen** (Ready-Kommentar + Close), Klassifikation ist verdrahtet, getestet und live verifiziert.
+2. **Optionaler Live-Augenschein durch Patrick** in der QA-Preview (`dashboard-v3-qa`, Port 8788, `/v3/slots` + `/v3/lager`) — Badges/Filter mit Echtdaten.
+3. Offen aus Session 24: echter End-to-End-Live-Test des WF1-Rechnungs-Uploads beim nächsten realen Rechnungseingang.
 
 ### Wichtige IDs / Pfade
 
-- WF1 Prod-ID: `wnGAwHhgfXq2ATM8` (30 Nodes) · Upload-Webhook-Pfad: `wf1-rechnung-upload`
-- Google-Drive-Cred: `kOLyDv48afTu5P9q` · Google-Sheets-Cred: `6GG86fWHw536Rk36`
-- Rechnungseingang-Ordner: `15_5fYaCgnR2pUFpXs6hXJRjvu1jsnS3H` · Erledigt: `1pzIBzjefir5MvOXTRxVBEFBm-UZwtNAo`
-- Vorschläge-Sheet `Rechnungseingang_Pruefung` (Google-Sheet `12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo`)
-- Entwicklungs-Arbeitskopie: `C:\Users\patri\Documents\mein-erstes-Projekt` · Dashboard-PG via SSH-Tunnel Port 15432 (`DASHBOARD_V2_PG_URL` in `dashboard/.env.local`)
+- Entwicklungs-Arbeitskopie: `C:\Users\patri\Documents\mein-erstes-Projekt` (dashboard/) · Dashboard-PG via SSH-Tunnel Port 15432 (`DASHBOARD_V2_PG_URL` in `dashboard/.env.local`)
+- Klassifikation: `dashboard/lib/slow-mover.js` (`classifyTurnover`, Deep Module, rein/testbar) · Definitionen: `GET /api/v2/settings/definitions` + `docs/UBIQUITOUS_LANGUAGE.md`
+- Drehzahl-Recency-Quelle: `automatenlager.sales_transactions` (`settlement_at`), Drehzahl: `automatenlager.v_slot_turnover` · Drift-Guard: `dashboard/lib/db-schema.js`
+- WF1 Prod-ID (unverändert): `wnGAwHhgfXq2ATM8` (30 Nodes)

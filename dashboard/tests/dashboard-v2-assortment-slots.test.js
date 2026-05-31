@@ -213,3 +213,87 @@ test('AC-UI: v2.css defines compact assortment and indicator styles', () => {
   assert.match(css, /\.v2-indicator-chip/, 'missing indicator chip style');
   assert.match(css, /@media\s*\(max-width:\s*820px\)[\s\S]*\.v2-assortment-row/, 'missing mobile assortment row rules');
 });
+
+// ── Drehzahl-/Slow-Mover-Klassifikation (classifyTurnover im Datenpfad) ────────
+// Granularität pro Slot/Automat, quartilbasiert; Ladenhüter = 0 Verkäufe ≥30 Tage.
+
+function turnoverRow(mdb, turnover, days) {
+  return {
+    slot_assignment_id: 100 + mdb,
+    location_id: 'LOC1',
+    location_name: 'Kantine',
+    machine_id: 'VM01',
+    machine_name: 'Faltrix Mini',
+    mdb_code: mdb,
+    product_id: mdb,
+    product_name: 'Produkt ' + mdb,
+    current_machine_qty: '5',
+    target_stock: '10',
+    machine_capacity: '12',
+    qty: '0',
+    revenue_net: '0',
+    db_net: '0',
+    turnover_count: String(turnover),
+    days_since_last_sale: days == null ? null : String(days),
+    value_per_product: '0',
+    nearest_mhd_date: null,
+    mhd_risk_qty: '0',
+    warning_types: [],
+  };
+}
+
+test('AC-T1: classifyTurnover wird angewandt — turnover_class liegt im API-Result je Slot', () => {
+  const rows = [10, 20, 30, 40, 50, 60, 70, 80].map((t, i) => turnoverRow(11 + i, t, 1));
+  const { slots } = buildAssortmentSlotsData({ slots: rows }, {});
+
+  assert.equal(slots.length, 8);
+  for (const s of slots) {
+    assert.ok(['renner', 'normal', 'langsam_dreher', 'ladenhueter'].includes(s.turnover_class),
+      `Slot ${s.mdb_code} braucht eine gültige turnover_class`);
+  }
+  const byMdb = Object.fromEntries(slots.map((s) => [s.mdb_code, s.turnover_class]));
+  // Q1≈27.5, Q3≈62.5 → t>=62.5 renner (70,80); t<=27.5 langsam (10,20); Rest normal.
+  assert.equal(byMdb[18], 'renner');         // turnover 80
+  assert.equal(byMdb[17], 'renner');         // turnover 70
+  assert.equal(byMdb[11], 'langsam_dreher'); // turnover 10
+  assert.equal(byMdb[12], 'langsam_dreher'); // turnover 20
+  assert.equal(byMdb[14], 'normal');         // turnover 40
+});
+
+test('AC-T2: 0 Verkäufe seit ≥30 Tagen → ladenhueter, unabhängig von hoher Drehzahl', () => {
+  const rows = [
+    turnoverRow(11, 999, 40), // hohe Drehzahl, aber 40 Tage kein Verkauf
+    turnoverRow(12, 10, 1),
+    turnoverRow(13, 20, 1),
+    turnoverRow(14, 30, 1),
+    turnoverRow(15, 40, 1),
+  ];
+  const { slots } = buildAssortmentSlotsData({ slots: rows }, {});
+  assert.equal(slots.find((s) => s.mdb_code === 11).turnover_class, 'ladenhueter');
+});
+
+test('AC-T3: nie verkauft (days_since_last_sale NULL) → ladenhueter; daysSinceLastSale bleibt null', () => {
+  const rows = [
+    turnoverRow(11, 0, null),
+    turnoverRow(12, 10, 1),
+    turnoverRow(13, 20, 1),
+    turnoverRow(14, 30, 1),
+    turnoverRow(15, 40, 1),
+  ];
+  const { slots } = buildAssortmentSlotsData({ slots: rows }, {});
+  const s11 = slots.find((s) => s.mdb_code === 11);
+  assert.equal(s11.turnover_class, 'ladenhueter');
+  assert.equal(s11.daysSinceLastSale, null, 'null darf nicht zu 0 verfälscht werden');
+});
+
+test('AC-T4: daysSinceLastSale wird additiv ins Slot-Result übernommen', () => {
+  const { slots } = buildAssortmentSlotsData({ slots: [turnoverRow(11, 10, 5), turnoverRow(12, 20, 1)] }, {});
+  assert.equal(slots.find((s) => s.mdb_code === 11).daysSinceLastSale, 5);
+});
+
+test('AC-T5: queryAssortmentSlotsPg reichert Drehzahl-Recency additiv an (last_sale/settlement_at)', () => {
+  const src = fs.readFileSync(path.join(process.cwd(), 'lib', 'assortment-slots.js'), 'utf8');
+  assert.match(src, /days_since_last_sale/, 'Query muss days_since_last_sale liefern');
+  assert.match(src, /sales_transactions/, 'Recency stammt aus sales_transactions');
+  assert.match(src, /settlement_at/, 'MAX(settlement_at) als Recency-Quelle');
+});

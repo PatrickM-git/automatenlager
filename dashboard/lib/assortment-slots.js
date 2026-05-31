@@ -1,6 +1,7 @@
 'use strict';
 
 const { resolvePeriod, formatProductName } = require('./economics.js');
+const { classifyTurnover } = require('./slow-mover.js');
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -71,6 +72,14 @@ function matchesFilters(slot, filters) {
     && (!filters.machine || slot.machine_id === filters.machine || slot.machine_name.toLowerCase().includes(filters.machine.toLowerCase()));
 }
 
+function parseDaysSinceLastSale(value) {
+  // Wichtig: null bleibt null (= nie verkauft → Ladenhüter). toNum würde null
+  // fälschlich zu 0 ("heute verkauft") machen und die Ladenhüter-Regel kippen.
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 function parseSlotRow(row) {
   const current = toNum(row.current_machine_qty);
   const target = toNum(row.target_stock);
@@ -95,6 +104,7 @@ function parseSlotRow(row) {
     db_net: db,
     margin_pct: revenue > 0 ? round1((db / revenue) * 100) : 0,
     turnover_count: toNum(row.turnover_count),
+    daysSinceLastSale: parseDaysSinceLastSale(row.days_since_last_sale),
     value_per_product: Math.round(toNum(row.value_per_product) * 100) / 100,
     nearest_mhd_date: clean(row.nearest_mhd_date) || null,
     nearest_mhd_days: daysUntil(row.nearest_mhd_date),
@@ -117,12 +127,17 @@ function buildAssortmentSlotsData(pgRows, query = {}) {
     location: clean(query.location),
     machine: clean(query.machine),
   };
-  const slots = (pgRows.slots || [])
+  const parsed = (pgRows.slots || [])
     .map(parseSlotRow)
     .filter((slot) => matchesFilters(slot, filters))
     .sort((a, b) => a.location_name.localeCompare(b.location_name, 'de')
       || a.machine_name.localeCompare(b.machine_name, 'de')
       || a.mdb_code - b.mdb_code);
+
+  // Quartilbasierte Drehzahl-Klasse pro Slot/Automat (lib/slow-mover.js).
+  // Quartile werden über die hier gezeigte (ggf. gefilterte) Slot-Population
+  // gebildet; jeder Slot trägt danach `turnover_class`.
+  const slots = classifyTurnover(parsed);
 
   return {
     slots,
@@ -174,6 +189,16 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
             AND month <= $4::date
           GROUP BY machine_id, mdb_code
        ),
+       last_sale AS (
+         -- Letzter echter Verkauf je Slot (machine_id+mdb_code), zeitraum-unabhängig.
+         -- historic_backfill ausgeschlossen — identisch zur v_slot_turnover-Semantik.
+         SELECT st.machine_id,
+                st.mdb_code,
+                MAX(st.settlement_at) AS last_sale_at
+           FROM automatenlager.sales_transactions st
+          WHERE st.source != 'historic_backfill'
+          GROUP BY st.machine_id, st.mdb_code
+       ),
        batch_status AS (
          SELECT product_id,
                 MIN(mhd_date) FILTER (WHERE mhd_date IS NOT NULL AND status NOT IN ('depleted', 'expired')) AS nearest_mhd_date,
@@ -204,6 +229,7 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
               COALESCE(s.revenue_net, 0) AS revenue_net,
               COALESCE(s.db_net, 0) AS db_net,
               COALESCE(t.turnover_count, 0) AS turnover_count,
+              (CURRENT_DATE - (ls.last_sale_at AT TIME ZONE 'Europe/Berlin')::date) AS days_since_last_sale,
               COALESCE(iv.value_per_product, 0) AS value_per_product,
               bs.nearest_mhd_date,
               COALESCE(bs.mhd_risk_qty, 0) AS mhd_risk_qty,
@@ -219,6 +245,9 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
          LEFT JOIN turnover t
            ON t.machine_id = sa.machine_id
           AND t.mdb_code = sa.mdb_code
+         LEFT JOIN last_sale ls
+           ON ls.machine_id = sa.machine_id
+          AND ls.mdb_code = sa.mdb_code
          LEFT JOIN automatenlager.mv_inventory_value_daily iv ON iv.product_id = sa.product_id
          LEFT JOIN batch_status bs ON bs.product_id = sa.product_id
          LEFT JOIN warning_status ws

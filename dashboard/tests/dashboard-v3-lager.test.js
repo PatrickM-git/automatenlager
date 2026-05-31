@@ -155,6 +155,17 @@ test('AC-L7b: slow_mover_class is null when not present in row', () => {
   assert.equal(snickers.slow_mover_class, null);
 });
 
+test('AC-L7c: turnover_class wird durchgereicht, wenn die Zeile sie trägt', () => {
+  const rows = [{ ...RAW_ROWS[0], turnover_class: 'ladenhueter' }];
+  const { cards } = buildLagerData(rows);
+  assert.equal(cards[0].turnover_class, 'ladenhueter');
+});
+
+test('AC-L7d: turnover_class ist null, wenn nicht vorhanden', () => {
+  const { cards } = buildLagerData(RAW_ROWS);
+  assert.equal(cards.find(c => c.product_name === 'Snickers').turnover_class, null);
+});
+
 /* =========================================================================
    AC-L8: buildBarChartData – SVG-kompatible Datenstruktur
    ========================================================================= */

@@ -766,14 +766,31 @@
       });
     }
     if (route.path === '/lager') {
-      return fetchJson('/api/v2/inventory-mhd').then(function (res) {
+      /* Sortiment-Slots zusätzlich laden: liefert die quartilbasierte Drehzahl-
+         Klasse je Slot (machine_id+mdb_code). Single Source of Truth ist der
+         Sortiment-Endpunkt; hier wird sie nur per Join an die MHD-Karten geheftet.
+         Fällt der Join aus, bleiben die Karten ohne Drehzahl-Badge (graceful). */
+      return Promise.all([
+        fetchJson('/api/v2/inventory-mhd'),
+        fetchJson('/api/v2/assortment-slots').catch(function () { return {}; }),
+      ]).then(function (results) {
+        var res  = results[0];
         var rows = (res && res.data && res.data.mhdRisks) || [];
         if (rows.length === 0) { return { status: 'empty' }; }
+        var slots = (results[1] && results[1].data && results[1].data.slots) || [];
+        var classByKey = {};
+        slots.forEach(function (s) {
+          if (s && s.turnover_class) {
+            classByKey[String(s.machine_id) + '|' + String(s.mdb_code)] = s.turnover_class;
+          }
+        });
         /* Client-side: build lager data (same logic as lib/lager.js, no server round-trip) */
         var cards = rows.map(function (r) {
           var s = String(r.severity || r.warning_severity || '').toLowerCase();
           var sev = (s === 'critical' || s === 'error') ? 'critical' :
                     (s === 'warning'  || s === 'warn')  ? 'warning'  : 'info';
+          var tkey = String(r.machine_id || '') + '|' + String(r.mdb_code || '');
+          var tclass = classByKey[tkey] || (r.turnover_class != null ? String(r.turnover_class) : null);
           return {
             batch_id:        Number(r.batch_id)      || 0,
             product_id:      Number(r.product_id)    || 0,
@@ -786,6 +803,7 @@
             location_name:   String(r.location_name  || ''),
             mdb_code:        String(r.mdb_code       || ''),
             slow_mover_class: r.slow_mover_class != null ? String(r.slow_mover_class) : null,
+            turnover_class:  tclass,
           };
         });
         _lagerAllCards = cards;
@@ -886,12 +904,39 @@
     return { days: days, pct: pct, label: label };
   }
 
+  /* Drehzahl-/Slow-Mover-Klassen (Quelle: lib/slow-mover.js → SLOW_MOVER).
+     Reihenfolge = Filter-Reihenfolge. „normal" bleibt ohne Badge (Grundzustand),
+     ist aber filterbar. */
+  var TURNOVER_CLASSES = [
+    { key: 'renner',         label: 'Renner',         short: 'Renner'   },
+    { key: 'normal',         label: 'Normal',         short: 'Normal'   },
+    { key: 'langsam_dreher', label: 'Langsam-Dreher', short: 'Langsam'  },
+    { key: 'ladenhueter',    label: 'Ladenhüter',     short: 'Ladenh.'  },
+  ];
+  var TURNOVER_LABEL = {};
+  var TURNOVER_SHORT = {};
+  TURNOVER_CLASSES.forEach(function (c) { TURNOVER_LABEL[c.key] = c.label; TURNOVER_SHORT[c.key] = c.short; });
+
+  /* Klassen-Badge (v3-badge--turnover-<key>). „normal"/leer → kein Badge.
+     compact=true nutzt das Kurzlabel (für enge Slot-Zellen). */
+  function turnoverBadge(key, compact) {
+    if (!key || key === 'normal') { return ''; }
+    var label = TURNOVER_LABEL[key] || key;
+    var text  = compact ? (TURNOVER_SHORT[key] || label) : label;
+    var extra = compact ? ' v3-slot__turnover' : '';
+    return '<span class="v3-badge v3-badge--turnover v3-badge--turnover-' + esc(key) + extra + '"' +
+      ' title="Drehzahl: ' + esc(label) + '">' + esc(text) + '</span>';
+  }
+
   function renderLagerCard(card) {
     var sev   = card.severity || 'info';
     var mod   = sev === 'critical' ? ' v3-lager-card--crit' : sev === 'warning' ? ' v3-lager-card--warn' : ' v3-lager-card--info';
     var bMod  = sev === 'critical' ? 'v3-badge--crit' : sev === 'warning' ? 'v3-badge--warn' : 'v3-badge--info';
     var bTxt  = sev === 'critical' ? 'Kritisch' : sev === 'warning' ? 'Warnung' : 'OK';
-    var slow  = card.slow_mover_class ? '<span class="v3-badge v3-badge--slow-mover">Slow-Mover</span>' : '';
+    // Drehzahl-Klasse als Badge (renner/langsam_dreher/ladenhueter). Fällt auf das
+    // alte slow_mover_class-Feld zurück, falls turnover_class (noch) fehlt.
+    var turnoverKey = card.turnover_class || (card.slow_mover_class ? 'langsam_dreher' : null);
+    var slow  = turnoverBadge(turnoverKey, false);
     var vMod  = sev === 'critical' ? ' v3-lager-card__stat-value--crit' : sev === 'warning' ? ' v3-lager-card__stat-value--warn' : '';
     var urg   = card.mhd_date ? mhdUrgency(card.mhd_date) : { pct: 0, label: '—' };
     var expiryBar = card.mhd_date
@@ -995,12 +1040,21 @@
       }).map(function (id) {
         return '<option value="' + esc(id) + '">' + esc(products[id]) + '</option>';
       }).join('');
+    var turnoverChips = TURNOVER_CLASSES.map(function (c) {
+      return '<button class="v3-chip v3-chip--turnover-' + esc(c.key) + '" data-lager-turnover="' + esc(c.key) + '"' +
+        ' aria-pressed="false">' + esc(c.label) + '</button>';
+    }).join('');
     return '<div class="v3-lager-bar" role="search" aria-label="Bestand filtern">' +
       '<div class="v3-lager-bar__group">' +
         '<span class="v3-lager-bar__label">Dringlichkeit</span>' +
         '<button class="v3-chip v3-chip--active" data-lager-sev="" aria-pressed="true">Alle</button>' +
         '<button class="v3-chip v3-chip--crit" data-lager-sev="critical" aria-pressed="false">Kritisch</button>' +
         '<button class="v3-chip v3-chip--warn" data-lager-sev="warning" aria-pressed="false">Warnung</button>' +
+      '</div>' +
+      '<div class="v3-lager-bar__group">' +
+        '<span class="v3-lager-bar__label">Drehzahl</span>' +
+        '<button class="v3-chip v3-chip--active" data-lager-turnover="" aria-pressed="true">Alle</button>' +
+        turnoverChips +
       '</div>' +
       '<div class="v3-lager-bar__group">' +
         '<span class="v3-lager-bar__label">Automat</span>' +
@@ -1042,17 +1096,19 @@
     var grid    = viewEl.querySelector('[data-lager-grid]');
     var chart   = viewEl.querySelector('[data-lager-chart]');
     var sevBtns = viewEl.querySelectorAll('[data-lager-sev]');
+    var turnBtns = viewEl.querySelectorAll('[data-lager-turnover]');
     var machSel = viewEl.querySelector('[data-lager-machine]');
     var prodSel = viewEl.querySelector('[data-lager-product]');
     if (!grid) { return; }
 
-    var filters = { severity: null, machine_id: null, product_id: null };
+    var filters = { severity: null, machine_id: null, product_id: null, turnover_class: null };
 
     function applyFilter() {
       var filtered = _lagerAllCards.filter(function (c) {
         if (filters.severity   && c.severity   !== filters.severity)              return false;
         if (filters.machine_id && c.machine_id !== filters.machine_id)             return false;
         if (filters.product_id && c.product_id !== Number(filters.product_id))     return false;
+        if (filters.turnover_class && c.turnover_class !== filters.turnover_class) return false;
         return true;
       });
       var critF = filtered.filter(function (c) { return c.severity === 'critical'; }).length;
@@ -1086,6 +1142,18 @@
         var sev = btn.getAttribute('data-lager-sev') || null;
         filters.severity = sev || null;
         sevBtns.forEach(function (b) {
+          var active = b === btn;
+          b.setAttribute('aria-pressed', active ? 'true' : 'false');
+          if (active) { b.classList.add('v3-chip--active'); }
+          else { b.classList.remove('v3-chip--active'); }
+        });
+        applyFilter();
+      });
+    });
+    turnBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        filters.turnover_class = btn.getAttribute('data-lager-turnover') || null;
+        turnBtns.forEach(function (b) {
           var active = b === btn;
           b.setAttribute('aria-pressed', active ? 'true' : 'false');
           if (active) { b.classList.add('v3-chip--active'); }
@@ -1567,13 +1635,16 @@
         ' data-slot-said="' + esc(slot.slot_assignment_id || 0) + '"' +
         ' data-slot-qty="' + esc(curQty) + '"' +
         ' data-slot-cap="' + esc(cap) + '"' +
+        ' data-slot-turnover="' + esc(occupied ? (slot.turnover_class || '') : '') + '"' +
         (canEdit ? '' : ' disabled') +
-        ' aria-label="Slot ' + esc(slot.mdb_code) + ' – ' + product + (occupied ? ' (' + esc(curQty) + (cap ? '/' + esc(cap) : '') + ')' : '') + '">' +
+        ' aria-label="Slot ' + esc(slot.mdb_code) + ' – ' + product + (occupied ? ' (' + esc(curQty) + (cap ? '/' + esc(cap) : '') + ')' : '') +
+          (occupied && slot.turnover_class && TURNOVER_LABEL[slot.turnover_class] ? ' · Drehzahl: ' + esc(TURNOVER_LABEL[slot.turnover_class]) : '') + '">' +
         '<span class="v3-slot__code">' + esc(slot.mdb_code) + '</span>' +
         '<span class="v3-slot__product">' + product + '</span>' +
         (occupied
           ? '<span class="v3-slot__meta">' + esc(curQty) + (cap ? ' / ' + esc(cap) : '') + ' Stk.</span>'
           : '') +
+        (occupied ? turnoverBadge(slot.turnover_class, true) : '') +
         (fillPct != null
           ? '<span class="v3-slot__fill"><span class="v3-slot__fillbar" style="width:' + Math.max(0, Math.min(100, fillPct)) + '%"></span></span>'
           : '') +
@@ -1650,8 +1721,22 @@
           '<p class="v3-slots-hint">Das Bestücken der Slots ist Admins vorbehalten. Die Etagen-Übersicht ist hier nur zur Ansicht.</p>' +
         '</aside>';
 
+    /* Drehzahl-Filter (User Story 37): hebt Slots einer Klasse hervor, dimmt den
+       Rest. Wirkt per data-turnover-filter auf [data-slots-stagewrap] (CSS),
+       übersteht den Stage-Neuaufbau beim Automatenwechsel ohne erneutes Binden. */
+    var turnoverFilter = '' +
+      '<div class="v3-slots-filter" role="group" aria-label="Nach Drehzahl-Klasse filtern">' +
+        '<span class="v3-slots-filter__label">Drehzahl</span>' +
+        '<button type="button" class="v3-chip v3-chip--active" data-slots-turnover="" aria-pressed="true">Alle</button>' +
+        TURNOVER_CLASSES.map(function (c) {
+          return '<button type="button" class="v3-chip v3-chip--turnover-' + esc(c.key) + '"' +
+            ' data-slots-turnover="' + esc(c.key) + '" aria-pressed="false">' + esc(c.label) + '</button>';
+        }).join('') +
+      '</div>';
+
     return '' +
       machineChips +
+      turnoverFilter +
       '<div class="v3-slots-layout" data-slots-root>' +
         '<div class="v3-slots-stagewrap" data-slots-stagewrap>' +
           (machines.length ? renderMachineStage(machines[0], canEdit) : '') +
@@ -2272,6 +2357,24 @@
     };
     var root = viewEl.querySelector('[data-slots-root]');
     if (!root) { return; }
+
+    // Drehzahl-Filter: setzt das data-turnover-filter-Attribut auf den (beim
+    // Automatenwechsel bestehenbleibenden) Stage-Wrapper; CSS dimmt Nicht-Treffer.
+    var stagewrapEl = viewEl.querySelector('[data-slots-stagewrap]');
+    viewEl.querySelectorAll('[data-slots-turnover]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var key = btn.getAttribute('data-slots-turnover') || '';
+        if (stagewrapEl) {
+          if (key) { stagewrapEl.setAttribute('data-turnover-filter', key); }
+          else { stagewrapEl.removeAttribute('data-turnover-filter'); }
+        }
+        viewEl.querySelectorAll('[data-slots-turnover]').forEach(function (b) {
+          var active = b === btn;
+          b.classList.toggle('v3-chip--active', active);
+          b.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+      });
+    });
 
     // Maschinenwahl
     viewEl.querySelectorAll('[data-slots-machine]').forEach(function (btn) {
