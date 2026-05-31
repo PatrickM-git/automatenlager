@@ -117,6 +117,7 @@ Read-Only guest access:
 - Before changing a production workflow, decide whether the local JSON export or the live n8n workflow is authoritative.
 - Test workflow changes in n8n before replacing active production versions.
 - WF8 must not use Google Sheets `appendOrUpdate` with multiple matching columns. Use append + Existing-Key-Skip, or a future single technical key such as `guv_key`.
+- **Encoding: keep workflow JSON UTF-8, never round-trip through Latin-1.** A Latin-1/UTF-8 mismatch during an earlier import/export irreversibly replaced every German umlaut with `U+FFFD` (bytes `0xEFBFBD`) in WF4/5/7/9 — in node names **and** `jsCode`. Most damaging: WF4's `normalize()` regexes had become `.replace(/�/g, 'ae')` and matched the replacement char instead of real umlauts, so the umlaut was stripped by the final `[^a-z0-9]` filter (`"Müller"` → `"mller"`) and product matching silently broke. Prevention: read/write exports as UTF-8 (use node `https`, not tools that may re-encode); after any export grep for `U+FFFD`; the regression guard `dashboard/tests/encoding-umlaut-fix.test.js` fails if any `WF*.json` reintroduces it or if `normalize()` stops mapping umlauts.
 
 ## Handover Convention
 

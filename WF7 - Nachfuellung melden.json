@@ -150,7 +150,7 @@
                                        0
                                    ],
                       "parameters":  {
-                                         "jsCode":  "\n// WF6 Nachf�llung: Verarbeite Webhook-Parameter und bereite Updates vor.\n// Input: Query-Parameter aus dem Webhook (product_key, qty, notes)\nconst wh = $(\u0027Webhook\u0027).first()?.json?.query || {};\nconst productKey = String(wh.product_key || \u0027\u0027).trim();\nconst notesIn    = String(wh.notes || \u0027\u0027).trim();\nconst qtyIn      = wh.qty !== undefined ? Number(wh.qty) : null;\n\nif (!productKey) {\n  throw new Error(\u0027Fehlender Parameter: product_key ist Pflicht.\u0027);\n}\n\nfunction clean(v) { return String(v ?? \u0027\u0027).replace(/\\n/g, \u0027 \u0027).replace(/\\s+/g, \u0027 \u0027).trim(); }\nfunction isActive(v) {\n  return [\u0027TRUE\u0027,\u00271\u0027,\u0027JA\u0027,\u0027YES\u0027,\u0027AKTIV\u0027,\u0027ACTIVE\u0027].includes(clean(v).toUpperCase());\n}\nfunction num(v) {\n  const n = Number(String(v ?? \u0027\u0027).replace(\u0027,\u0027, \u0027.\u0027));\n  return Number.isFinite(n) ? n : null;\n}\n\n// Produkte-Zeilen f�r diesen product_key\nconst allProdukte   = $(\u0027Google Sheets - Produkte lesen\u0027).all().map(i =\u003e i.json);\nconst allHinweise   = $(\u0027Google Sheets - Hinweise lesen\u0027).all().map(i =\u003e i.json);\nconst matchedSlots  = allProdukte.filter(p =\u003e\n  clean(p.product_key) === productKey \u0026\u0026 isActive(p.active)\n);\n\nif (!matchedSlots.length) {\n  throw new Error(\u0027Kein aktiver Slot f�r product_key: \u0027 + productKey);\n}\n\nconst now = new Date().toISOString();\nconst productName = clean(\n  matchedSlots[0].internal_product_name ||\n  matchedSlots[0].nayax_product_name ||\n  productKey\n);\n\n// Slot-Updates bauen\nconst slotUpdates = matchedSlots.map(p =\u003e {\n  const capacity = num(p.machine_capacity) || 0;\n  const newQty = qtyIn !== null ? Math.min(qtyIn, capacity) : capacity;\n  return {\n    product_slot_id: clean(p.product_slot_id),\n    current_machine_qty: newQty,\n    last_stock_update_source: \u0027WF6_NACHFUELLUNG\u0027,\n    last_stock_update_at: now\n  };\n});\n\n// Hinweise die aufgel�st werden sollen\nconst resolvableTypes = [\u0027EMPTY_BATCH\u0027, \u0027LOW_STOCK\u0027, \u0027INSUFFICIENT_BATCH_STOCK\u0027, \u0027LOW_BATCH\u0027];\nconst toResolve = allHinweise.filter(h =\u003e {\n  const resolved = clean(h.resolved).toUpperCase();\n  if ([\u0027TRUE\u0027,\u0027JA\u0027,\u0027YES\u0027,\u00271\u0027,\u0027ERLEDIGT\u0027,\u0027RESOLVED\u0027].includes(resolved)) return false;\n  return clean(h.product_key) === productKey \u0026\u0026 resolvableTypes.includes(clean(h.type));\n}).map(h =\u003e ({ created_at: clean(h.created_at), resolved: \u0027TRUE\u0027 }));\n\n// Audit-Eintrag\nconst auditEntry = {\n  created_at: now,\n  type: \u0027NACHFUELLUNG\u0027,\n  severity: \u0027info\u0027,\n  machine_id: clean(matchedSlots[0].machine_id || \u0027457107528\u0027),\n  product_key: productKey,\n  nayax_product_name: productName,\n  message: \u0027Nachf�llung erfasst f�r \u0027 + productName +\n           \u0027. Slots aktualisiert: \u0027 + slotUpdates.map(s =\u003e s.product_slot_id + \u0027=\u0027 + s.current_machine_qty).join(\u0027, \u0027) +\n           (notesIn ? \u0027. Bemerkung: \u0027 + notesIn : \u0027\u0027),\n  resolved: \u0027TRUE\u0027\n};\n\nreturn [{\n  json: {\n    ok: true,\n    productKey,\n    productName,\n    slotUpdates,\n    toResolve,\n    auditEntry,\n    summary: {\n      slots_updated: slotUpdates.length,\n      hints_resolved: toResolve.length\n    }\n  }\n}];\n"
+                                         "jsCode":  "\n// WF6 Nachfüllung: Verarbeite Webhook-Parameter und bereite Updates vor.\n// Input: Query-Parameter aus dem Webhook (product_key, qty, notes)\nconst wh = $(\u0027Webhook\u0027).first()?.json?.query || {};\nconst productKey = String(wh.product_key || \u0027\u0027).trim();\nconst notesIn    = String(wh.notes || \u0027\u0027).trim();\nconst qtyIn      = wh.qty !== undefined ? Number(wh.qty) : null;\n\nif (!productKey) {\n  throw new Error(\u0027Fehlender Parameter: product_key ist Pflicht.\u0027);\n}\n\nfunction clean(v) { return String(v ?? \u0027\u0027).replace(/\\n/g, \u0027 \u0027).replace(/\\s+/g, \u0027 \u0027).trim(); }\nfunction isActive(v) {\n  return [\u0027TRUE\u0027,\u00271\u0027,\u0027JA\u0027,\u0027YES\u0027,\u0027AKTIV\u0027,\u0027ACTIVE\u0027].includes(clean(v).toUpperCase());\n}\nfunction num(v) {\n  const n = Number(String(v ?? \u0027\u0027).replace(\u0027,\u0027, \u0027.\u0027));\n  return Number.isFinite(n) ? n : null;\n}\n\n// Produkte-Zeilen für diesen product_key\nconst allProdukte   = $(\u0027Google Sheets - Produkte lesen\u0027).all().map(i =\u003e i.json);\nconst allHinweise   = $(\u0027Google Sheets - Hinweise lesen\u0027).all().map(i =\u003e i.json);\nconst matchedSlots  = allProdukte.filter(p =\u003e\n  clean(p.product_key) === productKey \u0026\u0026 isActive(p.active)\n);\n\nif (!matchedSlots.length) {\n  throw new Error(\u0027Kein aktiver Slot für product_key: \u0027 + productKey);\n}\n\nconst now = new Date().toISOString();\nconst productName = clean(\n  matchedSlots[0].internal_product_name ||\n  matchedSlots[0].nayax_product_name ||\n  productKey\n);\n\n// Slot-Updates bauen\nconst slotUpdates = matchedSlots.map(p =\u003e {\n  const capacity = num(p.machine_capacity) || 0;\n  const newQty = qtyIn !== null ? Math.min(qtyIn, capacity) : capacity;\n  return {\n    product_slot_id: clean(p.product_slot_id),\n    current_machine_qty: newQty,\n    last_stock_update_source: \u0027WF6_NACHFUELLUNG\u0027,\n    last_stock_update_at: now\n  };\n});\n\n// Hinweise die aufgelöst werden sollen\nconst resolvableTypes = [\u0027EMPTY_BATCH\u0027, \u0027LOW_STOCK\u0027, \u0027INSUFFICIENT_BATCH_STOCK\u0027, \u0027LOW_BATCH\u0027];\nconst toResolve = allHinweise.filter(h =\u003e {\n  const resolved = clean(h.resolved).toUpperCase();\n  if ([\u0027TRUE\u0027,\u0027JA\u0027,\u0027YES\u0027,\u00271\u0027,\u0027ERLEDIGT\u0027,\u0027RESOLVED\u0027].includes(resolved)) return false;\n  return clean(h.product_key) === productKey \u0026\u0026 resolvableTypes.includes(clean(h.type));\n}).map(h =\u003e ({ created_at: clean(h.created_at), resolved: \u0027TRUE\u0027 }));\n\n// Audit-Eintrag\nconst auditEntry = {\n  created_at: now,\n  type: \u0027NACHFUELLUNG\u0027,\n  severity: \u0027info\u0027,\n  machine_id: clean(matchedSlots[0].machine_id || \u0027457107528\u0027),\n  product_key: productKey,\n  nayax_product_name: productName,\n  message: \u0027Nachfüllung erfasst für \u0027 + productName +\n           \u0027. Slots aktualisiert: \u0027 + slotUpdates.map(s =\u003e s.product_slot_id + \u0027=\u0027 + s.current_machine_qty).join(\u0027, \u0027) +\n           (notesIn ? \u0027. Bemerkung: \u0027 + notesIn : \u0027\u0027),\n  resolved: \u0027TRUE\u0027\n};\n\nreturn [{\n  json: {\n    ok: true,\n    productKey,\n    productName,\n    slotUpdates,\n    toResolve,\n    auditEntry,\n    summary: {\n      slots_updated: slotUpdates.length,\n      hints_resolved: toResolve.length\n    }\n  }\n}];\n"
                                      }
                   },
                   {
@@ -168,7 +168,7 @@
                   },
                   {
                       "id":  "6b40bc27-d78a-4201-b719-5aace1b5cbaf",
-                      "name":  "Extract - Hinweise aufl�sen",
+                      "name":  "Extract - Hinweise auflösen",
                       "type":  "n8n-nodes-base.code",
                       "typeVersion":  2,
                       "position":  [
@@ -276,7 +276,7 @@
                   },
                   {
                       "id":  "86e7954b-bfc4-43cc-8587-0e064049b3f1",
-                      "name":  "Google Sheets - Hinweise aufl�sen",
+                      "name":  "Google Sheets - Hinweise auflösen",
                       "type":  "n8n-nodes-base.googleSheets",
                       "typeVersion":  4.5,
                       "position":  [
@@ -338,7 +338,7 @@
                   },
                   {
                       "id":  "0f08710d-6f4d-495c-a775-b9cd5f316579",
-                      "name":  "Google Sheets - Audit anh�ngen",
+                      "name":  "Google Sheets - Audit anhängen",
                       "type":  "n8n-nodes-base.googleSheets",
                       "typeVersion":  4.5,
                       "position":  [
@@ -544,7 +544,7 @@
                                                                                      "index":  0
                                                                                  },
                                                                                  {
-                                                                                     "node":  "Extract - Hinweise aufl�sen",
+                                                                                     "node":  "Extract - Hinweise auflösen",
                                                                                      "type":  "main",
                                                                                      "index":  0
                                                                                  },
@@ -572,11 +572,11 @@
                                                                     ]
                                                                 ]
                                                    },
-                        "Extract - Hinweise aufl�sen":  {
+                        "Extract - Hinweise auflösen":  {
                                                             "main":  [
                                                                          [
                                                                              {
-                                                                                 "node":  "Google Sheets - Hinweise aufl�sen",
+                                                                                 "node":  "Google Sheets - Hinweise auflösen",
                                                                                  "type":  "main",
                                                                                  "index":  0
                                                                              }
@@ -587,7 +587,7 @@
                                                 "main":  [
                                                              [
                                                                  {
-                                                                     "node":  "Google Sheets - Audit anh�ngen",
+                                                                     "node":  "Google Sheets - Audit anhängen",
                                                                      "type":  "main",
                                                                      "index":  0
                                                                  }
@@ -820,7 +820,7 @@
                                                              0
                                                          ],
                                             "parameters":  {
-                                                               "jsCode":  "\n// WF6 Nachf�llung: Verarbeite Webhook-Parameter und bereite Updates vor.\n// Input: Query-Parameter aus dem Webhook (product_key, qty, notes)\nconst wh = $(\u0027Webhook\u0027).first()?.json?.query || {};\nconst productKey = String(wh.product_key || \u0027\u0027).trim();\nconst notesIn    = String(wh.notes || \u0027\u0027).trim();\nconst qtyIn      = wh.qty !== undefined ? Number(wh.qty) : null;\n\nif (!productKey) {\n  throw new Error(\u0027Fehlender Parameter: product_key ist Pflicht.\u0027);\n}\n\nfunction clean(v) { return String(v ?? \u0027\u0027).replace(/\\n/g, \u0027 \u0027).replace(/\\s+/g, \u0027 \u0027).trim(); }\nfunction isActive(v) {\n  return [\u0027TRUE\u0027,\u00271\u0027,\u0027JA\u0027,\u0027YES\u0027,\u0027AKTIV\u0027,\u0027ACTIVE\u0027].includes(clean(v).toUpperCase());\n}\nfunction num(v) {\n  const n = Number(String(v ?? \u0027\u0027).replace(\u0027,\u0027, \u0027.\u0027));\n  return Number.isFinite(n) ? n : null;\n}\n\n// Produkte-Zeilen f�r diesen product_key\nconst allProdukte   = $(\u0027Google Sheets - Produkte lesen\u0027).all().map(i =\u003e i.json);\nconst allHinweise   = $(\u0027Google Sheets - Hinweise lesen\u0027).all().map(i =\u003e i.json);\nconst matchedSlots  = allProdukte.filter(p =\u003e\n  clean(p.product_key) === productKey \u0026\u0026 isActive(p.active)\n);\n\nif (!matchedSlots.length) {\n  throw new Error(\u0027Kein aktiver Slot f�r product_key: \u0027 + productKey);\n}\n\nconst now = new Date().toISOString();\nconst productName = clean(\n  matchedSlots[0].internal_product_name ||\n  matchedSlots[0].nayax_product_name ||\n  productKey\n);\n\n// Slot-Updates bauen\nconst slotUpdates = matchedSlots.map(p =\u003e {\n  const capacity = num(p.machine_capacity) || 0;\n  const newQty = qtyIn !== null ? Math.min(qtyIn, capacity) : capacity;\n  return {\n    product_slot_id: clean(p.product_slot_id),\n    current_machine_qty: newQty,\n    last_stock_update_source: \u0027WF6_NACHFUELLUNG\u0027,\n    last_stock_update_at: now\n  };\n});\n\n// Hinweise die aufgel�st werden sollen\nconst resolvableTypes = [\u0027EMPTY_BATCH\u0027, \u0027LOW_STOCK\u0027, \u0027INSUFFICIENT_BATCH_STOCK\u0027, \u0027LOW_BATCH\u0027];\nconst toResolve = allHinweise.filter(h =\u003e {\n  const resolved = clean(h.resolved).toUpperCase();\n  if ([\u0027TRUE\u0027,\u0027JA\u0027,\u0027YES\u0027,\u00271\u0027,\u0027ERLEDIGT\u0027,\u0027RESOLVED\u0027].includes(resolved)) return false;\n  return clean(h.product_key) === productKey \u0026\u0026 resolvableTypes.includes(clean(h.type));\n}).map(h =\u003e ({ created_at: clean(h.created_at), resolved: \u0027TRUE\u0027 }));\n\n// Audit-Eintrag\nconst auditEntry = {\n  created_at: now,\n  type: \u0027NACHFUELLUNG\u0027,\n  severity: \u0027info\u0027,\n  machine_id: clean(matchedSlots[0].machine_id || \u0027457107528\u0027),\n  product_key: productKey,\n  nayax_product_name: productName,\n  message: \u0027Nachf�llung erfasst f�r \u0027 + productName +\n           \u0027. Slots aktualisiert: \u0027 + slotUpdates.map(s =\u003e s.product_slot_id + \u0027=\u0027 + s.current_machine_qty).join(\u0027, \u0027) +\n           (notesIn ? \u0027. Bemerkung: \u0027 + notesIn : \u0027\u0027),\n  resolved: \u0027TRUE\u0027\n};\n\nreturn [{\n  json: {\n    ok: true,\n    productKey,\n    productName,\n    slotUpdates,\n    toResolve,\n    auditEntry,\n    summary: {\n      slots_updated: slotUpdates.length,\n      hints_resolved: toResolve.length\n    }\n  }\n}];\n"
+                                                               "jsCode":  "\n// WF6 Nachfüllung: Verarbeite Webhook-Parameter und bereite Updates vor.\n// Input: Query-Parameter aus dem Webhook (product_key, qty, notes)\nconst wh = $(\u0027Webhook\u0027).first()?.json?.query || {};\nconst productKey = String(wh.product_key || \u0027\u0027).trim();\nconst notesIn    = String(wh.notes || \u0027\u0027).trim();\nconst qtyIn      = wh.qty !== undefined ? Number(wh.qty) : null;\n\nif (!productKey) {\n  throw new Error(\u0027Fehlender Parameter: product_key ist Pflicht.\u0027);\n}\n\nfunction clean(v) { return String(v ?? \u0027\u0027).replace(/\\n/g, \u0027 \u0027).replace(/\\s+/g, \u0027 \u0027).trim(); }\nfunction isActive(v) {\n  return [\u0027TRUE\u0027,\u00271\u0027,\u0027JA\u0027,\u0027YES\u0027,\u0027AKTIV\u0027,\u0027ACTIVE\u0027].includes(clean(v).toUpperCase());\n}\nfunction num(v) {\n  const n = Number(String(v ?? \u0027\u0027).replace(\u0027,\u0027, \u0027.\u0027));\n  return Number.isFinite(n) ? n : null;\n}\n\n// Produkte-Zeilen für diesen product_key\nconst allProdukte   = $(\u0027Google Sheets - Produkte lesen\u0027).all().map(i =\u003e i.json);\nconst allHinweise   = $(\u0027Google Sheets - Hinweise lesen\u0027).all().map(i =\u003e i.json);\nconst matchedSlots  = allProdukte.filter(p =\u003e\n  clean(p.product_key) === productKey \u0026\u0026 isActive(p.active)\n);\n\nif (!matchedSlots.length) {\n  throw new Error(\u0027Kein aktiver Slot für product_key: \u0027 + productKey);\n}\n\nconst now = new Date().toISOString();\nconst productName = clean(\n  matchedSlots[0].internal_product_name ||\n  matchedSlots[0].nayax_product_name ||\n  productKey\n);\n\n// Slot-Updates bauen\nconst slotUpdates = matchedSlots.map(p =\u003e {\n  const capacity = num(p.machine_capacity) || 0;\n  const newQty = qtyIn !== null ? Math.min(qtyIn, capacity) : capacity;\n  return {\n    product_slot_id: clean(p.product_slot_id),\n    current_machine_qty: newQty,\n    last_stock_update_source: \u0027WF6_NACHFUELLUNG\u0027,\n    last_stock_update_at: now\n  };\n});\n\n// Hinweise die aufgelöst werden sollen\nconst resolvableTypes = [\u0027EMPTY_BATCH\u0027, \u0027LOW_STOCK\u0027, \u0027INSUFFICIENT_BATCH_STOCK\u0027, \u0027LOW_BATCH\u0027];\nconst toResolve = allHinweise.filter(h =\u003e {\n  const resolved = clean(h.resolved).toUpperCase();\n  if ([\u0027TRUE\u0027,\u0027JA\u0027,\u0027YES\u0027,\u00271\u0027,\u0027ERLEDIGT\u0027,\u0027RESOLVED\u0027].includes(resolved)) return false;\n  return clean(h.product_key) === productKey \u0026\u0026 resolvableTypes.includes(clean(h.type));\n}).map(h =\u003e ({ created_at: clean(h.created_at), resolved: \u0027TRUE\u0027 }));\n\n// Audit-Eintrag\nconst auditEntry = {\n  created_at: now,\n  type: \u0027NACHFUELLUNG\u0027,\n  severity: \u0027info\u0027,\n  machine_id: clean(matchedSlots[0].machine_id || \u0027457107528\u0027),\n  product_key: productKey,\n  nayax_product_name: productName,\n  message: \u0027Nachfüllung erfasst für \u0027 + productName +\n           \u0027. Slots aktualisiert: \u0027 + slotUpdates.map(s =\u003e s.product_slot_id + \u0027=\u0027 + s.current_machine_qty).join(\u0027, \u0027) +\n           (notesIn ? \u0027. Bemerkung: \u0027 + notesIn : \u0027\u0027),\n  resolved: \u0027TRUE\u0027\n};\n\nreturn [{\n  json: {\n    ok: true,\n    productKey,\n    productName,\n    slotUpdates,\n    toResolve,\n    auditEntry,\n    summary: {\n      slots_updated: slotUpdates.length,\n      hints_resolved: toResolve.length\n    }\n  }\n}];\n"
                                                            }
                                         },
                                         {
@@ -838,7 +838,7 @@
                                         },
                                         {
                                             "id":  "6b40bc27-d78a-4201-b719-5aace1b5cbaf",
-                                            "name":  "Extract - Hinweise aufl�sen",
+                                            "name":  "Extract - Hinweise auflösen",
                                             "type":  "n8n-nodes-base.code",
                                             "typeVersion":  2,
                                             "position":  [
@@ -946,7 +946,7 @@
                                         },
                                         {
                                             "id":  "86e7954b-bfc4-43cc-8587-0e064049b3f1",
-                                            "name":  "Google Sheets - Hinweise aufl�sen",
+                                            "name":  "Google Sheets - Hinweise auflösen",
                                             "type":  "n8n-nodes-base.googleSheets",
                                             "typeVersion":  4.5,
                                             "position":  [
@@ -1008,7 +1008,7 @@
                                         },
                                         {
                                             "id":  "0f08710d-6f4d-495c-a775-b9cd5f316579",
-                                            "name":  "Google Sheets - Audit anh�ngen",
+                                            "name":  "Google Sheets - Audit anhängen",
                                             "type":  "n8n-nodes-base.googleSheets",
                                             "typeVersion":  4.5,
                                             "position":  [
@@ -1214,7 +1214,7 @@
                                                                                                            "index":  0
                                                                                                        },
                                                                                                        {
-                                                                                                           "node":  "Extract - Hinweise aufl�sen",
+                                                                                                           "node":  "Extract - Hinweise auflösen",
                                                                                                            "type":  "main",
                                                                                                            "index":  0
                                                                                                        },
@@ -1242,11 +1242,11 @@
                                                                                           ]
                                                                                       ]
                                                                          },
-                                              "Extract - Hinweise aufl�sen":  {
+                                              "Extract - Hinweise auflösen":  {
                                                                                   "main":  [
                                                                                                [
                                                                                                    {
-                                                                                                       "node":  "Google Sheets - Hinweise aufl�sen",
+                                                                                                       "node":  "Google Sheets - Hinweise auflösen",
                                                                                                        "type":  "main",
                                                                                                        "index":  0
                                                                                                    }
@@ -1257,7 +1257,7 @@
                                                                       "main":  [
                                                                                    [
                                                                                        {
-                                                                                           "node":  "Google Sheets - Audit anh�ngen",
+                                                                                           "node":  "Google Sheets - Audit anhängen",
                                                                                            "type":  "main",
                                                                                            "index":  0
                                                                                        }
