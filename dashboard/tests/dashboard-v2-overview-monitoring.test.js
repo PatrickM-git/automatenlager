@@ -290,3 +290,35 @@ test('AC-WD7: v2.css defines warning drill-down styles', () => {
   assert.match(css, /\.v2-warn-trigger/, 'missing .v2-warn-trigger');
   assert.match(css, /\.v2-warn-correction-link/, 'missing .v2-warn-correction-link');
 });
+
+// ── #2: Cockpit-KPIs — „nur leere" Slots + BACKUP_OK aus Warnungs-Zähler ──
+
+test('AC-CK2-1: low-stock priority is relabelled to empty slots ("leer"), not "unter Zielbestand"', () => {
+  const overview = buildOverviewData(RAW_DATA);
+  const lowStock = overview.priorities.find((p) => p.id === 'low-stock');
+
+  assert.ok(lowStock, 'low-stock priority must exist when lowStockCount > 0');
+  assert.equal(lowStock.title, 'Leere Slots');
+  assert.match(lowStock.message, /leer/);
+  assert.doesNotMatch(lowStock.message, /unter Zielbestand/);
+});
+
+test('AC-CK2-2: low-stock count query counts empty slots (= 0), matching the detail page, not "< target_stock"', () => {
+  const src = fs.readFileSync(path.join(process.cwd(), 'lib', 'overview-monitoring.js'), 'utf8');
+
+  assert.match(src, /current_machine_qty\s*=\s*0/, 'cockpit low-stock query must count empty slots (= 0)');
+  assert.doesNotMatch(src, /current_machine_qty\s*<\s*target_stock/, 'cockpit must no longer count slots merely under target');
+});
+
+test('AC-CK2-3: open-warnings COUNT query excludes BACKUP_OK (success message), consistent with the warnings list', () => {
+  const src = fs.readFileSync(path.join(process.cwd(), 'lib', 'overview-monitoring.js'), 'utf8');
+  const backupOkFilters = src.match(/!=\s*'BACKUP_OK'/g) || [];
+
+  // One filter already lives in the warnings-list query; the COUNT query must add a second.
+  assert.ok(backupOkFilters.length >= 2, `expected BACKUP_OK to be excluded in both count and list queries, found ${backupOkFilters.length}`);
+});
+
+test('AC-CK2-4: cockpit.js KPI label for low-stock reflects empty slots', () => {
+  const src = fs.readFileSync(path.join(process.cwd(), 'lib', 'cockpit.js'), 'utf8');
+  assert.match(src, /'low-stock'[\s\S]{0,40}'Leere Slots'/, 'cockpit.js low-stock KPI must be labelled "Leere Slots"');
+});

@@ -142,8 +142,8 @@ function buildOverviewData(raw = {}) {
     priorities,
     'low-stock',
     'warning',
-    'Niedriger Bestand',
-    `${metrics.lowStockCount} Slot(s) unter Zielbestand.`,
+    'Leere Slots',
+    `${metrics.lowStockCount} Slot(s) leer.`,
     metrics.lowStockCount,
   );
   if (metrics.revenueNetToday > 0) {
@@ -176,11 +176,14 @@ async function queryOverviewMonitoringPg(pgUrl) {
       warningsResult,
     ] = await Promise.all([
       client.query(
+        // BACKUP_OK ist eine Erfolgsmeldung, keine offene Warnung — wie in der
+        // Warnungs-Liste unten ausschließen, sonst bläht es den Cockpit-Zähler auf.
         `SELECT COUNT(*)::int AS count FROM (
            SELECT DISTINCT ON (warning_type, COALESCE(product_id::text, warning_key))
              warning_id
            FROM automatenlager.warnings w
            WHERE w.resolved = FALSE
+             AND w.warning_type != 'BACKUP_OK'
              AND NOT (
                w.warning_type = 'MDB_CODE_CHANGED_FOR_PRODUCT'
                AND w.product_id IS NOT NULL
@@ -198,11 +201,13 @@ async function queryOverviewMonitoringPg(pgUrl) {
             AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'`,
       ),
       client.query(
+        // Cockpit-KPI "Leere Slots": nur wirklich leere Slots (= 0), deckungsgleich
+        // mit der Detailseite (inventory-mhd.js). "Unter Zielbestand" war als Cockpit-
+        // Signal zu laut (Normalzustand), die echte Aktion ist der leere Slot.
         `SELECT COUNT(*)::int AS count
            FROM automatenlager.slot_assignments
           WHERE active = TRUE
-            AND target_stock IS NOT NULL
-            AND current_machine_qty < target_stock`,
+            AND current_machine_qty = 0`,
       ),
       client.query(
         `SELECT COALESCE(SUM(revenue_net), 0)::numeric AS revenue_net,

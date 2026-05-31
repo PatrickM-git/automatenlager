@@ -8,7 +8,7 @@ function buildCockpitData(overviewData, monitoringData) {
   const kpis = [
     { key: 'warnings',  label: 'Offene Warnungen',  value: metrics.openWarningsCount ?? 0, unit: null  },
     { key: 'mhd-risk',  label: 'MHD-Risiko',        value: metrics.mhdRiskCount      ?? 0, unit: null  },
-    { key: 'low-stock', label: 'Niedriger Bestand',  value: metrics.lowStockCount     ?? 0, unit: null  },
+    { key: 'low-stock', label: 'Leere Slots',        value: metrics.lowStockCount     ?? 0, unit: null  },
     { key: 'revenue',   label: 'Umsatz heute',       value: metrics.revenueNetToday   ?? 0, unit: 'EUR' },
   ];
 

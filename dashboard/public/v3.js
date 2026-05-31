@@ -750,7 +750,7 @@
         var kpis = [
           { key: 'warnings',  label: 'Offene Warnungen', value: (ov.metrics && ov.metrics.openWarningsCount) || 0, unit: null  },
           { key: 'mhd-risk',  label: 'MHD-Risiko',       value: (ov.metrics && ov.metrics.mhdRiskCount)      || 0, unit: null  },
-          { key: 'low-stock', label: 'Niedriger Bestand', value: (ov.metrics && ov.metrics.lowStockCount)     || 0, unit: null  },
+          { key: 'low-stock', label: 'Leere Slots', value: (ov.metrics && ov.metrics.lowStockCount)     || 0, unit: null  },
           { key: 'revenue',   label: 'Umsatz heute',      value: (ov.metrics && ov.metrics.revenueNetToday)   || 0, unit: 'EUR' },
         ];
         var ampels = (mon.ampels || []);
