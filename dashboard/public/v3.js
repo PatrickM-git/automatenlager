@@ -858,6 +858,13 @@
         return { status: 'ok', onboarding: { data: data, canEdit: !!viewer.canTriggerActions } };
       }).catch(function () { return { status: 'error' }; });
     }
+    if (route.path === '/einstellungen') {
+      return fetchJson('/api/v2/settings/definitions').then(function (res) {
+        var defs = res && res.definitions ? res.definitions : null;
+        if (!defs) { return { status: 'error' }; }
+        return { status: 'ok', settings: defs };
+      }).catch(function () { return { status: 'error' }; });
+    }
     return new Promise(function (resolve) {
       setTimeout(function () { resolve({ status: 'ok', route: route }); }, 260);
     });
@@ -2315,6 +2322,36 @@
     }
   }
 
+  /* ---- Einstellungen-Seite (/einstellungen) ----------------------------- */
+  /* Zeigt die im Backend (lib/slow-mover.js) festgelegten Definitionen/Schwellwerte.
+     Quelle: GET /api/v2/settings/definitions → docs/UBIQUITOUS_LANGUAGE.md. */
+  function renderSettingsPage(settings) {
+    var sm = (settings && settings.slowMover) || { classes: [], ladenhueterDays: 30, minPointsForQuartiles: 4 };
+    var classRows = (sm.classes || []).map(function (c) {
+      return '<li class="v3-set-def">' +
+        '<span class="v3-badge v3-badge--turnover v3-badge--turnover-' + esc(c.key) + '">' + esc(c.label) + '</span>' +
+        '<span class="v3-set-def__text">' + esc(c.description) + '</span>' +
+      '</li>';
+    }).join('');
+
+    var thresholds = '' +
+      '<ul class="v3-set-list">' +
+        '<li><strong>Ladenhüter-Schwelle:</strong> 0 Verkäufe seit ≥ ' + esc(sm.ladenhueterDays) + ' Tagen ' +
+          '(Grenzfall genau ' + esc(sm.ladenhueterDays) + ' Tage zählt bereits).</li>' +
+        '<li><strong>Verfahren:</strong> quartilbasiert pro Slot/Automat — oberstes Quartil = Renner, unterstes = Langsam-Dreher, dazwischen Normal.</li>' +
+        '<li><strong>Mindest-Datenpunkte:</strong> unter ' + esc(sm.minPointsForQuartiles) + ' aktiven Slots (oder ohne Streuung) → alle „Normal".</li>' +
+      '</ul>';
+
+    return '' +
+      '<section class="v3-card" aria-label="Drehzahl-Klassifikation">' +
+        '<h2 class="v3-set-title">Drehzahl-Klassen (Slow-Mover)</h2>' +
+        '<p class="v3-state__msg" style="margin:0 0 16px">Wie das Cockpit Produkte nach Umschlag je Slot/Automat einordnet. Diese Definitionen sind im Domänen-Glossar <code>docs/UBIQUITOUS_LANGUAGE.md</code> verbindlich festgeschrieben und liegen im Backend (<code>lib/slow-mover.js</code>).</p>' +
+        '<ul class="v3-set-defs">' + classRows + '</ul>' +
+        '<h3 class="v3-set-subtitle">Schwellwerte</h3>' +
+        thresholds +
+      '</section>';
+  }
+
   function placeholderContent(route) {
     return '' +
       '<section class="v3-card" aria-label="Vorschau ' + route.title + '">' +
@@ -2379,6 +2416,8 @@
       } else if (route.path === '/monitoring' && result.monitoring) {
         viewEl.innerHTML = pageHead(route) + renderMonitoringPage(result.monitoring);
         bindMonitoringControls();
+      } else if (route.path === '/einstellungen' && result.settings) {
+        viewEl.innerHTML = pageHead(route) + renderSettingsPage(result.settings);
       } else {
         viewEl.innerHTML = pageHead(route) + placeholderContent(route);
       }

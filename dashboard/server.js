@@ -19,6 +19,7 @@ const { buildOnboardingStartPayload, validateOnboardingStart, buildOnboardingSta
 const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buildSlotAssignAuditEntry } = require('./lib/slot-assign-inline.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
+const { SLOW_MOVER } = require('./lib/slow-mover.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -2374,6 +2375,15 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
       }
+      return;
+    }
+
+    // ── Einstellungen: Definitionen/Schwellwerte (Slow-Mover etc.) ─────────────
+
+    if (parsed.pathname === '/api/v2/settings/definitions' && req.method === 'GET') {
+      // Reine Referenzdaten aus lib/slow-mover.js (Single Source of Truth);
+      // wird unter /einstellungen angezeigt und ist im Glossar festgeschrieben.
+      sendJson(res, 200, { ok: true, definitions: { slowMover: SLOW_MOVER } });
       return;
     }
 
