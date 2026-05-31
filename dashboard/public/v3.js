@@ -822,7 +822,7 @@
     if (route.path === '/slots') {
       return Promise.all([
         fetchJson('/api/v2/assortment-slots'),
-        fetchJson('/api/v2/refill/search?q='),
+        fetchJson('/api/v2/products/catalog?q='),
         fetchJson('/api/dashboard').catch(function () { return {}; }),
       ]).then(function (results) {
         var slots   = (results[0] && results[0].data && results[0].data.slots) || [];
@@ -1567,7 +1567,9 @@
       var pid = Number(row.product_id);
       if (!pid || seen[pid]) { return; }
       seen[pid] = true;
-      var name = String(row.product_name == null ? '' : row.product_name).trim();
+      /* Katalog (/products/catalog) liefert `name`, die Refill-Suche `product_name`. */
+      var rawName = row.name != null ? row.name : row.product_name;
+      var name = String(rawName == null ? '' : rawName).trim();
       items.push({ product_id: pid, product_key: row.product_key != null ? row.product_key : null, name: name, label: name });
     });
     return items;
@@ -2406,7 +2408,7 @@
       searchEl.addEventListener('input', function () {
         window.clearTimeout(t);
         t = window.setTimeout(function () {
-          fetchJson('/api/v2/refill/search?q=' + encodeURIComponent(searchEl.value || '')).then(function (res) {
+          fetchJson('/api/v2/products/catalog?q=' + encodeURIComponent(searchEl.value || '')).then(function (res) {
             var items = slotBuildPalette((res && res.results) || []);
             _slotsState.palette = items;
             listEl.innerHTML = renderPaletteTiles(items);

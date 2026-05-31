@@ -17,6 +17,7 @@ const { buildMachineProfile, getMachineOptions, queryMachineProfilesPg, upsertMa
 const { buildProductSuggestion, validateCorrectionAction, buildCorrectionActionPayload, buildCorrectionActionAuditEntry } = require('./lib/correction-action.js');
 const { buildOnboardingStartPayload, validateOnboardingStart, buildOnboardingStartAuditEntry } = require('./lib/onboarding-start.js');
 const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buildSlotAssignAuditEntry } = require('./lib/slot-assign-inline.js');
+const { buildProductCatalog } = require('./lib/product-catalog.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
 const { SLOW_MOVER } = require('./lib/slow-mover.js');
@@ -1657,6 +1658,33 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ── Refill routes ─────────────────────────────────────────────────────────
+
+    // Produkt-Katalog für die Slot-Palette: ALLE Produkte (auch ohne aktiven
+    // Slot), damit neue Produkte überhaupt zugewiesen werden können. Bewusst
+    // getrennt von /refill/search (das nur belegte Slots liefert).
+    if (parsed.pathname === '/api/v2/products/catalog' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      const q = clean(parsed.query.q || '');
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, results: [], error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      try {
+        const { Client } = require('pg');
+        const client = new Client({ connectionString: pgUrl });
+        await client.connect();
+        const { rows } = await client.query(`
+          SELECT p.product_id, p.product_key, p.name
+          FROM automatenlager.products p
+          ORDER BY p.name
+        `);
+        await client.end();
+        sendJson(res, 200, { ok: true, results: buildProductCatalog(rows, q) });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, results: [], error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
 
     if (parsed.pathname === '/api/v2/refill/search' && req.method === 'GET') {
       const pgUrl = dashboardV2PgUrl();
