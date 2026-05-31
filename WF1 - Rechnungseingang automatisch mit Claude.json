@@ -962,6 +962,118 @@
           "name": "Google Drive account"
         }
       }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config - WF2').first().json.google_sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Rechnungseingang_Pruefung",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        640,
+        880
+      ],
+      "id": "a1d2e3f4-0001-4001-b001-0000000000a1",
+      "name": "GS - Pruefung lesen (Dedup)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Dedup-Guard: ueberspringt Vorschlaege, deren Rechnung bereits verarbeitet wurde.\n// Primaerschluessel: approval_id (= APP_<drive_file_id>_<line>)\n// Fallback: invoice_id|supplier|line_number (faengt Re-Uploads mit neuer Drive-File-ID).\nconst incoming = $input.all().map(i => i.json);\n\nlet existing = [];\ntry { existing = $items('GS - Pruefung lesen (Dedup)').map(i => i.json); } catch (e) { existing = []; }\n\nconst norm = (v) => String(v ?? '').trim().toLowerCase();\n\nconst approvalSet = new Set(\n  existing.map(r => String(r.approval_id ?? '').trim()).filter(Boolean)\n);\nconst invSupLineSet = new Set(\n  existing\n    .filter(r => norm(r.invoice_id))\n    .map(r => [norm(r.invoice_id), norm(r.supplier), norm(r.line_number)].join('|'))\n);\n\nconst isDuplicate = (s) => {\n  const aid = String(s.approval_id ?? '').trim();\n  if (aid && approvalSet.has(aid)) return true;\n  if (norm(s.invoice_id)) {\n    const k = [norm(s.invoice_id), norm(s.supplier), norm(s.line_number)].join('|');\n    if (invSupLineSet.has(k)) return true;\n  }\n  return false;\n};\n\nconst fresh = incoming.filter(s => !isDuplicate(s));\nconst skipped = incoming.length - fresh.length;\nconsole.log(`Dedup: ${incoming.length} Vorschlaege, ${skipped} Duplikat(e) uebersprungen, ${fresh.length} neu.`);\n\n// Leeres Ergebnis => Append/WF2/PGW laufen nicht (Datei wird trotzdem verschoben).\nreturn fresh.map(json => ({ json }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        600
+      ],
+      "id": "a1d2e3f4-0002-4002-b002-0000000000a2",
+      "name": "Code - Dedup Filter"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wf1-rechnung-upload",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson",
+        "options": {
+          "binaryData": true,
+          "binaryPropertyName": "data"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -128,
+        1040
+      ],
+      "id": "a1d2e3f4-0003-4003-b003-0000000000a3",
+      "name": "Webhook - Rechnung Upload",
+      "webhookId": "a1d2e3f4-0003-4003-b003-0000000000a3"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Normalisiert das per Multipart hochgeladene File auf den Binary-Key 'file',\n// unabhaengig davon wie der Webhook es benannt hat (data, data0, file, ...).\nconst out = [];\nfor (const item of $input.all()) {\n  const bin = item.binary || {};\n  const keys = Object.keys(bin);\n  if (!keys.length) {\n    throw new Error('Kein Binary im Upload-Webhook empfangen.');\n  }\n  const key = keys.find(k => bin[k] && bin[k].fileName) || keys[0];\n  const file = bin[key];\n  out.push({\n    json: { fileName: file.fileName || 'rechnung', mimeType: file.mimeType || '' },\n    binary: { file },\n  });\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        1040
+      ],
+      "id": "a1d2e3f4-0004-4004-b004-0000000000a4",
+      "name": "Code - Upload Binary normalisieren"
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "upload",
+        "inputDataFieldName": "file",
+        "name": "={{ $binary.file.fileName }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "15_5fYaCgnR2pUFpXs6hXJRjvu1jsnS3H"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        352,
+        1040
+      ],
+      "id": "a1d2e3f4-0005-4005-b005-0000000000a5",
+      "name": "Google Drive - Upload Rechnungseingang",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kOLyDv48afTu5P9q",
+          "name": "Google Drive account"
+        }
+      }
     }
   ],
   "connections": {
@@ -1084,7 +1196,12 @@
       "main": [
         [
           {
-            "node": "Google Sheets - Pr?fung anh?ngen",
+            "node": "Google Drive - Rechnung verschieben",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code - Dedup Filter",
             "type": "main",
             "index": 0
           }
@@ -1094,11 +1211,6 @@
     "Google Sheets - Pr?fung anh?ngen": {
       "main": [
         [
-          {
-            "node": "Google Drive - Rechnung verschieben",
-            "type": "main",
-            "index": 0
-          },
           {
             "node": "Code - WF2 Start vorbereiten",
             "type": "main",
@@ -1143,6 +1255,11 @@
           },
           {
             "node": "Google Sheets - Produkt_Aliase lesen",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "GS - Pruefung lesen (Dedup)",
             "type": "main",
             "index": 0
           }
@@ -1225,11 +1342,44 @@
           }
         ]
       ]
+    },
+    "Code - Dedup Filter": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Pr?fung anh?ngen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Rechnung Upload": {
+      "main": [
+        [
+          {
+            "node": "Code - Upload Binary normalisieren",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Upload Binary normalisieren": {
+      "main": [
+        [
+          {
+            "node": "Google Drive - Upload Rechnungseingang",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
+  "active": true,
   "settings": {
     "executionOrder": "v1"
   },
-  "pinData": {},
-  "meta": null
+  "id": "wnGAwHhgfXq2ATM8"
 }

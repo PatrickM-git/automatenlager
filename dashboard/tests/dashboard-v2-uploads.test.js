@@ -185,7 +185,9 @@ test('AC: Admin kann Rechnungsdatei hochladen und an WF1/WF2-Pfad uebergeben', a
   const mockN8n = startMockN8n();
   const n8nPort = await listen(mockN8n.server);
   const dashboardPort = await getFreePort();
-  const dashboard = await startDashboard(dashboardPort, n8nPort);
+  // Resolution-Pfad explizit testen: lokalen Direkt-Webhook-Override neutralisieren
+  // (Nicht-URL-Wert = Override aus; leerer String ist auf Windows unzuverlaessig).
+  const dashboard = await startDashboard(dashboardPort, n8nPort, { INVOICE_UPLOAD_WEBHOOK_URL: 'off' });
 
   t.after(() => {
     dashboard.kill();
@@ -224,6 +226,53 @@ test('AC: Admin kann Rechnungsdatei hochladen und an WF1/WF2-Pfad uebergeben', a
   assert.ok(uploadCall, 'WF1 webhook wurde nicht aufgerufen');
   assert.match(uploadCall.headers['content-type'] || '', /^multipart\/form-data/i);
   assert.match(uploadCall.body.toString('latin1'), /rechnung-2026-05\.pdf/);
+});
+
+test('AC: INVOICE_UPLOAD_WEBHOOK_URL leitet Rechnung direkt an den festen Webhook (Mini)', async (t) => {
+  const mockN8n = startMockN8n();
+  const n8nPort = await listen(mockN8n.server);
+  const dashboardPort = await getFreePort();
+  const directUrl = `http://127.0.0.1:${n8nPort}/webhook/invoice-upload`;
+  const dashboard = await startDashboard(dashboardPort, n8nPort, {
+    INVOICE_UPLOAD_WEBHOOK_URL: directUrl,
+  });
+
+  t.after(() => {
+    dashboard.kill();
+    mockN8n.server.close();
+  });
+
+  const multipart = buildMultipart({
+    filename: 'rechnung-direct.pdf',
+    contentType: 'application/pdf',
+    data: Buffer.from('%PDF-1.4\nDirect invoice\n', 'utf8'),
+    target: 'invoice',
+  });
+
+  const response = await requestDashboard(dashboardPort, {
+    method: 'POST',
+    pathName: '/api/v2/uploads/invoice',
+    headers: {
+      'Content-Type': multipart.contentType,
+      'Content-Length': String(multipart.body.length),
+      'Tailscale-User-Login': 'patrick@example.test',
+    },
+    body: multipart.body,
+  });
+
+  assert.equal(response.status, 200);
+  const body = response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.target, 'invoice');
+  assert.equal(body.workflow.method, 'POST');
+  assert.equal(body.workflow.webhookPath, '(direct)');
+
+  // Datei wurde direkt an den festen Webhook gepostet ...
+  const uploadCall = mockN8n.calls.find((call) => call.method === 'POST' && call.url === '/webhook/invoice-upload');
+  assert.ok(uploadCall, 'Direkter Upload-Webhook wurde nicht aufgerufen');
+  assert.match(uploadCall.body.toString('latin1'), /rechnung-direct\.pdf/);
+  // ... ohne die n8n-Workflow-Liste zu konsultieren.
+  assert.equal(mockN8n.calls.some((call) => call.url.startsWith('/api/v1/workflows')), false);
 });
 
 test('AC: Admin kann Picklisten-PDF hochladen und an WF9-Pfad uebergeben', async (t) => {

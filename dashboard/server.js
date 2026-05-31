@@ -80,6 +80,9 @@ const dashboardV2UploadTargets = {
     allowedMimeTypes: ['application/pdf', 'image/png', 'image/jpeg'],
     allowedExtensions: ['.pdf', '.png', '.jpg', '.jpeg'],
     workflowName: /^WF1 - Rechnungseingang automatisch mit Claude$/i,
+    // Optionaler direkter Upload-Webhook (Mini-n8n: legt die Datei in den
+    // Drive-Ordner Rechnungseingang -> der Drive-Trigger verarbeitet sie).
+    directWebhookEnv: 'INVOICE_UPLOAD_WEBHOOK_URL',
   },
   picklist: {
     id: 'picklist',
@@ -406,17 +409,19 @@ function resolveV2UploadWorkflow(targetConfig, n8n) {
   const workflow = pickWorkflowForAction(n8n.workflows || [], targetConfig.workflowName);
   if (!workflow || !workflow.active) return null;
 
-  const webhook = firstProductionWebhook(workflow);
+  // Gezielt den POST-Webhook waehlen: ein Workflow kann zusaetzlich einen
+  // GET-Trigger-Webhook (z. B. Ordner-Scan) haben, der nicht fuer Uploads taugt.
+  const webhook = (workflow.webhooks || []).find(
+    (node) => node.path && clean(node.method || 'GET').toUpperCase() === 'POST'
+  );
   if (!webhook?.path) return null;
-  const method = clean(webhook.method || 'POST').toUpperCase();
-  if (method !== 'POST') return null;
 
   const webhookUrl = `${n8n.baseUrl || dashboardConfig().n8nBaseUrl}/webhook/${encodeURIComponent(webhook.path)}`;
   return {
     id: workflow.id,
     name: workflow.name,
     webhookPath: webhook.path,
-    method,
+    method: 'POST',
     url: webhookUrl,
   };
 }
@@ -2087,44 +2092,67 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      let n8n;
-      try {
-        n8n = await fetchN8nWorkflows();
-      } catch (error) {
-        sendJson(res, 502, {
-          ok: false,
-          viewer,
-          target: routeTarget,
-          upload: {
-            fileName: validatedFile.fileName,
-            mimeType: validatedFile.mimeType,
-            sizeBytes: validatedFile.sizeBytes,
-          },
-          error: {
-            code: 'N8N_UNREACHABLE',
-            message: `n8n konnte nicht geladen werden: ${error.message}`,
-          },
-        });
-        return;
+      // Optionaler gezielter Override: postet die Datei direkt an einen festen
+      // Webhook (z. B. die Mini-n8n), unabhaengig von der allgemeinen n8n-Basis
+      // des Dashboards. Prozess-Env hat Vorrang vor .env.local. Es zaehlt nur ein
+      // echter http(s)-URL-Wert — alles andere (leer, Platzhalter) = Override aus.
+      let directWebhookUrl = '';
+      if (targetConfig.directWebhookEnv) {
+        const fromProcess = process.env[targetConfig.directWebhookEnv];
+        const fromFile = loadLocalEnv()[targetConfig.directWebhookEnv];
+        const raw = clean(fromProcess !== undefined ? fromProcess : fromFile);
+        if (/^https?:\/\//i.test(raw)) directWebhookUrl = raw;
       }
 
-      const workflow = resolveV2UploadWorkflow(targetConfig, n8n);
-      if (!workflow) {
-        sendJson(res, 409, {
-          ok: false,
-          viewer,
-          target: routeTarget,
-          upload: {
-            fileName: validatedFile.fileName,
-            mimeType: validatedFile.mimeType,
-            sizeBytes: validatedFile.sizeBytes,
-          },
-          error: {
-            code: 'WORKFLOW_NOT_READY',
-            message: 'Kein aktiver POST-Webhook fuer den Upload-Workflow gefunden.',
-          },
-        });
-        return;
+      let workflow;
+      if (directWebhookUrl) {
+        workflow = {
+          id: null,
+          name: `${targetConfig.label} Upload (direkter Webhook)`,
+          webhookPath: '(direct)',
+          method: 'POST',
+          url: directWebhookUrl,
+        };
+      } else {
+        let n8n;
+        try {
+          n8n = await fetchN8nWorkflows();
+        } catch (error) {
+          sendJson(res, 502, {
+            ok: false,
+            viewer,
+            target: routeTarget,
+            upload: {
+              fileName: validatedFile.fileName,
+              mimeType: validatedFile.mimeType,
+              sizeBytes: validatedFile.sizeBytes,
+            },
+            error: {
+              code: 'N8N_UNREACHABLE',
+              message: `n8n konnte nicht geladen werden: ${error.message}`,
+            },
+          });
+          return;
+        }
+
+        workflow = resolveV2UploadWorkflow(targetConfig, n8n);
+        if (!workflow) {
+          sendJson(res, 409, {
+            ok: false,
+            viewer,
+            target: routeTarget,
+            upload: {
+              fileName: validatedFile.fileName,
+              mimeType: validatedFile.mimeType,
+              sizeBytes: validatedFile.sizeBytes,
+            },
+            error: {
+              code: 'WORKFLOW_NOT_READY',
+              message: 'Kein aktiver POST-Webhook fuer den Upload-Workflow gefunden.',
+            },
+          });
+          return;
+        }
       }
 
       let forwardResponse;
