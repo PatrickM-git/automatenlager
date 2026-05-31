@@ -171,6 +171,7 @@ function buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, opts = {}) {
         slot_assignment_id: slot.slot_assignment_id,
         product_slot_key: slot.product_slot_key,
         old_product_id: oldProductId,
+        old_product_key: slot.product_key || '',
         old_product_name: slot.product_name || '',
         new_product_id: matchedId,
         new_product_name: productsById[matchedId] || item.product_name || '',
@@ -186,10 +187,13 @@ function buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, opts = {}) {
         slot_assignment_id: slot.slot_assignment_id,
         product_slot_key: slot.product_slot_key,
         product_id: oldProductId,
+        old_product_key: slot.product_key || '',
         product_name: slot.product_name || item.product_name || '',
         old_qty: oldQty,
         new_qty: onHand,
         diff: onHand - oldQty,
+        target_stock: toNum(slot.target_stock),
+        machine_capacity: toNum(slot.machine_capacity),
       });
     } else {
       unchanged.push({ mdb_code: mdb, product_id: oldProductId, qty: oldQty });
@@ -247,6 +251,7 @@ function buildApplyPlan(diff) {
       slot_assignment_id: c.slot_assignment_id,
       product_slot_key: c.product_slot_key,
       old_product_id: c.old_product_id,
+      old_product_key: c.old_product_key,
       new_product_id: c.new_product_id,
       new_qty: c.new_qty,
       target_stock: c.target_stock,
@@ -262,7 +267,10 @@ function buildApplyPlan(diff) {
       slot_assignment_id: q.slot_assignment_id,
       product_slot_key: q.product_slot_key,
       product_id: q.product_id,
+      old_product_key: q.old_product_key,
       new_qty: q.new_qty,
+      target_stock: q.target_stock,
+      machine_capacity: q.machine_capacity,
     });
   }
 
@@ -276,6 +284,84 @@ function buildApplyPlan(diff) {
       expected_qty_sum: expectedQtySum,
     },
   };
+}
+
+// ── pgw_write-Events (close alt + open neu) ──────────────────────────────────
+
+// Kompakter Zeitstempel fuer den product_slot_key (wie WF4 psid):
+// "2026-05-31T14:30:00.000Z" -> "20260531T143000Z".
+function stamp(iso) {
+  return String(iso || '').replace(/[-:]/g, '').replace(/\.\d{1,3}Z?$/, 'Z');
+}
+
+/**
+ * Baut die pgw_write-`slot_assignment`-Events fuer den apply-Schreibpfad.
+ *
+ * WICHTIG (verifiziert an der Live-Funktion automatenlager.pgw_write):
+ *   - `slot_assignment` setzt current_machine_qty NUR beim INSERT eines NEUEN
+ *     product_slot_key; ON CONFLICT aktualisiert nur valid_to/active/notes.
+ *   - Daher wird JEDE Aenderung (Umbuchung UND reine Menge) einheitlich als
+ *     close(alte Zuordnung: active=false, valid_to=jetzt) + open(neue Zuordnung:
+ *     neuer product_slot_key, neues/gleiches Produkt, current_machine_qty=Soll)
+ *     ausgefuehrt. Das nutzt ausschliesslich den bewaehrten slot_assignment-
+ *     Pfad (kein neuer Roh-Schreibpfad) und setzt die Menge korrekt per INSERT.
+ *
+ * @param {{operations: Array, machine_id?: string}} plan
+ * @param {{machineKey?: string, nowIso?: string, batchRunId?: string,
+ *          productKeyById?: Object}} ctx
+ * @returns {Array<{event_type:'slot_assignment', batch_run_id:string, data:Object}>}
+ */
+function buildSlotAssignmentEvents(plan, ctx = {}) {
+  const machineKey = String(ctx.machineKey ?? (plan && plan.machine_id) ?? '');
+  const nowIso = ctx.nowIso || new Date().toISOString();
+  const batchRunId = ctx.batchRunId || `abgl_${nowIso.slice(0, 10)}`;
+  const keyById = ctx.productKeyById || {};
+  const events = [];
+
+  for (const op of (plan && plan.operations) || []) {
+    const mdb = op.mdb_code;
+    const newProductId = op.type === 'reassign' ? op.new_product_id : op.product_id;
+    const newKey = keyById[newProductId] || keyById[Number(newProductId)] || op.old_product_key || '';
+    const oldKey = op.old_product_key || newKey;
+
+    // close: alte Zuordnung schliessen (ON CONFLICT -> valid_to + active=false)
+    events.push({
+      event_type: 'slot_assignment',
+      batch_run_id: batchRunId,
+      data: {
+        product_slot_key: op.product_slot_key,
+        machine_key: machineKey,
+        mdb_code: mdb,
+        product_key: oldKey,
+        valid_from: nowIso,
+        valid_to: nowIso,
+        active: false,
+        current_machine_qty: 0,
+        notes: 'Nayax-Abgleich: alte Zuordnung geschlossen',
+      },
+    });
+
+    // open: neue Zuordnung (INSERT setzt current_machine_qty = Soll/On-Hand)
+    events.push({
+      event_type: 'slot_assignment',
+      batch_run_id: batchRunId,
+      data: {
+        product_slot_key: `PS_${machineKey}_${mdb}_${newKey}_${stamp(nowIso)}`,
+        machine_key: machineKey,
+        mdb_code: mdb,
+        product_key: newKey,
+        valid_from: nowIso,
+        valid_to: null,
+        active: true,
+        current_machine_qty: toNum(op.new_qty),
+        target_stock: op.target_stock != null ? toNum(op.target_stock) : null,
+        machine_capacity: op.machine_capacity != null ? toNum(op.machine_capacity) : null,
+        notes: 'Nayax-Abgleich: neue Zuordnung/Menge',
+      },
+    });
+  }
+
+  return events;
 }
 
 // ── Validierung / Guards ─────────────────────────────────────────────────────
@@ -350,6 +436,7 @@ function buildActiveSlotsQuery(opts = {}) {
       sa.mdb_code             AS mdb_code,
       sa.product_id           AS product_id,
       p.name                  AS product_name,
+      p.product_key           AS product_key,
       sa.current_machine_qty  AS current_machine_qty,
       sa.target_stock         AS target_stock,
       sa.machine_capacity     AS machine_capacity,
@@ -379,8 +466,9 @@ function buildNayaxAliasesQuery() {
 function buildProductsByIdQuery() {
   const text = `
     SELECT
-      p.product_id  AS product_id,
-      p.name        AS name
+      p.product_id   AS product_id,
+      p.name         AS name,
+      p.product_key  AS product_key
     FROM automatenlager.products p
     ORDER BY p.product_id`;
   return { text, values: [] };
@@ -394,6 +482,7 @@ module.exports = {
   matchNayaxProduct,
   buildAbgleichDiff,
   buildApplyPlan,
+  buildSlotAssignmentEvents,
   validateAbgleichApply,
   buildAbgleichPreviewPayload,
   buildAbgleichApplyPayload,

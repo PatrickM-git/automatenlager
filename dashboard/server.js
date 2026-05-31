@@ -26,6 +26,7 @@ const {
   buildAliasIndex,
   buildAbgleichDiff,
   buildApplyPlan,
+  buildSlotAssignmentEvents,
   validateAbgleichApply,
   buildAbgleichPreviewPayload,
   buildAbgleichApplyPayload,
@@ -282,8 +283,13 @@ async function computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey) {
   }
   const aliasIndex = buildAliasIndex(aliasRows);
   const productsById = {};
-  for (const r of productRows) productsById[Number(r.product_id)] = formatProductName(r.name) ?? r.name;
-  return buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, { machineId: machineKey, productsById });
+  const productKeyById = {};
+  for (const r of productRows) {
+    productsById[Number(r.product_id)] = formatProductName(r.name) ?? r.name;
+    if (r.product_key) productKeyById[Number(r.product_id)] = r.product_key;
+  }
+  const diff = buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, { machineId: machineKey, productsById });
+  return { diff, productKeyById };
 }
 
 // Beim Start einmalig prüfen, ob der Dashboard-Code zum echten DB-Schema passt.
@@ -2751,7 +2757,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       try {
-        const diff = await computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey);
+        const { diff } = await computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey);
         sendJson(res, 200, { ok: true, ...diff });
       } catch (err) {
         const code = err.code === 'NAYAX_WEBHOOK_ERROR' ? 502 : 503;
@@ -2798,10 +2804,18 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 503, { ok: false, error: { code: 'NAYAX_WEBHOOK_UNCONFIGURED', message: 'NAYAX_ABGLEICH_WEBHOOK_URL nicht gesetzt.' } });
         return;
       }
-      let plan; let diff;
+      let plan; let diff; let events;
       try {
-        diff = await computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey);
+        const result = await computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey);
+        diff = result.diff;
         plan = buildApplyPlan(diff);
+        const nowIso = new Date().toISOString();
+        events = buildSlotAssignmentEvents(plan, {
+          machineKey,
+          nowIso,
+          batchRunId: `abgl_${nowIso.slice(0, 10)}`,
+          productKeyById: result.productKeyById,
+        });
       } catch (err) {
         const code = err.code === 'NAYAX_WEBHOOK_ERROR' ? 502 : 503;
         sendJson(res, code, { ok: false, error: { code: err.code || 'PG_ERROR', message: err.message } });
@@ -2822,6 +2836,9 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const payload = buildAbgleichApplyPayload(plan, { triggered_by: viewer.login });
+      // pgw_write-fertige slot_assignment-Events (close alt + open neu) mitgeben;
+      // der Mini-WF reicht sie nur noch an WF-PGW durch (Logik bleibt getestet hier).
+      payload.events = events;
       let wfResult = { ok: true, status_ref: `abgl-${Date.now()}`, message: 'Payload protokolliert.' };
       try {
         const wfResponse = await fetch(webhookUrl, {

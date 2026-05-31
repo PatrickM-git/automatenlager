@@ -17,6 +17,7 @@ const {
   matchNayaxProduct,
   buildAbgleichDiff,
   buildApplyPlan,
+  buildSlotAssignmentEvents,
   validateAbgleichApply,
   buildAbgleichPreviewPayload,
   buildAbgleichApplyPayload,
@@ -127,11 +128,13 @@ test('buildAliasIndex: mehrere Aliase pro Produkt erlaubt (alle mappen)', () => 
 // ── buildAbgleichDiff: das Herzstueck ────────────────────────────────────────
 
 const PG_SLOTS = [
-  { slot_assignment_id: 1, machine_key: '457107528', mdb_code: 11, product_id: 101, product_name: 'Snickers', current_machine_qty: 5, product_slot_key: 'PS_a', target_stock: 10, machine_capacity: 10 },
-  { slot_assignment_id: 2, machine_key: '457107528', mdb_code: 12, product_id: 102, product_name: 'KitKat', current_machine_qty: 8, product_slot_key: 'PS_b', target_stock: 10, machine_capacity: 10 },
-  { slot_assignment_id: 3, machine_key: '457107528', mdb_code: 13, product_id: 104, product_name: 'Mars', current_machine_qty: 4, product_slot_key: 'PS_c', target_stock: 6, machine_capacity: 6 },
-  { slot_assignment_id: 4, machine_key: '457107528', mdb_code: 14, product_id: 105, product_name: 'Bounty', current_machine_qty: 3, product_slot_key: 'PS_d', target_stock: 6, machine_capacity: 6 },
+  { slot_assignment_id: 1, machine_key: '457107528', mdb_code: 11, product_id: 101, product_key: 'SKU_SNICKERS', product_name: 'Snickers', current_machine_qty: 5, product_slot_key: 'PS_a', target_stock: 10, machine_capacity: 10 },
+  { slot_assignment_id: 2, machine_key: '457107528', mdb_code: 12, product_id: 102, product_key: 'SKU_KITKAT', product_name: 'KitKat', current_machine_qty: 8, product_slot_key: 'PS_b', target_stock: 10, machine_capacity: 10 },
+  { slot_assignment_id: 3, machine_key: '457107528', mdb_code: 13, product_id: 104, product_key: 'SKU_MARS', product_name: 'Mars', current_machine_qty: 4, product_slot_key: 'PS_c', target_stock: 6, machine_capacity: 6 },
+  { slot_assignment_id: 4, machine_key: '457107528', mdb_code: 14, product_id: 105, product_key: 'SKU_BOUNTY', product_name: 'Bounty', current_machine_qty: 3, product_slot_key: 'PS_d', target_stock: 6, machine_capacity: 6 },
 ];
+
+const PRODUCT_KEY_BY_ID = { 101: 'SKU_SNICKERS', 102: 'SKU_KITKAT', 103: 'SKU_TWIX', 104: 'SKU_MARS', 105: 'SKU_BOUNTY', 106: 'SKU_PRINGLES' };
 
 const NAYAX_ITEMS = [
   { mdb_code: 11, product_name: 'Snickers', par: 10, missing_mdb: 2, on_hand: 8 },   // Menge 5 -> 8
@@ -280,6 +283,80 @@ test('buildApplyPlan: jede Operation hat einen deterministischen, idempotenten o
   assert.ok(plan1.operations.every((o) => typeof o.op_key === 'string' && o.op_key.length > 0));
 });
 
+test('buildAbgleichDiff: traegt old_product_key fuer den Schreibpfad (Schliessen der alten Zuordnung)', () => {
+  const d = diff();
+  assert.equal(d.assignment_changes[0].old_product_key, 'SKU_KITKAT');
+  assert.equal(d.qty_changes[0].old_product_key, 'SKU_SNICKERS');
+});
+
+test('buildApplyPlan: Operationen tragen product_slot_key + old_product_key (fuer close/open)', () => {
+  const plan = buildApplyPlan(diff());
+  const reassign = plan.operations.find((o) => o.type === 'reassign');
+  const setQty = plan.operations.find((o) => o.type === 'set_qty');
+  assert.equal(reassign.product_slot_key, 'PS_b');
+  assert.equal(reassign.old_product_key, 'SKU_KITKAT');
+  assert.equal(setQty.product_slot_key, 'PS_a');
+  assert.equal(setQty.old_product_key, 'SKU_SNICKERS');
+});
+
+// ── buildSlotAssignmentEvents: pgw_write-konforme Events (close alt + open neu) ─
+// Einheitlicher, bewaehrter slot_assignment-Pfad: pgw_write setzt
+// current_machine_qty NUR beim INSERT eines neuen product_slot_key, daher wird
+// jede Aenderung (Umbuchung UND Menge) als close(alt)+open(neu) ausgefuehrt.
+
+const EVENT_CTX = {
+  machineKey: '457107528',
+  nowIso: '2026-05-31T14:30:00.000Z',
+  batchRunId: 'abgl_2026-05-31',
+  productKeyById: PRODUCT_KEY_BY_ID,
+};
+
+test('buildSlotAssignmentEvents: je Operation ein close- + ein open-Event (slot_assignment)', () => {
+  const events = buildSlotAssignmentEvents(buildApplyPlan(diff()), EVENT_CTX);
+  assert.equal(events.length, 4, '2 Operationen x (close+open)');
+  assert.ok(events.every((e) => e.event_type === 'slot_assignment'));
+  assert.ok(events.every((e) => e.batch_run_id === 'abgl_2026-05-31'));
+  assert.ok(events.every((e) => e.data.machine_key === '457107528'));
+});
+
+test('buildSlotAssignmentEvents: Umbuchung schliesst alte (active=false, valid_to) + oeffnet neue', () => {
+  const events = buildSlotAssignmentEvents(buildApplyPlan(diff()), EVENT_CTX);
+  // Umbuchung mdb 12: KitKat(PS_b) -> Twix
+  const close = events.find((e) => e.data.product_slot_key === 'PS_b');
+  assert.ok(close, 'close-Event mit altem product_slot_key');
+  assert.equal(close.data.active, false);
+  assert.equal(close.data.valid_to, '2026-05-31T14:30:00.000Z');
+  assert.equal(close.data.product_key, 'SKU_KITKAT', 'close traegt altes Produkt');
+
+  const open = events.find((e) => e.data.active === true && e.data.product_key === 'SKU_TWIX');
+  assert.ok(open, 'open-Event fuers neue Produkt');
+  assert.equal(open.data.mdb_code, 12);
+  assert.equal(open.data.current_machine_qty, 9, 'On-Hand wird beim INSERT gesetzt');
+  assert.equal(open.data.valid_from, '2026-05-31T14:30:00.000Z');
+  assert.equal(open.data.valid_to, null);
+  assert.ok(/^PS_457107528_12_SKU_TWIX_/.test(open.data.product_slot_key), 'neuer deterministischer product_slot_key');
+});
+
+test('buildSlotAssignmentEvents: Mengenaenderung = close+open desselben Produkts mit neuer Menge', () => {
+  const events = buildSlotAssignmentEvents(buildApplyPlan(diff()), EVENT_CTX);
+  // mdb 11 Snickers 5 -> 8 (gleiches Produkt)
+  const open = events.find((e) => e.data.active === true && e.data.mdb_code === 11);
+  assert.ok(open);
+  assert.equal(open.data.product_key, 'SKU_SNICKERS', 'gleiches Produkt');
+  assert.equal(open.data.current_machine_qty, 8, 'neue Menge per INSERT gesetzt');
+  assert.ok(/^PS_457107528_11_SKU_SNICKERS_/.test(open.data.product_slot_key));
+});
+
+test('buildSlotAssignmentEvents: deterministisch (gleiche nowIso -> gleiche Keys)', () => {
+  const a = buildSlotAssignmentEvents(buildApplyPlan(diff()), EVENT_CTX);
+  const b = buildSlotAssignmentEvents(buildApplyPlan(diff()), EVENT_CTX);
+  assert.deepEqual(a.map((e) => e.data.product_slot_key), b.map((e) => e.data.product_slot_key));
+});
+
+test('buildSlotAssignmentEvents: leerer Plan -> keine Events', () => {
+  assert.deepEqual(buildSlotAssignmentEvents({ operations: [] }, EVENT_CTX), []);
+});
+
 // ── validateAbgleichApply: Guard gegen leere/ungueltige Applies ───────────────
 
 test('validateAbgleichApply: akzeptiert gueltigen Plan', () => {
@@ -350,6 +427,7 @@ test('buildActiveSlotsQuery: joint noetige Tabellen, schema-qualifiziert, nur ak
     assert.ok(text.includes(`automatenlager.${rel}`), `Query muss automatenlager.${rel} joinen`);
   }
   assert.ok(/\bactive\b/.test(text), 'nur aktive Slots');
+  assert.ok(/product_slot_key/.test(text) && /product_key/.test(text), 'liefert product_slot_key + product_key fuer den Schreibpfad');
 });
 
 test('buildActiveSlotsQuery: machine_key parametrisch ($1), kein Hardcode', () => {
@@ -375,6 +453,7 @@ test('buildProductsByIdQuery: schema-qualifiziert, liefert product_id + name', (
   assert.ok(text.includes('automatenlager.products'));
   assert.ok(/\bproduct_id\b/.test(text));
   assert.ok(/\bname\b/.test(text));
+  assert.ok(/\bproduct_key\b/.test(text), 'liefert product_key (id->key fuer den Schreibpfad)');
 });
 
 // ── HTTP-Endpunkte: preview (read-only) + apply (admin-only) ──────────────────
