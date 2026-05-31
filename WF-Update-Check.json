@@ -1,0 +1,175 @@
+{
+    "name": "WF-Update-Check",
+    "active": true,
+    "nodes": [
+        {
+            "parameters": {},
+            "id": "b5000000-0000-0000-0000-000000000001",
+            "name": "Manual Trigger",
+            "type": "n8n-nodes-base.manualTrigger",
+            "typeVersion": 1,
+            "position": [-1100, 0]
+        },
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "cronExpression",
+                            "expression": "0 0 6 * * 1"
+                        }
+                    ]
+                }
+            },
+            "id": "b5000000-0000-0000-0000-000000000002",
+            "name": "Schedule Trigger - Weekly Mon 06:00",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1.2,
+            "position": [-1100, -160]
+        },
+        {
+            "parameters": {
+                "url": "https://hub.docker.com/v2/repositories/n8nio/n8n/tags/latest",
+                "options": {}
+            },
+            "id": "b5000000-0000-0000-0000-000000000003",
+            "name": "HTTP Request - Docker Hub n8n latest",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [-800, -80],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "url": "http://localhost:5678/api/v1/",
+                "options": {},
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "X-N8N-API-KEY",
+                            "value": "={{ $env.N8N_API_KEY }}"
+                        }
+                    ]
+                }
+            },
+            "id": "b5000000-0000-0000-0000-000000000004",
+            "name": "HTTP Request - n8n Current Version",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [-800, 80],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "jsCode": "// Inline: update-check-logic\nconst UPDATE_CMD = 'docker compose pull n8n && docker compose up -d n8n --no-deps';\nconst VALIDATE_CMD = 'docker exec -e N8N_RUNNERS_ENABLED=false -e N8N_RUNNERS_BROKER_PORT=5699 homelab-n8n n8n execute --id axeg30n8SVKlCW54';\n\nfunction parseVersion(str) {\n  const parts = String(str).split('.').map(Number);\n  return { major: parts[0], minor: parts[1], patch: parts[2] };\n}\n\nfunction classifyUpdate(current, latest) {\n  const c = parseVersion(current);\n  const l = parseVersion(latest);\n  if (l.major !== c.major) return 'major';\n  if (l.minor !== c.minor) return 'minor';\n  if (l.patch !== c.patch) return 'patch';\n  return 'up-to-date';\n}\n\nfunction buildUpdateReport(current, latest) {\n  const type = classifyUpdate(current, latest);\n  return { type, current, latest, updateCommand: type === 'patch' ? UPDATE_CMD : null };\n}\n\nfunction buildGmailSubject(report) {\n  if (report.type === 'patch') {\n    return '[Homelab] n8n Patch verfuegbar: ' + report.current + ' -> ' + report.latest;\n  }\n  const label = report.type === 'minor' ? 'Minor-Update' : 'Major-Update';\n  return '[Homelab] n8n ' + label + ': manuelle Pruefung noetig (' + report.current + ' -> ' + report.latest + ')';\n}\n\nfunction buildGmailBody(report) {\n  const lines = [\n    'n8n Update-Check',\n    '',\n    'Aktuell: ' + report.current,\n    'Neu:     ' + report.latest,\n    'Typ:     ' + report.type,\n    '',\n  ];\n  if (report.type === 'patch') {\n    lines.push(\n      'Patch-Update kann sicher eingespielt werden.',\n      '',\n      '1. Update anwenden:',\n      '   ' + report.updateCommand,\n      '',\n      '2. Validierung (nach Neustart):',\n      '   ' + VALIDATE_CMD,\n    );\n  } else {\n    lines.push(\n      (report.type === 'minor' ? 'Minor' : 'Major') + '-Update erfordert manuelle Pruefung.',\n      '',\n      'Changelog pruefen: https://github.com/n8n-io/n8n/releases',\n    );\n  }\n  return lines.join('\\n');\n}\n\n// --- Read data from previous nodes ---\nconst hubItem = $('HTTP Request - Docker Hub n8n latest').item;\nconst n8nItem = $('HTTP Request - n8n Current Version').item;\n\nconst latest = String(hubItem.json.name || '').replace(/^v/, '');\nconst current = String(n8nItem.json.n8nVersion || '').replace(/^v/, '');\n\nif (!latest || !current) {\n  throw new Error('Konnte Versionen nicht abrufen: latest=' + latest + ' current=' + current);\n}\n\nconst report = buildUpdateReport(current, latest);\nreturn [{ json: {\n  type: report.type,\n  current: report.current,\n  latest: report.latest,\n  updateCommand: report.updateCommand,\n  gmailSubject: buildGmailSubject(report),\n  gmailBody: buildGmailBody(report),\n  send: report.type !== 'up-to-date',\n} }];"
+            },
+            "id": "b5000000-0000-0000-0000-000000000005",
+            "name": "Code - Build Update Report",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [-520, 0]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": true,
+                        "leftValue": "",
+                        "typeValidation": "strict"
+                    },
+                    "conditions": [
+                        {
+                            "id": "send-check",
+                            "leftValue": "={{ $json.send }}",
+                            "rightValue": true,
+                            "operator": {
+                                "type": "boolean",
+                                "operation": "true"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                }
+            },
+            "id": "b5000000-0000-0000-0000-000000000006",
+            "name": "IF - Should Send Mail",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [-260, 0]
+        },
+        {
+            "parameters": {
+                "sendTo": "PatrickZinke@gmx.net",
+                "subject": "={{ $json.gmailSubject }}",
+                "message": "={{ $json.gmailBody }}",
+                "options": {}
+            },
+            "id": "b5000000-0000-0000-0000-000000000007",
+            "name": "Gmail - Send Update Alert",
+            "type": "n8n-nodes-base.gmail",
+            "typeVersion": 2.1,
+            "position": [0, -80],
+            "credentials": {
+                "gmailOAuth2": {
+                    "id": "8zhryCRhHAc2OnKA",
+                    "name": "Gmail account"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Manual Trigger": {
+            "main": [
+                [
+                    { "node": "HTTP Request - Docker Hub n8n latest", "type": "main", "index": 0 },
+                    { "node": "HTTP Request - n8n Current Version", "type": "main", "index": 0 }
+                ]
+            ]
+        },
+        "Schedule Trigger - Weekly Mon 06:00": {
+            "main": [
+                [
+                    { "node": "HTTP Request - Docker Hub n8n latest", "type": "main", "index": 0 },
+                    { "node": "HTTP Request - n8n Current Version", "type": "main", "index": 0 }
+                ]
+            ]
+        },
+        "HTTP Request - Docker Hub n8n latest": {
+            "main": [
+                [
+                    { "node": "Code - Build Update Report", "type": "main", "index": 0 }
+                ]
+            ]
+        },
+        "HTTP Request - n8n Current Version": {
+            "main": [
+                [
+                    { "node": "Code - Build Update Report", "type": "main", "index": 0 }
+                ]
+            ]
+        },
+        "Code - Build Update Report": {
+            "main": [
+                [
+                    { "node": "IF - Should Send Mail", "type": "main", "index": 0 }
+                ]
+            ]
+        },
+        "IF - Should Send Mail": {
+            "main": [
+                [
+                    { "node": "Gmail - Send Update Alert", "type": "main", "index": 0 }
+                ],
+                []
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveDataErrorExecution": "all",
+        "saveDataSuccessExecution": "all",
+        "saveManualExecutions": true,
+        "timezone": "Europe/Berlin"
+    }
+}
