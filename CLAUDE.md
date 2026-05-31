@@ -110,6 +110,8 @@ Read-Only guest access:
 
 ## n8n Workflow Notes
 
+- **ALWAYS work on the HP Mini n8n instance — never the local one.** The production workflows (WF0–WF9) run 24/7 on the HP Mini at `https://hp-mini-server.tail573a13.ts.net`. A local n8n instance (`localhost:5678`) on the dev PC holds **outdated/inactive copies with different workflow IDs** — editing those is wasted work. Example WF1: Mini production = `wnGAwHhgfXq2ATM8` (published) vs. local = `dKNRRxkCPmVsArJ0` (inactive).
+- **Before any n8n change, verify the target instance.** Confirm the connection points at the Mini (not localhost) and that the workflow ID matches production via `get_workflow_details`. If the expected Mini ID returns "not found", the connection is on the wrong instance — switch it first. Connection details live in `dashboard/.env.connections` (template: `.env.connections.example`); the Mini n8n API key is in `C:\Users\patri\.n8n-api-key`.
 - The production n8n instance runs on the HP Mini (`homelab-n8n`, n8n 2.21.4).
 - Code nodes using `.first()` or `$items(...)` must run in `Run Once for All Items` mode.
 - Before changing a production workflow, decide whether the local JSON export or the live n8n workflow is authoritative.

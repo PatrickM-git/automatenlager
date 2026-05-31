@@ -46,6 +46,7 @@ function startDashboard(port, envOverrides = {}) {
       PORT: String(port),
       N8N_BASE_URL: 'http://127.0.0.1:9',
       N8N_API_KEY: 'test-key',
+      DASHBOARD_V2_PG_URL: '',
       DASHBOARD_ADMIN_LOGIN: 'admin@example.test',
       ...envOverrides,
     },

@@ -192,6 +192,534 @@
     '</div>';
   }
 
+  /* ---- Monitoring-Seite (/monitoring) ------------------------------------ */
+  /* Client-Spiegel von lib/monitoring-view.js – der Browser kann das CommonJS-
+     Modul nicht requiren; die kanonische Logik ist dort getestet. */
+  var _monState = { filter: 'all', mon: null, cases: [], canEdit: false };
+
+  var MON_STATE_META = {
+    red:    { label: 'Kritisch', title: 'Betrieb kritisch',  msg: 'Mindestens ein Bereich ist kritisch – bitte zuerst die roten Ampeln prüfen.' },
+    yellow: { label: 'Warnung',  title: 'Hinweise vorhanden', msg: 'Einzelne Bereiche zeigen Warnungen. Kein Stillstand, aber im Blick behalten.' },
+    green:  { label: 'OK',       title: 'Betrieb stabil',     msg: 'Alle überwachten Bereiche laufen stabil.' },
+  };
+  var MON_CASE_TYPE = {
+    mdb_proposal:       { label: 'MDB-Vorschlag',      cls: '' },
+    unknown_product:    { label: 'Unbekanntes Produkt', cls: 'unknown' },
+    correction_warning: { label: 'Korrektur-Warnung',   cls: 'warning' },
+  };
+
+  function monClientView(mon, cases, filter) {
+    mon = mon || {};
+    var ampelsAll = mon.ampels || [];
+    var counts = { red: 0, yellow: 0, green: 0 };
+    var worst = 0; var sev = { red: 3, yellow: 2, green: 1 };
+    for (var i = 0; i < ampelsAll.length; i++) {
+      var st = ampelsAll[i] && ampelsAll[i].state;
+      if (st === 'red' || st === 'yellow' || st === 'green') {
+        counts[st]++; if (sev[st] > worst) { worst = sev[st]; }
+      }
+    }
+    var overallState = worst === 3 ? 'red' : worst === 2 ? 'yellow' : 'green';
+    var activeFilter = (filter && filter !== 'all') ? filter : 'all';
+    var ampels = activeFilter === 'all' ? ampelsAll
+      : ampelsAll.filter(function (a) { return a && a.state === activeFilter; });
+    return {
+      overallState: overallState, counts: counts, total: ampelsAll.length,
+      distribution: [
+        { state: 'red', count: counts.red },
+        { state: 'yellow', count: counts.yellow },
+        { state: 'green', count: counts.green },
+      ],
+      ampels: ampels, activeFilter: activeFilter,
+      correction: { openCount: (cases || []).length, cases: cases || [] },
+    };
+  }
+
+  function renderMonCount(state, label, count) {
+    return '<div class="v3-mon-count v3-mon-count--' + state + '">' +
+      '<span class="v3-mon-count__num">' + count + '</span>' +
+      '<span class="v3-mon-count__label">' + esc(label) + '</span></div>';
+  }
+
+  function renderMonDistSvg(distribution, total) {
+    var W = 100, segs = '', x = 0;
+    var colors = { red: 'var(--crit)', yellow: 'var(--warn)', green: 'var(--ok)' };
+    if (total <= 0) {
+      segs = '<rect x="0" y="0" width="100" height="14" fill="var(--paper-deep)"/>';
+    } else {
+      for (var i = 0; i < distribution.length; i++) {
+        var w = (distribution[i].count / total) * W;
+        if (w <= 0) { continue; }
+        segs += '<rect x="' + x.toFixed(2) + '" y="0" width="' + w.toFixed(2) + '" height="14" fill="' + colors[distribution[i].state] + '"/>';
+        x += w;
+      }
+    }
+    return '<svg class="v3-mon-distbar" viewBox="0 0 100 14" preserveAspectRatio="none" role="img" aria-label="Verteilung der Status-Ampeln">' +
+      '<defs><clipPath id="v3-mon-clip"><rect x="0" y="0" width="100" height="14" rx="7"/></clipPath></defs>' +
+      '<g clip-path="url(#v3-mon-clip)">' + segs + '</g></svg>';
+  }
+
+  function renderMonFilter(view) {
+    var defs = [
+      { key: 'all', label: 'Alle', count: view.total, dot: null },
+      { key: 'red', label: 'Kritisch', count: view.counts.red, dot: 'red' },
+      { key: 'yellow', label: 'Warnung', count: view.counts.yellow, dot: 'yellow' },
+      { key: 'green', label: 'OK', count: view.counts.green, dot: 'green' },
+    ];
+    return '<div class="v3-mon-filter" role="group" aria-label="Status filtern">' +
+      defs.map(function (d) {
+        return '<button type="button" class="v3-mon-chip" data-mon-filter="' + d.key + '" aria-pressed="' + (view.activeFilter === d.key) + '">' +
+          (d.dot ? '<span class="v3-mon-chip__dot v3-mon-chip__dot--' + d.dot + '"></span>' : '') +
+          esc(d.label) + ' <span class="v3-mon-chip__count">' + d.count + '</span></button>';
+      }).join('') + '</div>';
+  }
+
+  function renderMonAmpel(a) {
+    var cls = (a.state === 'red' || a.state === 'yellow' || a.state === 'green') ? a.state : 'green';
+    return '<div class="v3-mon-ampel v3-mon-ampel--' + cls + '">' +
+      '<span class="v3-mon-ampel__dot"></span>' +
+      '<div class="v3-mon-ampel__main">' +
+        '<p class="v3-mon-ampel__label">' + esc(a.label || a.key || '—') + '</p>' +
+        '<p class="v3-mon-ampel__msg">' + esc(a.message || '') + '</p>' +
+      '</div></div>';
+  }
+
+  function renderMonListWrap(view) {
+    var list = view.ampels.length === 0
+      ? '<div class="v3-mon-cases-empty">Keine Ampeln in dieser Auswahl.</div>'
+      : '<div class="v3-mon-list">' + view.ampels.map(renderMonAmpel).join('') + '</div>';
+    return renderMonFilter(view) + list;
+  }
+
+  function renderMonCaseCard(c) {
+    var t = MON_CASE_TYPE[c.case_type] || { label: c.case_type || 'Fall', cls: '' };
+    var typeCls = 'v3-mon-case__type' + (t.cls ? ' v3-mon-case__type--' + t.cls : '');
+    var meta = [];
+    if (c.machine_id) { meta.push('Automat ' + esc(c.machine_id)); }
+    if (c.mdb_code != null && c.mdb_code !== '') { meta.push('MDB ' + esc(c.mdb_code)); }
+    var actions = _monState.canEdit
+      ? '<button type="button" class="v3-btn v3-btn--brand" data-mon-suggest="' + esc(c.case_id) + '">Vorschlag ansehen</button>'
+      : '<span class="v3-mon-case__meta">Nur Admins können Korrekturen bestätigen.</span>';
+    return '<article class="v3-mon-case">' +
+      '<div class="v3-mon-case__head">' +
+        '<span class="' + typeCls + '">' + esc(t.label) + '</span>' +
+        (meta.length ? '<span class="v3-mon-case__meta">' + meta.join(' · ') + '</span>' : '') +
+      '</div>' +
+      '<p class="v3-mon-case__msg">' + esc(c.message || c.nayax_report || '') + '</p>' +
+      '<div class="v3-mon-case__actions">' + actions + '</div>' +
+      '<div class="v3-mon-case__suggest-host"></div>' +
+    '</article>';
+  }
+
+  function renderMonCorrection(correction) {
+    var head =
+      '<div class="v3-mon-section__head">' +
+        '<h2 class="v3-mon-section__title">Offene Korrekturfälle</h2>' +
+        '<span class="v3-mon-section__count">' + correction.openCount + '</span>' +
+      '</div>';
+    var body = correction.openCount === 0
+      ? '<div class="v3-mon-cases-empty">Keine offenen Korrekturfälle – sauber!</div>'
+      : '<div class="v3-mon-cases">' + correction.cases.map(renderMonCaseCard).join('') + '</div>';
+    return '<section class="v3-mon-section" aria-label="Korrekturfälle">' + head + body + '</section>';
+  }
+
+  function renderMonitoringPage(view) {
+    var ov = MON_STATE_META[view.overallState];
+    var board =
+      '<div class="v3-mon-board">' +
+        '<div class="v3-mon-overall v3-mon-overall--' + view.overallState + '">' +
+          '<div class="v3-mon-overall__orb"><div class="v3-mon-overall__dot"></div></div>' +
+          '<div>' +
+            '<div class="v3-mon-overall__state">' + esc(ov.label) + '</div>' +
+            '<p class="v3-mon-overall__title">' + esc(ov.title) + '</p>' +
+            '<p class="v3-mon-overall__msg">' + esc(ov.msg) + '</p>' +
+          '</div>' +
+        '</div>' +
+        '<div class="v3-mon-dist">' +
+          '<div class="v3-mon-counts">' +
+            renderMonCount('red', 'Kritisch', view.counts.red) +
+            renderMonCount('yellow', 'Warnung', view.counts.yellow) +
+            renderMonCount('green', 'OK', view.counts.green) +
+          '</div>' +
+          renderMonDistSvg(view.distribution, view.total) +
+        '</div>' +
+      '</div>';
+    return board +
+      '<div data-mon-listwrap>' + renderMonListWrap(view) + '</div>' +
+      renderMonCorrection(view.correction);
+  }
+
+  function monFindCase(caseId) {
+    for (var i = 0; i < _monState.cases.length; i++) {
+      if (String(_monState.cases[i].case_id) === String(caseId)) { return _monState.cases[i]; }
+    }
+    return null;
+  }
+
+  function monLoadSuggestion(btn) {
+    var caseId = btn.getAttribute('data-mon-suggest');
+    var card = btn.closest('.v3-mon-case');
+    var host = card && card.querySelector('.v3-mon-case__suggest-host');
+    if (!host) { return; }
+    if (host.getAttribute('data-open') === '1') { host.innerHTML = ''; host.removeAttribute('data-open'); return; }
+    host.setAttribute('data-open', '1');
+    host.innerHTML = '<div class="v3-mon-case__suggest"><p>Vorschlag wird geladen …</p></div>';
+    fetchJson('/api/v2/correction-action/suggest?case_id=' + encodeURIComponent(caseId)).then(function (res) {
+      var products = (res && res.products) || [];
+      var suggestion = (res && res.suggestion) || {};
+      var suggestedId = suggestion.suggested_product_id != null ? String(suggestion.suggested_product_id) : '';
+      var opts = products.map(function (p) {
+        var pid = String(p.product_id);
+        return '<option value="' + esc(pid) + '"' + (pid === suggestedId ? ' selected' : '') + '>' + esc(p.name) + '</option>';
+      }).join('');
+      host.innerHTML =
+        '<div class="v3-mon-case__suggest">' +
+          (suggestion.suggested_product_name
+            ? '<p>Systemvorschlag: <span class="v3-mon-case__suggested">' + esc(suggestion.suggested_product_name) + '</span></p>'
+            : '<p>Bitte das korrekte Produkt wählen:</p>') +
+          '<select class="v3-mon-case__select" data-mon-product aria-label="Korrektes Produkt">' + opts + '</select>' +
+          '<button type="button" class="v3-btn v3-btn--brand" data-mon-confirm="' + esc(caseId) + '">Korrektur bestätigen</button>' +
+          '<p class="v3-mon-case__result" hidden></p>' +
+        '</div>';
+      var cBtn = host.querySelector('[data-mon-confirm]');
+      if (cBtn) { cBtn.addEventListener('click', function () { monConfirm(caseId, host); }); }
+    }).catch(function () {
+      host.innerHTML = '<div class="v3-mon-case__suggest"><p class="v3-mon-case__result is-err">Vorschlag konnte nicht geladen werden.</p></div>';
+    });
+  }
+
+  function monConfirm(caseId, host) {
+    var c = monFindCase(caseId);
+    if (!c) { return; }
+    var sel = host.querySelector('[data-mon-product]');
+    var confirmedId = sel && sel.value !== '' ? Number(sel.value) : null;
+    var result = host.querySelector('.v3-mon-case__result');
+    var btn = host.querySelector('[data-mon-confirm]');
+    if (btn) { btn.disabled = true; }
+    postJson('/api/v2/correction-action/confirm', {
+      case_id: c.case_id, case_type: c.case_type, machine_id: c.machine_id, mdb_code: c.mdb_code,
+      old_product_id: c.product_id, slot_assignment_id: c.slot_assignment_id, confirmed_product_id: confirmedId,
+    }).then(function (r) {
+      if (!result) { return; }
+      result.hidden = false;
+      if (r.ok && r.json && r.json.ok) {
+        result.className = 'v3-mon-case__result is-ok';
+        result.textContent = 'Korrektur ausgelöst (' + (r.json.status_ref || 'ok') + ').';
+      } else {
+        result.className = 'v3-mon-case__result is-err';
+        result.textContent = (r.json && r.json.error && r.json.error.message) || 'Bestätigung fehlgeschlagen.';
+        if (btn) { btn.disabled = false; }
+      }
+    }).catch(function () {
+      if (result) { result.hidden = false; result.className = 'v3-mon-case__result is-err'; result.textContent = 'Netzwerkfehler bei der Bestätigung.'; }
+      if (btn) { btn.disabled = false; }
+    });
+  }
+
+  function bindMonFilter() {
+    var wrap = viewEl.querySelector('[data-mon-listwrap]');
+    if (!wrap) { return; }
+    var chips = wrap.querySelectorAll('[data-mon-filter]');
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].addEventListener('click', function () {
+        _monState.filter = this.getAttribute('data-mon-filter');
+        var view = monClientView(_monState.mon, _monState.cases, _monState.filter);
+        wrap.innerHTML = renderMonListWrap(view);
+        bindMonFilter();
+      });
+    }
+  }
+
+  function bindMonitoringControls() {
+    bindMonFilter();
+    var sBtns = viewEl.querySelectorAll('[data-mon-suggest]');
+    for (var j = 0; j < sBtns.length; j++) {
+      sBtns[j].addEventListener('click', function () { monLoadSuggestion(this); });
+    }
+  }
+
+  /* ---- Automaten-Seite (/automaten) -------------------------------------- */
+  /* Client-Spiegel von lib/automaten-view.js (kanonische Logik dort getestet). */
+  var _slotsFocus = null;
+  var AUTO_STATUS = { aktiv: 'Aktiv', geplant: 'Geplant', inaktiv: 'Inaktiv' };
+
+  function automatenClientView(machines, locations) {
+    machines = machines || []; locations = locations || [];
+    var locByMachine = {};
+    for (var i = 0; i < locations.length; i++) {
+      var ids = locations[i].machine_ids || [];
+      for (var k = 0; k < ids.length; k++) {
+        var key = String(ids[k] == null ? '' : ids[k]).trim();
+        if (key && !locByMachine[key]) { locByMachine[key] = locations[i]; }
+      }
+    }
+    var unassigned = 0;
+    var builtMachines = machines.map(function (m) {
+      var loc = locByMachine[String(m.machine_id == null ? '' : m.machine_id).trim()] || null;
+      if (!loc) { unassigned++; }
+      return {
+        machine_id: m.machine_id,
+        label: (m.label && String(m.label).trim()) || String(m.machine_id || ''),
+        area: m.area || null, type: m.type || null, position: m.position || null, nickname: m.nickname || null,
+        location_name: loc ? loc.name : null,
+        location_status: loc ? loc.status : null,
+      };
+    });
+    var builtLocations = locations.map(function (l) {
+      return {
+        location_id: l.location_id != null ? l.location_id : null,
+        name: l.name, status: l.status || null,
+        machineCount: (l.machine_ids || []).length,
+      };
+    });
+    return {
+      machines: builtMachines, locations: builtLocations,
+      total: builtMachines.length, locationsTotal: builtLocations.length, unassignedCount: unassigned,
+    };
+  }
+
+  function renderAutoCard(m) {
+    var attrs = [];
+    if (m.area) { attrs.push(esc(m.area)); }
+    if (m.type) { attrs.push(esc(m.type)); }
+    if (m.position) { attrs.push(esc(m.position)); }
+    if (m.nickname) { attrs.push(esc(m.nickname)); }
+    var locChip = m.location_name
+      ? '<span class="v3-auto-loc-chip v3-auto-loc-chip--' + (m.location_status || 'none') + '">' + esc(m.location_name) + '</span>'
+      : '<span class="v3-auto-loc-chip v3-auto-loc-chip--none">Ohne Standort</span>';
+    return '<article class="v3-auto-card">' +
+      '<div class="v3-auto-card__top">' +
+        '<span class="v3-auto-card__id">' + esc(m.machine_id) + '</span>' + locChip +
+      '</div>' +
+      '<p class="v3-auto-card__label">' + esc(m.label) + '</p>' +
+      (attrs.length ? '<div class="v3-auto-card__attrs">' + attrs.map(function (a) { return '<span class="v3-auto-attr">' + a + '</span>'; }).join('') + '</div>' : '') +
+      '<button type="button" class="v3-btn v3-auto-card__jump" data-auto-jump="' + esc(m.machine_id) + '">Zur Slot-Ansicht <span aria-hidden="true">&#8594;</span></button>' +
+    '</article>';
+  }
+
+  function renderAutoLocationCard(l) {
+    return '<article class="v3-auto-loc-card">' +
+      '<div class="v3-auto-loc-card__top">' +
+        '<span class="v3-auto-loc-card__name">' + esc(l.name) + '</span>' +
+        '<span class="v3-auto-loc-chip v3-auto-loc-chip--' + (l.status || 'none') + '">' + esc(AUTO_STATUS[l.status] || l.status || '—') + '</span>' +
+      '</div>' +
+      '<p class="v3-auto-loc-card__meta">' + l.machineCount + ' Automat' + (l.machineCount === 1 ? '' : 'en') + '</p>' +
+    '</article>';
+  }
+
+  function renderAutomatenPage(view) {
+    var summary =
+      '<div class="v3-auto-summary">' +
+        '<div class="v3-auto-stat"><span class="v3-auto-stat__num">' + view.total + '</span><span class="v3-auto-stat__label">Automaten</span></div>' +
+        '<div class="v3-auto-stat"><span class="v3-auto-stat__num">' + view.locationsTotal + '</span><span class="v3-auto-stat__label">Standorte</span></div>' +
+        '<div class="v3-auto-stat"><span class="v3-auto-stat__num">' + view.unassignedCount + '</span><span class="v3-auto-stat__label">Ohne Standort</span></div>' +
+      '</div>';
+    var machines = view.machines.length === 0
+      ? '<div class="v3-mon-cases-empty">Noch keine Automatenprofile angelegt.</div>'
+      : '<div class="v3-auto-grid">' + view.machines.map(renderAutoCard).join('') + '</div>';
+    var locations = view.locations.length === 0 ? '' :
+      '<section class="v3-auto-section">' +
+        '<div class="v3-mon-section__head"><h2 class="v3-mon-section__title">Standorte</h2>' +
+          '<span class="v3-mon-section__count">' + view.locationsTotal + '</span></div>' +
+        '<div class="v3-auto-loc-grid">' + view.locations.map(renderAutoLocationCard).join('') + '</div>' +
+      '</section>';
+    return summary + machines + locations;
+  }
+
+  function automatenJump(machineId) {
+    _slotsFocus = machineId;
+    navigate('/slots');
+  }
+
+  function bindAutomatenControls() {
+    var btns = viewEl.querySelectorAll('[data-auto-jump]');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function () { automatenJump(this.getAttribute('data-auto-jump')); });
+    }
+  }
+
+  function slotsApplyFocus() {
+    if (!_slotsFocus) { return; }
+    var raw = _slotsFocus; _slotsFocus = null;
+    var sel = (window.CSS && CSS.escape) ? CSS.escape(raw) : String(raw).replace(/"/g, '\\"');
+    var target = viewEl.querySelector('[data-slots-stage-machine="' + sel + '"]');
+    if (!target) { return; }
+    try { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { target.scrollIntoView(); }
+    target.classList.add('is-jump-target');
+    window.setTimeout(function () { target.classList.remove('is-jump-target'); }, 1600);
+  }
+
+  /* ---- Onboarding-Seite (/onboarding) — Routing-Cockpit ------------------ */
+  /* Domänenkorrekt: Stammdaten (Name/Preis/MwSt) + Lagerchargen (MHD) gehören
+     WF2 bzw. dem Wareneingang und entstehen über WF1 (Rechnung) -> WF2 (Freigabe).
+     Diese Seite ERFASST keine Stammdaten, sie macht die Pipeline sichtbar und
+     routet jede Stufe zum richtigen Werkzeug (Freigabe -> WF2-Formular,
+     slot_offen -> Slot-Zuordnung). Client-Spiegel von lib/onboarding-flow.js. */
+  var _onbState = { data: null, canEdit: false };
+
+  function onbFunnelClient(data) {
+    data = data || {};
+    var by = data.products_by_status || {};
+    var approvals = Array.isArray(data.pending_approvals) ? data.pending_approvals : [];
+    var unknown = Array.isArray(data.unknown_products) ? data.unknown_products : [];
+    function cnt(k) { return (by[k] || []).length; }
+    var approvalsCount = approvals.length;
+    var nayaxPendingCount = cnt('bereit_fur_moma');
+    var verkaufsbereitCount = cnt('verkaufsbereit');
+    return {
+      stages: [
+        { key: 'approvals',      label: 'Freigabe offen',          count: approvalsCount },
+        { key: 'nayax_pending',  label: 'Nayax-Verknüpfung offen', count: nayaxPendingCount },
+        { key: 'verkaufsbereit', label: 'Verkaufsbereit',          count: verkaufsbereitCount },
+      ],
+      approvals: approvals.slice(), approvalsCount: approvalsCount,
+      nayaxPendingCount: nayaxPendingCount, verkaufsbereitCount: verkaufsbereitCount,
+      unknownProducts: unknown.slice(), unknownCount: unknown.length,
+      wf2FormUrl: data.wf2_form_url || '',
+    };
+  }
+
+  function renderOnbUpload(canEdit) {
+    if (!canEdit) {
+      return '<section class="v3-card v3-onb-card">' +
+        '<h2 class="v3-onb-card__title">Rechnung erfassen</h2>' +
+        '<p class="v3-onb-card__lead">Das Hochladen von Rechnungen ist Admins vorbehalten.</p>' +
+      '</section>';
+    }
+    var uploadIcon = icon('<path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/>');
+    return '<section class="v3-card v3-onb-card">' +
+      '<h2 class="v3-onb-card__title">Rechnung erfassen</h2>' +
+      '<p class="v3-onb-card__lead">Rechnung als PDF oder Foto hochladen – <b>WF1</b> liest sie automatisch aus und uebergibt sie an die Freigabe (WF2).</p>' +
+      '<div class="v3-onb-upload">' +
+        '<label class="v3-onb-upload__drop" for="v3-onb-file">' +
+          '<span class="v3-onb-upload__icon">' + uploadIcon + '</span>' +
+          '<span class="v3-onb-upload__cta"><b>Datei waehlen</b> oder Kamera</span>' +
+          '<span class="v3-onb-upload__file" data-onb-filename>PDF, JPG oder PNG &middot; max. 10 MB</span>' +
+          '<input id="v3-onb-file" class="v3-onb-upload__input" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" data-onb-file>' +
+        '</label>' +
+        '<div class="v3-onb-upload__actions">' +
+          '<button type="button" class="v3-btn v3-btn--brand" data-onb-upload disabled>Hochladen &amp; verarbeiten</button>' +
+        '</div>' +
+        '<p class="v3-onb-upload__result" data-onb-upload-result hidden></p>' +
+        '<p class="v3-onb-upload__drive">Alternativ: am Handy teilen &#8594; in den Drive-Ordner &bdquo;Rechnungseingang&ldquo; legen.</p>' +
+      '</div>' +
+    '</section>';
+  }
+
+  function renderOnbStatus(funnel) {
+    var tiles = funnel.stages.map(function (s) {
+      return '<div class="v3-onb-stat v3-onb-stat--' + s.key + '">' +
+        '<span class="v3-onb-stat__num">' + s.count + '</span>' +
+        '<span class="v3-onb-stat__label">' + esc(s.label) + '</span></div>';
+    }).join('');
+    return '<div class="v3-onb-status">' + tiles + '</div>';
+  }
+
+  function renderOnbApprovals(funnel) {
+    if (funnel.approvalsCount === 0) { return ''; }
+    var hasForm = !!funnel.wf2FormUrl;
+    var items = funnel.approvals.map(function (a) {
+      var meta = [a.supplier_name, a.invoice_date].filter(Boolean).map(esc).join(' · ');
+      var action = hasForm
+        ? '<a class="v3-btn v3-btn--brand" href="' + esc(funnel.wf2FormUrl) + '" target="_blank" rel="noopener noreferrer">Im WF2-Formular freigeben</a>'
+        : '<span class="v3-onb-note">WF2-Formular-URL nicht konfiguriert.</span>';
+      return '<div class="v3-onb-approval">' +
+        '<div class="v3-onb-approval__main">' +
+          '<span class="v3-onb-approval__nr">Rechnung ' + esc(a.invoice_number || a.invoice_key || '—') + '</span>' +
+          (meta ? '<span class="v3-onb-approval__meta">' + meta + '</span>' : '') +
+        '</div>' +
+        '<span class="v3-onb-approval__open">' + (a.open_items || 0) + ' offen</span>' +
+        action +
+      '</div>';
+    }).join('');
+    return '<section class="v3-card v3-onb-card">' +
+      '<div class="v3-mon-section__head"><h2 class="v3-mon-section__title">Rechnungen freigeben (WF2)</h2>' +
+        '<span class="v3-mon-section__count">' + funnel.approvalsCount + '</span></div>' +
+      '<p class="v3-onb-card__lead">Offene Rechnungsposten – hier legt WF2 das Produkt mit Stammdaten und Lagercharge (inkl. MHD) an.</p>' +
+      '<div class="v3-onb-approvals">' + items + '</div>' +
+    '</section>';
+  }
+
+  function renderOnbUnknown(funnel) {
+    var unknown = funnel.unknownProducts;
+    if (!unknown || unknown.length === 0) { return ''; }
+    var hasForm = !!funnel.wf2FormUrl;
+    return '<section class="v3-card v3-onb-card">' +
+      '<div class="v3-mon-section__head"><h2 class="v3-mon-section__title">Unbekannte Nayax-Produkte</h2>' +
+        '<span class="v3-mon-section__count">' + unknown.length + '</span></div>' +
+      '<p class="v3-onb-card__lead">Verkäufe ohne Produktzuordnung. Sie lösen sich auf, sobald das Produkt über eine Rechnung (WF1 &#8594; WF2) angelegt und der Nayax-Name zugeordnet ist' +
+        (hasForm ? ' &#8211; dafür unten das WF2-Formular öffnen.' : '.') + '</p>' +
+      '<div class="v3-onb-unknown">' +
+        unknown.map(function (u) {
+          return '<div class="v3-onb-unknown__item">' +
+            '<span class="v3-onb-unknown__key">' + esc(u.product_key) + '</span>' +
+            '<span class="v3-onb-unknown__tx">' + (u.tx_count || 0) + ' Verkäufe</span>' +
+          '</div>';
+        }).join('') +
+      '</div>' +
+      (hasForm
+        ? '<div class="v3-onb-unknown__cta"><a class="v3-btn v3-btn--brand" href="' + esc(funnel.wf2FormUrl) + '" target="_blank" rel="noopener noreferrer">WF2-Formular öffnen</a></div>'
+        : '') +
+    '</section>';
+  }
+
+  function renderOnboardingPage(payload) {
+    _onbState.data = payload.data || {};
+    _onbState.canEdit = !!payload.canEdit;
+    var funnel = onbFunnelClient(_onbState.data);
+    return renderOnbUpload(_onbState.canEdit) +
+      renderOnbStatus(funnel) +
+      renderOnbApprovals(funnel) +
+      renderOnbUnknown(funnel);
+  }
+
+  function onbUploadFileChosen(input) {
+    var nameEl = viewEl.querySelector('[data-onb-filename]');
+    var btn = viewEl.querySelector('[data-onb-upload]');
+    var file = input.files && input.files[0];
+    if (file) {
+      if (nameEl) { nameEl.textContent = file.name; nameEl.classList.add('is-set'); }
+      if (btn) { btn.disabled = false; }
+    } else {
+      if (nameEl) { nameEl.textContent = 'PDF, JPG oder PNG'; nameEl.classList.remove('is-set'); }
+      if (btn) { btn.disabled = true; }
+    }
+  }
+
+  function onbUpload(btn) {
+    var input = viewEl.querySelector('[data-onb-file]');
+    var result = viewEl.querySelector('[data-onb-upload-result]');
+    var file = input && input.files && input.files[0];
+    if (!file) { return; }
+    var fd = new FormData(); fd.append('target', 'invoice'); fd.append('file', file, file.name);
+    var label = btn.textContent; btn.disabled = true; btn.textContent = 'Wird hochgeladen ...';
+    function show(cls, msg) {
+      if (result) { result.hidden = false; result.className = 'v3-onb-upload__result ' + cls; result.textContent = msg; }
+    }
+    fetch('/api/v2/uploads/invoice', { method: 'POST', body: fd })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, json: j }; }); })
+      .then(function (r) {
+        if (r.ok && r.json && r.json.ok) {
+          show('is-ok', 'Rechnung "' + file.name + '" hochgeladen – WF1 verarbeitet sie jetzt.');
+          if (input) { input.value = ''; }
+          var nameEl = viewEl.querySelector('[data-onb-filename]');
+          if (nameEl) { nameEl.textContent = 'PDF, JPG oder PNG'; nameEl.classList.remove('is-set'); }
+          btn.textContent = label;
+        } else {
+          show('is-err', (r.json && r.json.error && r.json.error.message) || 'Upload fehlgeschlagen.');
+          btn.disabled = false; btn.textContent = label;
+        }
+      })
+      .catch(function () { show('is-err', 'Netzwerkfehler beim Upload.'); btn.disabled = false; btn.textContent = label; });
+  }
+
+  function bindOnboardingControls() {
+    var fileInput = viewEl.querySelector('[data-onb-file]');
+    if (fileInput) { fileInput.addEventListener('change', function () { onbUploadFileChosen(this); }); }
+    var uploadBtn = viewEl.querySelector('[data-onb-upload]');
+    if (uploadBtn) { uploadBtn.addEventListener('click', function () { onbUpload(this); }); }
+  }
+
   /* ---- Daten-Lader pro Seite ------------------------------------------- */
   function fetchJson(url) {
     return fetch(url).then(function (r) {
@@ -291,6 +819,43 @@
             canEdit:  !!viewer.canTriggerActions,
           },
         };
+      }).catch(function () { return { status: 'error' }; });
+    }
+    if (route.path === '/monitoring') {
+      return Promise.all([
+        fetchJson('/api/v2/monitoring'),
+        fetchJson('/api/v2/correction-cases').catch(function () { return { cases: [] }; }),
+        fetchJson('/api/dashboard').catch(function () { return {}; }),
+      ]).then(function (results) {
+        var mon    = (results[0] && results[0].data) ? results[0].data : {};
+        var cases  = (results[1] && results[1].cases) || [];
+        var viewer = (results[2] && results[2].viewer) || {};
+        _monState.mon = mon;
+        _monState.cases = cases;
+        _monState.canEdit = !!viewer.canTriggerActions;
+        _monState.filter = 'all';
+        return { status: 'ok', monitoring: monClientView(mon, cases, 'all') };
+      }).catch(function () { return { status: 'error' }; });
+    }
+    if (route.path === '/automaten') {
+      return Promise.all([
+        fetchJson('/api/v2/machine-profiles'),
+        fetchJson('/api/v2/locations').catch(function () { return { data: [] }; }),
+      ]).then(function (results) {
+        var machines  = (results[0] && results[0].data) || [];
+        var locations = (results[1] && results[1].data) || [];
+        if (machines.length === 0 && locations.length === 0) { return { status: 'empty' }; }
+        return { status: 'ok', automaten: automatenClientView(machines, locations) };
+      }).catch(function () { return { status: 'error' }; });
+    }
+    if (route.path === '/onboarding') {
+      return Promise.all([
+        fetchJson('/api/v2/onboarding'),
+        fetchJson('/api/dashboard').catch(function () { return {}; }),
+      ]).then(function (results) {
+        var data   = (results[0] && results[0].data) || {};
+        var viewer = (results[1] && results[1].viewer) || {};
+        return { status: 'ok', onboarding: { data: data, canEdit: !!viewer.canTriggerActions } };
       }).catch(function () { return { status: 'error' }; });
     }
     return new Promise(function (resolve) {
@@ -1019,10 +1584,11 @@
         '</div>';
     }).join('');
     return '' +
-      '<div class="v3-slots-stage" data-slots-stage>' +
+      '<div class="v3-slots-stage" data-slots-stage data-slots-stage-machine="' + esc(machine.machine_id) + '">' +
         '<div class="v3-slots-stage__top">' +
           '<span class="v3-slots-stage__name">' + esc(machine.machine_name) + '</span>' +
           (machine.location_name ? '<span class="v3-slots-stage__loc">' + esc(machine.location_name) + '</span>' : '') +
+          (canEdit ? '<button type="button" class="v3-btn v3-btn--brand v3-slots-fillbtn" data-slots-fillall="' + esc(machine.machine_id) + '">Automat voll auffüllen</button>' : '') +
         '</div>' +
         '<div class="v3-slots-stage__body">' + floorsHtml + '</div>' +
         '<div class="v3-slots-stage__tray" aria-hidden="true"></div>' +
@@ -1084,7 +1650,8 @@
           (machines.length ? renderMachineStage(machines[0], canEdit) : '') +
         '</div>' +
         palettePanel +
-      '</div>';
+      '</div>' +
+      '<div class="v3-slots-fillpanel" data-slots-fillpanel hidden></div>';
     // Dialog + Toast werden auf document.body portiert (mountSlotDialog/showSlotToast),
     // damit position:fixed am Viewport haftet (Vorfahren der View tragen ein transform).
   }
@@ -1347,6 +1914,168 @@
     });
   }
 
+  /* ---- „Automat voll auffüllen" (Bulk-Refill) -------------------------- */
+  /* Client-Spiegel von lib/bulk-refill.js (kanonische Logik dort getestet).
+     Füllt jeden Slot bis zur Kapazität, HART begrenzt durch den real
+     verfügbaren Lagerbestand je Produkt (geteilt über Slots gleichen Produkts).
+     Schreibt ausschließlich über den bestehenden /api/v2/refill/trigger. */
+  function bulkNum(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+
+  function bulkActiveMachine() {
+    return (_slotsState.machines || [])[_slotsState.activeMachine] || null;
+  }
+
+  function bulkOccupiedSlots(machine) {
+    var out = [];
+    ((machine && machine.floors) || []).forEach(function (f) {
+      (f.slots || []).forEach(function (s) { if (Number(s.product_id) > 0) { out.push(s); } });
+    });
+    return out;
+  }
+
+  function bulkRefillPlanClient(slots) {
+    slots = slots || [];
+    var avail = {}, remaining = {}, requested = {}, nameOf = {}, order = [];
+    function desired(s) {
+      var cap = bulkNum(s.capacity), cur = bulkNum(s.current_machine_qty);
+      var free = s.free_capacity != null ? bulkNum(s.free_capacity) : (cap - cur);
+      return Math.max(0, free);
+    }
+    slots.forEach(function (s) {
+      var pid = bulkNum(s.product_id);
+      if (pid <= 0 || Object.prototype.hasOwnProperty.call(avail, pid)) { return; }
+      var st = Math.max(0, bulkNum(s.available_backstock));
+      avail[pid] = st; remaining[pid] = st; requested[pid] = 0; nameOf[pid] = s.product_name || ''; order.push(pid);
+    });
+    var totalRefill = 0, slotsPlanned = 0, cappedCount = 0;
+    var planSlots = slots.map(function (s) {
+      var pid = bulkNum(s.product_id);
+      var des = pid > 0 ? desired(s) : 0;
+      if (pid > 0) { requested[pid] += des; }
+      var qty = 0, capped = false;
+      if (pid > 0 && des > 0) { var pool = remaining[pid]; qty = Math.min(des, pool); remaining[pid] = pool - qty; capped = qty < des; }
+      if (qty > 0) { totalRefill += qty; slotsPlanned++; }
+      if (capped) { cappedCount++; }
+      return {
+        machine_id: s.machine_id, mdb_code: s.mdb_code, product_id: pid, product_name: s.product_name || '',
+        current_machine_qty: bulkNum(s.current_machine_qty), capacity: bulkNum(s.capacity),
+        desired: des, refill_qty: qty, qty: qty, available_backstock: pid > 0 ? avail[pid] : 0, capped_by_stock: capped,
+      };
+    });
+    var byProduct = order.map(function (pid) {
+      var a = avail[pid], alloc = a - remaining[pid], req = requested[pid];
+      return { product_id: pid, product_name: nameOf[pid], requested: req, allocated: alloc, available: a, short: alloc < req };
+    });
+    return { slots: planSlots, totalRefill: totalRefill, slotsPlanned: slotsPlanned, cappedCount: cappedCount, byProduct: byProduct };
+  }
+
+  function ensureBulkPanel() { return viewEl.querySelector('[data-slots-fillpanel]'); }
+  function bindBulkClose(panel) {
+    panel.querySelectorAll('[data-bulk-close]').forEach(function (b) {
+      b.addEventListener('click', function () { panel.hidden = true; panel.innerHTML = ''; });
+    });
+  }
+  function bulkPanelLoading(panel) {
+    panel.hidden = false;
+    panel.innerHTML = '<div class="v3-state v3-state--loading" style="min-height:88px"><span class="v3-spinner"></span><p class="v3-state__msg">Lagerbestände werden geprüft …</p></div>';
+  }
+  function bulkPanelMessage(panel, msg) {
+    panel.hidden = false;
+    panel.innerHTML = '<div class="v3-slots-fill-head"><span class="v3-slots-fill-title">Automat voll auffüllen</span>' +
+      '<button type="button" class="v3-slots-fill-close" data-bulk-close aria-label="Schließen">&times;</button></div>' +
+      '<p class="v3-slots-fill-empty">' + esc(msg) + '</p>';
+    bindBulkClose(panel);
+  }
+
+  function bulkRefillStart(btn) {
+    var machine = bulkActiveMachine();
+    var panel = ensureBulkPanel();
+    if (!machine || !panel) { return; }
+    var occupied = bulkOccupiedSlots(machine);
+    if (occupied.length === 0) { bulkPanelMessage(panel, 'Dieser Automat hat keine belegten Slots zum Auffüllen.'); return; }
+    btn.disabled = true;
+    var label = btn.textContent; btn.textContent = 'Bestände werden geprüft …';
+    bulkPanelLoading(panel);
+    var reqs = occupied.map(function (s) {
+      var mid = writeMachineId(s);
+      return fetchJson('/api/v2/refill/details?machine_id=' + encodeURIComponent(mid) + '&mdb_code=' + encodeURIComponent(s.mdb_code))
+        .then(function (res) {
+          var det = (res && res.data) || {};
+          var slot = det.slot || {}; var bs = det.backstock || {};
+          return {
+            machine_id: mid, mdb_code: s.mdb_code, product_id: s.product_id, product_name: s.product_name,
+            current_machine_qty: slot.current_machine_qty != null ? slot.current_machine_qty : s.current_machine_qty,
+            capacity: slot.capacity != null ? slot.capacity : s.machine_capacity,
+            free_capacity: slot.free_capacity,
+            available_backstock: bs.total_qty != null ? bs.total_qty : 0,
+          };
+        }).catch(function () { return null; });
+    });
+    Promise.all(reqs).then(function (rows) {
+      btn.disabled = false; btn.textContent = label;
+      var plan = bulkRefillPlanClient(rows.filter(Boolean));
+      bulkRenderPreview(panel, machine, plan);
+    });
+  }
+
+  function bulkRenderPreview(panel, machine, plan) {
+    panel.hidden = false;
+    var closeBtn = '<button type="button" class="v3-slots-fill-close" data-bulk-close aria-label="Schließen">&times;</button>';
+    if (plan.totalRefill === 0) {
+      panel.innerHTML = '<div class="v3-slots-fill-head"><span class="v3-slots-fill-title">Automat voll auffüllen</span>' + closeBtn + '</div>' +
+        '<p class="v3-slots-fill-empty">Alle belegten Slots sind bereits voll – oder es ist kein passender Lagerbestand verfügbar.</p>';
+      bindBulkClose(panel);
+      return;
+    }
+    var rows = plan.slots.filter(function (s) { return s.product_id > 0 && s.desired > 0; }).map(function (s) {
+      return '<div class="v3-slots-fill-row' + (s.capped_by_stock ? ' is-capped' : '') + '">' +
+        '<span class="v3-slots-fill-row__name">' + esc(s.product_name || ('Slot ' + s.mdb_code)) + ' <em>· Slot ' + esc(s.mdb_code) + '</em></span>' +
+        '<span class="v3-slots-fill-row__qty">' + s.current_machine_qty + ' &#8594; ' + (s.current_machine_qty + s.refill_qty) + (s.capacity ? ' / ' + s.capacity : '') + '</span>' +
+        (s.refill_qty > 0 ? '<span class="v3-slots-fill-row__add">+' + s.refill_qty + '</span>' : '<span class="v3-slots-fill-row__add is-zero">+0</span>') +
+        (s.capped_by_stock ? '<span class="v3-slots-fill-row__cap">Lager begrenzt</span>' : '') +
+      '</div>';
+    }).join('');
+    var shortProducts = plan.byProduct.filter(function (p) { return p.short; });
+    var shortNote = shortProducts.length
+      ? '<p class="v3-slots-fill-note">Begrenzt durch Lagerbestand: ' +
+        shortProducts.map(function (p) { return esc(p.product_name) + ' (' + p.allocated + ' von ' + p.requested + ' möglich)'; }).join(', ') + '.</p>'
+      : '';
+    panel.innerHTML =
+      '<div class="v3-slots-fill-head"><span class="v3-slots-fill-title">Voll auffüllen · ' + esc(machine.machine_name) + '</span>' + closeBtn + '</div>' +
+      '<p class="v3-slots-fill-lead">Aufgefüllt wird bis zur Kapazität und <b>höchstens so viel, wie im Lager verfügbar ist</b>.</p>' +
+      '<div class="v3-slots-fill-rows">' + rows + '</div>' + shortNote +
+      '<div class="v3-slots-fill-actions">' +
+        '<span class="v3-slots-fill-sum">' + plan.slotsPlanned + ' Slot(s) · +' + plan.totalRefill + ' Stk.</span>' +
+        '<button type="button" class="v3-btn" data-bulk-close>Abbrechen</button>' +
+        '<button type="button" class="v3-btn v3-btn--brand" data-bulk-confirm>Auffüllen bestätigen</button>' +
+      '</div>';
+    bindBulkClose(panel);
+    var cBtn = panel.querySelector('[data-bulk-confirm]');
+    if (cBtn) { cBtn.addEventListener('click', function () { bulkConfirm(panel, plan); }); }
+    if (panel.scrollIntoView) { panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  }
+
+  function bulkConfirm(panel, plan) {
+    var toFill = plan.slots.filter(function (s) { return s.refill_qty > 0; });
+    if (toFill.length === 0) { return; }
+    var cBtn = panel.querySelector('[data-bulk-confirm]');
+    if (cBtn) { cBtn.disabled = true; cBtn.textContent = 'Wird aufgefüllt …'; }
+    var done = 0, failed = 0;
+    var jobs = toFill.map(function (s) {
+      return postJson('/api/v2/refill/trigger', {
+        machine_id: s.machine_id, mdb_code: Number(s.mdb_code), product_id: Number(s.product_id),
+        product_name: s.product_name || '', qty: s.refill_qty,
+      }).then(function (r) {
+        if (r.ok && r.json && r.json.ok) { done++; } else { failed++; }
+      }).catch(function () { failed++; });
+    });
+    Promise.all(jobs).then(function () {
+      panel.hidden = true; panel.innerHTML = '';
+      showSlotToast(done + ' Slot(s) aufgefüllt' + (failed ? ' · ' + failed + ' fehlgeschlagen' : '') + '.');
+      renderRoute(ROUTE_BY_PATH['/slots']);   // Bestände neu laden
+    });
+  }
+
   /* ---- Zustand + Hilfsfunktionen --------------------------------------- */
   var _slotsState = { machines: [], palette: [], canEdit: false, activeMachine: 0 };
 
@@ -1553,6 +2282,12 @@
 
     if (!_slotsState.canEdit) { return; }
 
+    // „Automat voll auffüllen" – delegiert auf root, übersteht den Stage-Neuaufbau
+    root.addEventListener('click', function (e) {
+      var fb = e.target.closest && e.target.closest('[data-slots-fillall]');
+      if (fb) { bulkRefillStart(fb); }
+    });
+
     // Palette-Suche (nutzt vorhandene Produkt-/Refill-Suche)
     var searchEl = viewEl.querySelector('[data-palette-search]');
     var listEl   = viewEl.querySelector('[data-palette-list]');
@@ -1632,8 +2367,18 @@
       } else if (route.path === '/slots' && result.slots) {
         viewEl.innerHTML = pageHead(route) + renderSlotsPage(result.slots);
         bindSlotEditor(result.slots);
+        slotsApplyFocus();
+      } else if (route.path === '/automaten' && result.automaten) {
+        viewEl.innerHTML = pageHead(route) + renderAutomatenPage(result.automaten);
+        bindAutomatenControls();
+      } else if (route.path === '/onboarding' && result.onboarding) {
+        viewEl.innerHTML = pageHead(route) + renderOnboardingPage(result.onboarding);
+        bindOnboardingControls();
       } else if (route.path === '/' && result.cockpit) {
         viewEl.innerHTML = pageHead(route) + renderCockpitPage(result.cockpit);
+      } else if (route.path === '/monitoring' && result.monitoring) {
+        viewEl.innerHTML = pageHead(route) + renderMonitoringPage(result.monitoring);
+        bindMonitoringControls();
       } else {
         viewEl.innerHTML = pageHead(route) + placeholderContent(route);
       }

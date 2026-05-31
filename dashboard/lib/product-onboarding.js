@@ -76,17 +76,21 @@ async function queryProductOnboardingPg(pgUrl) {
         JOIN automatenlager.suppliers s ON s.supplier_id = i.supplier_id
         ORDER BY i.invoice_date DESC, i.invoice_key, ii.line_number
       `),
+      // Unbekannte (nicht zugeordnete) Verkäufe: in sales_transactions gibt es
+      // KEINE Spalte product_key — der Roh-Produktname steht in product_name_raw.
+      // Wir liefern ihn als product_key, damit das Onboarding (Nayax-Produktname)
+      // unverändert weiterarbeitet.
       client.query(`
         SELECT
-          st.product_key,
+          st.product_name_raw AS product_key,
           COUNT(*)::int AS tx_count
         FROM automatenlager.sales_transactions st
         WHERE st.product_id IS NULL
-          AND st.product_key IS NOT NULL
-          AND st.product_key <> ''
-        GROUP BY st.product_key
+          AND st.product_name_raw IS NOT NULL
+          AND st.product_name_raw <> ''
+        GROUP BY st.product_name_raw
         ORDER BY tx_count DESC
-      `).catch(() => ({ rows: [] })),
+      `),
       client.query('SELECT COUNT(*)::int AS total FROM automatenlager.invoices'),
     ]);
 

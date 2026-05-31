@@ -1,0 +1,157 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const {
+  queryLocationsPg,
+  upsertLocationPg,
+  buildLocationComparison,
+  slugifyLocationKey,
+  LOCATIONS_SELECT_SQL,
+} = require('../lib/location-profiles.js');
+
+// Reales Schema von automatenlager.locations (Produktiv-DB homelab).
+const REAL_LOCATION_COLUMNS = [
+  'location_id', 'location_key', 'name', 'location_type', 'address',
+  'customer_group', 'opening_hours', 'notes', 'created_at', 'updated_at',
+];
+
+// Emuliert die Spaltenprüfung von Postgres: jede mit `l.` qualifizierte
+// Referenz auf die locations-Tabelle muss real existieren, sonst wirft die
+// (gefakte) DB denselben Fehler wie zuvor produktiv: 42703 "column ... does not exist".
+function assertOnlyRealLocationColumns(sql) {
+  const refs = [...sql.matchAll(/\bl\.([a-z_][a-z0-9_]*)/gi)].map((m) => m[1].toLowerCase());
+  for (const col of refs) {
+    if (!REAL_LOCATION_COLUMNS.includes(col)) {
+      const err = new Error(`column "${col}" does not exist`);
+      err.code = '42703';
+      throw err;
+    }
+  }
+}
+
+function makeFakeClient(rowsForQuery) {
+  const calls = [];
+  return {
+    calls,
+    async connect() { this.connected = true; },
+    async query(sql, params) {
+      // Wie die echte DB: zuerst Spalten validieren, dann Zeilen liefern.
+      assertOnlyRealLocationColumns(sql);
+      calls.push({ sql, params });
+      return { rows: typeof rowsForQuery === 'function' ? rowsForQuery(sql, params) : rowsForQuery };
+    },
+    async end() { this.ended = true; },
+  };
+}
+
+// ── Regression: GET /api/v2/locations scheitert nicht mehr an fehlender Spalte ──
+
+test('REGRESSION: queryLocationsPg referenziert nur real existierende locations-Spalten (kein 503/PG_ERROR mehr)', async () => {
+  const fake = makeFakeClient([
+    {
+      location_id: '1',
+      name: 'DPFA Weiterbildung Chemnitz',
+      notes: null,
+      target_group: null,
+      start_date: null,
+      machine_ids: ['1', '2'],
+      status: 'aktiv',
+    },
+  ]);
+
+  // Vor dem Fix warf dies "column \"status\" does not exist"; jetzt läuft es durch.
+  const profiles = await queryLocationsPg('postgresql://fake/db', () => fake);
+
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0].name, 'DPFA Weiterbildung Chemnitz');
+  assert.equal(profiles[0].status, 'aktiv');
+  assert.deepEqual(profiles[0].machine_ids, ['1', '2']);
+  assert.equal(profiles[0].target_group, null);
+  assert.equal(profiles[0].start_date, null);
+  assert.equal(fake.connected, true);
+  assert.equal(fake.ended, true);
+
+  // machine_ids/target_group werden aus dem realen Schema abgeleitet.
+  assert.match(fake.calls[0].sql, /automatenlager\.machines/);
+  assert.match(fake.calls[0].sql, /customer_group/);
+});
+
+test('REGRESSION-GUARD: die Spaltenprüfung erkennt eine wieder eingeführte status-Spalte', () => {
+  // Stellt sicher, dass der obige Test nicht vacuous ist: würde jemand erneut
+  // `l.status` o. Ä. selektieren, schlägt die emulierte DB-Prüfung an.
+  assert.throws(
+    () => assertOnlyRealLocationColumns('SELECT l.status, l.start_date FROM automatenlager.locations l'),
+    /column "status" does not exist/,
+  );
+  // Und das tatsächliche Produktiv-SELECT besteht die Prüfung.
+  assert.doesNotThrow(() => assertOnlyRealLocationColumns(LOCATIONS_SELECT_SQL));
+});
+
+test('queryLocationsPg-Ergebnis ist direkt mit buildLocationComparison kompatibel', async () => {
+  const fake = makeFakeClient([
+    { location_id: '1', name: 'Standort A', notes: null, target_group: 'Schule', start_date: null, machine_ids: ['VM01'], status: 'aktiv' },
+  ]);
+  const profiles = await queryLocationsPg('x', () => fake);
+  const cmp = buildLocationComparison(profiles, [
+    { machine_id: 'VM01', revenue_net: 100, db_net: 30, qty: 10, slot_turnover: 1, inventory_value: 50 },
+  ]);
+  assert.equal(cmp[0].name, 'Standort A');
+  assert.equal(cmp[0].target_group, 'Schule');
+  assert.equal(cmp[0].kpis.revenue_net, 100);
+  assert.equal(cmp[0].kpis.qty, 10);
+});
+
+// ── Schreibpfad: upsertLocationPg an reales Schema angepasst ────────────────────
+
+test('upsertLocationPg schreibt nur reale Spalten und nutzt ON CONFLICT (location_key)', async () => {
+  const fake = makeFakeClient((sql, params) => [
+    { location_id: '7', location_key: params[0], name: params[1], location_type: params[2], customer_group: params[3], notes: params[4] },
+  ]);
+
+  const saved = await upsertLocationPg('x', {
+    name: 'Büro Berlin',
+    status: 'aktiv',
+    notes: 'Kantine EG',
+    start_date: null,
+    target_group: 'Mitarbeiter',
+    machine_ids: ['VM01'],
+  }, () => fake);
+
+  const { sql, params } = fake.calls[0];
+  // ON CONFLICT muss auf den realen Unique-Key (location_key) zielen, nicht auf name.
+  assert.match(sql, /ON CONFLICT \(location_key\)/);
+  // Nicht existierende Spalten dürfen nicht geschrieben werden.
+  assert.doesNotMatch(sql, /\bstatus\b/);
+  assert.doesNotMatch(sql, /start_date/);
+  assert.doesNotMatch(sql, /machine_ids/);
+  // Mapping: target_group → customer_group, location_key aus Name generiert.
+  assert.equal(params[0], 'LOC_BUERO_BERLIN');
+  assert.equal(params[1], 'Büro Berlin');
+  assert.equal(params[3], 'Mitarbeiter');
+  assert.equal(params[4], 'Kantine EG');
+  // Ergebnis wird zurück ins Domänenmodell gemappt.
+  assert.equal(saved.name, 'Büro Berlin');
+  assert.equal(saved.target_group, 'Mitarbeiter');
+  assert.deepEqual(saved.machine_ids, []);
+});
+
+test('upsertLocationPg akzeptiert expliziten location_key und location_type', async () => {
+  const fake = makeFakeClient((sql, params) => [
+    { location_id: '8', location_key: params[0], name: params[1], location_type: params[2], customer_group: params[3], notes: params[4] },
+  ]);
+  await upsertLocationPg('x', {
+    name: 'DPFA Chemnitz', status: 'aktiv', machine_ids: [],
+    location_key: 'LOC_DPFA_CHEMNITZ', location_type: 'bildung',
+  }, () => fake);
+  assert.equal(fake.calls[0].params[0], 'LOC_DPFA_CHEMNITZ');
+  assert.equal(fake.calls[0].params[2], 'bildung');
+});
+
+test('slugifyLocationKey transliteriert Umlaute und erzeugt LOC_-Prefix', () => {
+  assert.equal(slugifyLocationKey('DPFA Weiterbildung Chemnitz'), 'LOC_DPFA_WEITERBILDUNG_CHEMNITZ');
+  assert.equal(slugifyLocationKey('Büro Süd'), 'LOC_BUERO_SUED');
+  assert.equal(slugifyLocationKey('Straße 1'), 'LOC_STRASSE_1');
+  assert.equal(slugifyLocationKey('   '), 'LOC_STANDORT');
+});

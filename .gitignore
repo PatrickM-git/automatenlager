@@ -73,6 +73,7 @@ vite.config.ts.timestamp-*
 .env.*
 !.env.example
 !dashboard/.env.example
+!dashboard/.env.connections.example
 
 # Local one-off helper scripts
 patch_*.py

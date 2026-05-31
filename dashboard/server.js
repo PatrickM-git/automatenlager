@@ -17,6 +17,8 @@ const { buildMachineProfile, getMachineOptions, queryMachineProfilesPg, upsertMa
 const { buildProductSuggestion, validateCorrectionAction, buildCorrectionActionPayload, buildCorrectionActionAuditEntry } = require('./lib/correction-action.js');
 const { buildOnboardingStartPayload, validateOnboardingStart, buildOnboardingStartAuditEntry } = require('./lib/onboarding-start.js');
 const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buildSlotAssignAuditEntry } = require('./lib/slot-assign-inline.js');
+const { resolvePgUrl } = require('./lib/pg-url.js');
+const { runSchemaCheck } = require('./lib/db-schema.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -213,7 +215,41 @@ function formatBerlinDateTime(date) {
 }
 
 function dashboardV2PgUrl() {
-  return clean(process.env.DASHBOARD_V2_PG_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL);
+  // Priorität: echte Prozess-Umgebung > .env.local (wie bei der n8n-Konfiguration).
+  return resolvePgUrl(process.env, loadLocalEnv());
+}
+
+// Beim Start einmalig prüfen, ob der Dashboard-Code zum echten DB-Schema passt.
+// Nicht-blockierend, wirft nie: bei fehlender/unerreichbarer DB still überspringen.
+async function logStartupSchemaCheck() {
+  const pgUrl = dashboardV2PgUrl();
+  if (!pgUrl) return; // PG nicht konfiguriert → nichts zu prüfen
+  let client;
+  try {
+    const { Client } = require('pg');
+    client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 4000 });
+    await client.connect();
+  } catch (err) {
+    console.log(`ℹ Schema-Check übersprungen (PG nicht erreichbar: ${err.code || err.message}).`);
+    if (client) { try { await client.end(); } catch { /* egal */ } }
+    return;
+  }
+  try {
+    const report = await runSchemaCheck(client, __dirname);
+    if (report.healthy) {
+      console.log(`✓ Schema-Contract erfüllt (${report.checkedColumnRefs} Spalten-Refs, ${report.checkedRelations} Relationen gegen DB geprüft).`);
+    } else {
+      console.warn('⚠ Schema-Drift erkannt — der Dashboard-Code erwartet etwas, das die DB nicht hat:');
+      if (report.missingRelations.length) console.warn(`  fehlende Relationen: ${report.missingRelations.join(', ')}`);
+      if (report.missingReferencedRelations.length) console.warn(`  benutzte, aber fehlende Relationen: ${report.missingReferencedRelations.join(', ')}`);
+      for (const v of report.missingColumns) console.warn(`  fehlende Spalte: ${v.relation}.${v.column}`);
+      console.warn('  → Details: GET /api/v2/_diagnostics/schema');
+    }
+  } catch (err) {
+    console.log(`ℹ Schema-Check fehlgeschlagen: ${err.message}`);
+  } finally {
+    try { await client.end(); } catch { /* egal */ }
+  }
 }
 
 function collectRawBody(req, maxBytes) {
@@ -2313,6 +2349,40 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // ── Diagnostics: Schema-Contract gegen die echte DB prüfen ─────────────────
+
+    if (parsed.pathname === '/api/v2/_diagnostics/schema' && req.method === 'GET') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        sendJson(res, 403, { ok: false, error: { code: 'FORBIDDEN', message: 'Nur Admins können die Schema-Diagnose abrufen.' } });
+        return;
+      }
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      try {
+        const { Client } = require('pg');
+        const client = new Client({ connectionString: pgUrl });
+        await client.connect();
+        try {
+          const report = await runSchemaCheck(client, __dirname);
+          // Gesundes Schema → 200, Drift → 503 (so lässt es sich per Status-Code überwachen).
+          sendJson(res, report.healthy ? 200 : 503, {
+            ok: report.healthy,
+            generatedAt: new Date().toISOString(),
+            report,
+          });
+        } finally {
+          await client.end();
+        }
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
     // ── Locations routes ──────────────────────────────────────────────────────
 
     if (parsed.pathname === '/api/v2/locations' && req.method === 'GET') {
@@ -2746,4 +2816,6 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Automatenlager dashboard running at http://localhost:${PORT}`);
+  // Nicht awaiten: Startup nicht blockieren, nur informativ loggen.
+  logStartupSchemaCheck();
 });
