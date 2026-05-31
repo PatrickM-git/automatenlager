@@ -376,3 +376,137 @@ test('buildProductsByIdQuery: schema-qualifiziert, liefert product_id + name', (
   assert.ok(/\bproduct_id\b/.test(text));
   assert.ok(/\bname\b/.test(text));
 });
+
+// ── HTTP-Endpunkte: preview (read-only) + apply (admin-only) ──────────────────
+
+const http = require('node:http');
+const { spawn } = require('node:child_process');
+
+function getFreePort() {
+  return new Promise((resolve) => {
+    const srv = http.createServer();
+    srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => resolve(port)); });
+  });
+}
+
+function request(port, urlPath, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const method = opts.method || 'GET';
+    const req = http.request(
+      { hostname: '127.0.0.1', port, path: urlPath, method, headers: opts.headers || {} },
+      (res) => {
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode, json: () => JSON.parse(body) }));
+      },
+    );
+    req.on('error', reject);
+    if (opts.body) req.write(opts.body);
+    req.end();
+  });
+}
+
+function startDashboard(port, envOverrides = {}) {
+  const child = spawn(process.execPath, ['server.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PORT: String(port),
+      N8N_BASE_URL: 'http://127.0.0.1:9',
+      N8N_API_KEY: 'test-key',
+      DASHBOARD_V2_PG_URL: '',
+      DASHBOARD_ADMIN_LOGIN: 'admin@example.test',
+      ...envOverrides,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { child.kill(); reject(new Error('Server timeout')); }, 10_000);
+    child.stdout.on('data', (chunk) => {
+      if (String(chunk).includes(`http://localhost:${port}`)) { clearTimeout(timeout); resolve(child); }
+    });
+    child.stderr.resume();
+    child.on('exit', (code) => { if (code !== null && code !== 0) { clearTimeout(timeout); reject(new Error(`Exit ${code}`)); } });
+  });
+}
+
+test('Endpoint: GET /api/v2/nayax-abgleich/preview ohne machine -> 400', async () => {
+  const port = await getFreePort();
+  const child = await startDashboard(port);
+  try {
+    const res = await request(port, '/api/v2/nayax-abgleich/preview');
+    assert.equal(res.status, 400);
+    const body = res.json();
+    assert.equal(body.ok, false);
+    assert.equal(body.error.code, 'MISSING_PARAMS');
+  } finally { child.kill(); }
+});
+
+test('Endpoint: GET /api/v2/nayax-abgleich/preview ohne PG -> 503 PG_UNCONFIGURED', async () => {
+  const port = await getFreePort();
+  const child = await startDashboard(port);
+  try {
+    const res = await request(port, '/api/v2/nayax-abgleich/preview?machine=457107528');
+    assert.equal(res.status, 503);
+    const body = res.json();
+    assert.equal(body.ok, false);
+    assert.equal(body.error.code, 'PG_UNCONFIGURED');
+  } finally { child.kill(); }
+});
+
+test('Endpoint: POST /api/v2/nayax-abgleich/apply -> 403 fuer Gast', async () => {
+  const port = await getFreePort();
+  const child = await startDashboard(port, { DASHBOARD_ADMIN_LOGIN: 'admin@example.test' });
+  try {
+    const res = await request(port, '/api/v2/nayax-abgleich/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'tailscale-user-login': 'guest@example.test' },
+      body: JSON.stringify({ machine: '457107528' }),
+    });
+    assert.equal(res.status, 403);
+    const body = res.json();
+    assert.equal(body.ok, false);
+    assert.equal(body.error.code, 'READ_ONLY_FORBIDDEN');
+  } finally { child.kill(); }
+});
+
+test('Endpoint: POST /api/v2/nayax-abgleich/apply (Admin) ohne machine -> 400', async () => {
+  const port = await getFreePort();
+  const child = await startDashboard(port, { DASHBOARD_ADMIN_LOGIN: 'admin@example.test' });
+  try {
+    const res = await request(port, '/api/v2/nayax-abgleich/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'tailscale-user-login': 'admin@example.test' },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 400);
+    const body = res.json();
+    assert.equal(body.ok, false);
+    assert.equal(body.error.code, 'MISSING_FIELDS');
+  } finally { child.kill(); }
+});
+
+test('Endpoint: POST /api/v2/nayax-abgleich/apply (Admin, machine, kein PG) -> 503', async () => {
+  const port = await getFreePort();
+  const child = await startDashboard(port, { DASHBOARD_ADMIN_LOGIN: 'admin@example.test' });
+  try {
+    const res = await request(port, '/api/v2/nayax-abgleich/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'tailscale-user-login': 'admin@example.test' },
+      body: JSON.stringify({ machine: '457107528' }),
+    });
+    assert.equal(res.status, 503);
+    const body = res.json();
+    assert.equal(body.ok, false);
+    assert.equal(body.error.code, 'PG_UNCONFIGURED');
+  } finally { child.kill(); }
+});
+
+test('Endpoint: kein Roh-Schreibpfad (PUT /api/v2/nayax-abgleich/raw -> 404)', async () => {
+  const port = await getFreePort();
+  const child = await startDashboard(port);
+  try {
+    const res = await request(port, '/api/v2/nayax-abgleich/raw', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    assert.equal(res.status, 404);
+  } finally { child.kill(); }
+});

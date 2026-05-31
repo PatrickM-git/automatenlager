@@ -1669,6 +1669,9 @@
           '<span class="v3-slots-stage__name">' + esc(machine.machine_name) + '</span>' +
           (machine.location_name ? '<span class="v3-slots-stage__loc">' + esc(machine.location_name) + '</span>' : '') +
           (canEdit ? '<button type="button" class="v3-btn v3-btn--brand v3-slots-fillbtn" data-slots-fillall="' + esc(machine.machine_id) + '">Automat voll auffüllen</button>' : '') +
+          // Abgleich-Vorschau ist read-only -> auch für Gäste sichtbar; die
+          // Übernahme im Panel ist admin-only (Server erzwingt 403).
+          '<button type="button" class="v3-btn v3-slots-fillbtn" data-slots-nayax-abgleich="' + esc(machine.machine_id) + '">Aus Nayax abgleichen</button>' +
         '</div>' +
         '<div class="v3-slots-stage__body">' + floorsHtml + '</div>' +
         '<div class="v3-slots-stage__tray" aria-hidden="true"></div>' +
@@ -1745,7 +1748,8 @@
         '</div>' +
         palettePanel +
       '</div>' +
-      '<div class="v3-slots-fillpanel" data-slots-fillpanel hidden></div>';
+      '<div class="v3-slots-fillpanel" data-slots-fillpanel hidden></div>' +
+      '<div class="v3-slots-fillpanel" data-slots-abgleichpanel hidden></div>';
     // Dialog + Toast werden auf document.body portiert (mountSlotDialog/showSlotToast),
     // damit position:fixed am Viewport haftet (Vorfahren der View tragen ein transform).
   }
@@ -2170,6 +2174,156 @@
     });
   }
 
+  /* ---- „Aus Nayax abgleichen" (Vollabgleich Slotbelegung + Füllstand) -- */
+  /* Vorschau (read-only, auch Gäste) -> /api/v2/nayax-abgleich/preview liefert
+     den vollständigen Diff (Umbuchung alt->neu, Menge alt->neu, Onboarding-Liste,
+     PG-only-Slots). Übernahme (admin-only, Confirm) -> /api/v2/nayax-abgleich/apply
+     mit expected_guard (Drift-Schutz). Onboarding/unmatchbar wird übersprungen.
+     Reine Vanilla-JS, gespiegelt am Bulk-Panel (gleiche v3-slots-fill*-Klassen). */
+  function ensureAbgleichPanel() { return viewEl.querySelector('[data-slots-abgleichpanel]'); }
+  function bindAbgleichClose(panel) {
+    panel.querySelectorAll('[data-abgleich-close]').forEach(function (b) {
+      b.addEventListener('click', function () { panel.hidden = true; panel.innerHTML = ''; });
+    });
+  }
+  function abgleichHead(title) {
+    return '<div class="v3-slots-fill-head"><span class="v3-slots-fill-title">' + esc(title) + '</span>' +
+      '<button type="button" class="v3-slots-fill-close" data-abgleich-close aria-label="Schließen">&times;</button></div>';
+  }
+
+  function nayaxAbgleichStart(btn) {
+    var machine = bulkActiveMachine();
+    var panel = ensureAbgleichPanel();
+    if (!machine || !panel) { return; }
+    var machineKey = btn.getAttribute('data-slots-nayax-abgleich') || machine.machine_id;
+    btn.disabled = true;
+    var label = btn.textContent; btn.textContent = 'Nayax wird gelesen …';
+    panel.hidden = false;
+    panel.innerHTML = '<div class="v3-state v3-state--loading" style="min-height:88px"><span class="v3-spinner"></span><p class="v3-state__msg">Nayax-Bestand wird gelesen und abgeglichen …</p></div>';
+    fetchJson('/api/v2/nayax-abgleich/preview?machine=' + encodeURIComponent(machineKey)).then(function (res) {
+      btn.disabled = false; btn.textContent = label;
+      if (!res.ok || !res.json || !res.json.ok) {
+        var msg = (res.json && res.json.error && res.json.error.message) || 'Nayax-Abgleich konnte nicht geladen werden.';
+        panel.innerHTML = abgleichHead('Aus Nayax abgleichen') + '<p class="v3-slots-fill-empty">' + esc(msg) + '</p>';
+        bindAbgleichClose(panel);
+        return;
+      }
+      nayaxAbgleichRenderPreview(panel, machine, res.json, machineKey, _slotsState.canEdit);
+    }).catch(function () {
+      btn.disabled = false; btn.textContent = label;
+      panel.innerHTML = abgleichHead('Aus Nayax abgleichen') + '<p class="v3-slots-fill-empty">Netzwerkfehler beim Nayax-Abgleich.</p>';
+      bindAbgleichClose(panel);
+    });
+  }
+
+  function abgleichArrow(a, b) { return esc(a) + ' &#8594; ' + esc(b); }
+
+  function nayaxAbgleichRenderPreview(panel, machine, diff, machineKey, canEdit) {
+    panel.hidden = false;
+    var ac = diff.assignment_changes || [];
+    var qc = diff.qty_changes || [];
+    var ob = diff.onboarding || [];
+    var pgOnly = diff.pg_only_slots || [];
+    var nChanges = ac.length + qc.length;
+
+    if (nChanges === 0 && ob.length === 0 && pgOnly.length === 0) {
+      panel.innerHTML = abgleichHead('Aus Nayax abgleichen · ' + machine.machine_name) +
+        '<p class="v3-slots-fill-empty">Alles im Einklang mit Nayax – keine Abweichung in Belegung oder Menge.</p>';
+      bindAbgleichClose(panel);
+      return;
+    }
+
+    var sections = '';
+    if (ac.length) {
+      sections += '<p class="v3-slots-fill-lead"><b>Produktwechsel (Umbuchung)</b> – Belegung wird angepasst, Menge mitgesetzt.</p>' +
+        '<div class="v3-slots-fill-rows">' + ac.map(function (c) {
+          return '<div class="v3-slots-fill-row">' +
+            '<span class="v3-slots-fill-row__name">' + abgleichArrow(c.old_product_name || ('#' + c.old_product_id), c.new_product_name || ('#' + c.new_product_id)) + ' <em>· Slot ' + esc(c.mdb_code) + '</em></span>' +
+            '<span class="v3-slots-fill-row__qty">' + esc(c.old_qty) + ' &#8594; ' + esc(c.new_qty) + '</span>' +
+            '<span class="v3-slots-fill-row__cap">Umbuchung</span>' +
+          '</div>';
+        }).join('') + '</div>';
+    }
+    if (qc.length) {
+      sections += '<p class="v3-slots-fill-lead"><b>Mengen-Abgleich</b> – gleiches Produkt, Füllstand aus Nayax.</p>' +
+        '<div class="v3-slots-fill-rows">' + qc.map(function (q) {
+          var d = Number(q.new_qty) - Number(q.old_qty);
+          return '<div class="v3-slots-fill-row">' +
+            '<span class="v3-slots-fill-row__name">' + esc(q.product_name || ('Slot ' + q.mdb_code)) + ' <em>· Slot ' + esc(q.mdb_code) + '</em></span>' +
+            '<span class="v3-slots-fill-row__qty">' + esc(q.old_qty) + ' &#8594; ' + esc(q.new_qty) + '</span>' +
+            '<span class="v3-slots-fill-row__add' + (d < 0 ? ' is-zero' : '') + '">' + (d >= 0 ? '+' : '') + d + '</span>' +
+          '</div>';
+        }).join('') + '</div>';
+    }
+    if (ob.length) {
+      sections += '<p class="v3-slots-fill-note"><b>Neue / unbekannte Produkte – erst onboarden</b> (werden beim Übernehmen übersprungen):<br>' +
+        ob.map(function (o) {
+          var why = o.reason === 'kein_match' ? 'kein Produkt-Treffer' : 'noch kein Slot im Dashboard';
+          return esc(o.product_name || ('Slot ' + o.mdb_code)) + ' (Slot ' + esc(o.mdb_code) + ', ' + esc(o.on_hand) + ' Stk., ' + why + ')';
+        }).join('; ') + '.</p>';
+    }
+    if (pgOnly.length) {
+      sections += '<p class="v3-slots-fill-note">Im Dashboard, aber nicht in Nayax (nur Hinweis, wird nicht geändert): ' +
+        pgOnly.map(function (s) { return esc(s.product_name || ('Slot ' + s.mdb_code)) + ' (Slot ' + esc(s.mdb_code) + ')'; }).join('; ') + '.</p>';
+    }
+
+    var expectedQtySum = ac.reduce(function (s, c) { return s + Number(c.new_qty || 0); }, 0)
+      + qc.reduce(function (s, q) { return s + Number(q.new_qty || 0); }, 0);
+
+    var actionRight = canEdit
+      ? '<button type="button" class="v3-btn" data-abgleich-close>Abbrechen</button>' +
+        '<button type="button" class="v3-btn v3-btn--brand" data-abgleich-confirm' + (nChanges === 0 ? ' disabled' : '') + '>Übernehmen</button>'
+      : '<span class="v3-slots-fill-note" style="margin:0">Übernehmen ist Admins vorbehalten.</span>' +
+        '<button type="button" class="v3-btn" data-abgleich-close>Schließen</button>';
+
+    panel.innerHTML =
+      abgleichHead('Aus Nayax abgleichen · ' + machine.machine_name) +
+      sections +
+      '<div class="v3-slots-fill-actions">' +
+        '<span class="v3-slots-fill-sum">' + nChanges + ' Änderung(en) · ' + ac.length + ' Umbuchung · ' + qc.length + ' Menge</span>' +
+        actionRight +
+      '</div>';
+    bindAbgleichClose(panel);
+    var cBtn = panel.querySelector('[data-abgleich-confirm]');
+    if (cBtn) {
+      cBtn.addEventListener('click', function () {
+        nayaxAbgleichConfirm(panel, machine, machineKey, { expected_changes: nChanges, expected_qty_sum: expectedQtySum });
+      });
+    }
+    if (panel.scrollIntoView) { panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  }
+
+  function nayaxAbgleichConfirm(panel, machine, machineKey, expectedGuard) {
+    var cBtn = panel.querySelector('[data-abgleich-confirm]');
+    if (cBtn) { cBtn.disabled = true; cBtn.textContent = 'Wird übernommen …'; }
+    postJson('/api/v2/nayax-abgleich/apply', { machine: machineKey, expected_guard: expectedGuard }).then(function (r) {
+      if (r.ok && r.json && r.json.ok) {
+        var applied = r.json.applied != null ? r.json.applied : '?';
+        var skipped = (r.json.skipped && (r.json.skipped.onboarding + r.json.skipped.pg_only)) || 0;
+        panel.hidden = true; panel.innerHTML = '';
+        showSlotToast(applied + ' Slot(s) aus Nayax übernommen' + (skipped ? ' · ' + skipped + ' übersprungen (Onboarding)' : '') + '.');
+        renderRoute(ROUTE_BY_PATH['/slots']);   // Belegung + Bestände neu laden
+        return;
+      }
+      var err = (r.json && r.json.error && r.json.error.code) || '';
+      var msg = (r.json && r.json.error && r.json.error.message) || (r.json && r.json.message) || 'Übernahme fehlgeschlagen.';
+      if (err === 'PREVIEW_VERALTET') {
+        // Daten haben sich seit der Vorschau geändert -> Vorschau neu laden.
+        var startBtn = viewEl.querySelector('[data-slots-nayax-abgleich="' + machineKey + '"]');
+        if (startBtn) { nayaxAbgleichStart(startBtn); }
+        showSlotToast(msg);
+        return;
+      }
+      if (cBtn) { cBtn.disabled = false; cBtn.textContent = 'Übernehmen'; }
+      var sum = panel.querySelector('.v3-slots-fill-sum');
+      if (sum) { sum.textContent = msg; }
+    }).catch(function () {
+      if (cBtn) { cBtn.disabled = false; cBtn.textContent = 'Übernehmen'; }
+      var sum = panel.querySelector('.v3-slots-fill-sum');
+      if (sum) { sum.textContent = 'Netzwerkfehler bei der Übernahme.'; }
+    });
+  }
+
   /* ---- Zustand + Hilfsfunktionen --------------------------------------- */
   var _slotsState = { machines: [], palette: [], canEdit: false, activeMachine: 0 };
 
@@ -2390,6 +2544,13 @@
         var stagewrap = viewEl.querySelector('[data-slots-stagewrap]');
         if (stagewrap) { stagewrap.innerHTML = renderMachineStage(_slotsState.machines[_slotsState.activeMachine], _slotsState.canEdit); }
       });
+    });
+
+    // „Aus Nayax abgleichen" – Vorschau ist read-only (auch Gäste), daher VOR
+    // dem canEdit-Return gebunden. Delegiert auf root (übersteht Stage-Neuaufbau).
+    root.addEventListener('click', function (e) {
+      var ab = e.target.closest && e.target.closest('[data-slots-nayax-abgleich]');
+      if (ab) { nayaxAbgleichStart(ab); }
     });
 
     if (!_slotsState.canEdit) { return; }

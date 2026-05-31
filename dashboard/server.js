@@ -21,6 +21,19 @@ const { buildProductCatalog } = require('./lib/product-catalog.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
 const { SLOW_MOVER } = require('./lib/slow-mover.js');
+const {
+  normalizeNayaxItems,
+  buildAliasIndex,
+  buildAbgleichDiff,
+  buildApplyPlan,
+  validateAbgleichApply,
+  buildAbgleichPreviewPayload,
+  buildAbgleichApplyPayload,
+  buildAbgleichAuditEntry,
+  buildActiveSlotsQuery,
+  buildNayaxAliasesQuery,
+  buildProductsByIdQuery,
+} = require('./lib/nayax-abgleich.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
@@ -222,6 +235,55 @@ function formatBerlinDateTime(date) {
 function dashboardV2PgUrl() {
   // Priorität: echte Prozess-Umgebung > .env.local (wie bei der n8n-Konfiguration).
   return resolvePgUrl(process.env, loadLocalEnv());
+}
+
+// Vollabgleich-Diff (Slotbelegung + Füllstand) Nayax -> PG, read-only.
+// Holt die Nayax-Items vom Mini-WF (mode=preview, Credential liegt in n8n),
+// liest PG (aktive Slots + Nayax-Aliase + Produktnamen) und baut den Diff über
+// die getestete reine Logik in lib/nayax-abgleich.js. Wirft bei Webhook-/PG-
+// Fehlern (mit err.code) -> der Aufrufer mappt auf HTTP-Status.
+async function computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey) {
+  const wfResp = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildAbgleichPreviewPayload(machineKey)),
+  });
+  if (!wfResp.ok) {
+    const text = await wfResp.text().catch(() => '');
+    const err = new Error(`Nayax-Webhook antwortete ${wfResp.status}: ${text.slice(0, 200)}`);
+    err.code = 'NAYAX_WEBHOOK_ERROR';
+    throw err;
+  }
+  let wfJson;
+  try { wfJson = await wfResp.json(); } catch { wfJson = {}; }
+  const rawItems = wfJson.nayax_items
+    || wfJson.items
+    || (wfJson.data && (wfJson.data.nayax_items || wfJson.data.items))
+    || (Array.isArray(wfJson.data) ? wfJson.data : null)
+    || [];
+  const nayaxItems = normalizeNayaxItems(Array.isArray(rawItems) ? rawItems : []);
+
+  const { Client } = require('pg');
+  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
+  await client.connect();
+  let pgSlots; let aliasRows; let productRows;
+  try {
+    const slotsQ = buildActiveSlotsQuery({ machineKey });
+    const aliasQ = buildNayaxAliasesQuery();
+    const prodQ = buildProductsByIdQuery();
+    const [sRes, aRes, pRes] = await Promise.all([
+      client.query(slotsQ.text, slotsQ.values),
+      client.query(aliasQ.text, aliasQ.values),
+      client.query(prodQ.text, prodQ.values),
+    ]);
+    pgSlots = sRes.rows; aliasRows = aRes.rows; productRows = pRes.rows;
+  } finally {
+    await client.end();
+  }
+  const aliasIndex = buildAliasIndex(aliasRows);
+  const productsById = {};
+  for (const r of productRows) productsById[Number(r.product_id)] = formatProductName(r.name) ?? r.name;
+  return buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, { machineId: machineKey, productsById });
 }
 
 // Beim Start einmalig prüfen, ob der Dashboard-Code zum echten DB-Schema passt.
@@ -2662,6 +2724,136 @@ const server = http.createServer(async (req, res) => {
         ok: wfResult.ok,
         action_key: payload.action_key,
         status_ref: auditEntry.status_ref,
+        message: wfResult.message,
+        ...(wfResult.ok ? {} : { error: { code: 'WEBHOOK_ERROR', message: wfResult.message } }),
+      });
+      return;
+    }
+
+    // ── Nayax-Abgleich routes (Vollabgleich Slotbelegung + Füllstand) ─────────
+
+    // Vorschau (read-only, auch für Gäste): vollständiger Diff aus Slotbelegung
+    // (Umbuchung alt->neu) + Menge (alt->neu) + Onboarding-Liste + PG-only-Slots.
+    if (parsed.pathname === '/api/v2/nayax-abgleich/preview' && req.method === 'GET') {
+      const machineKey = clean(parsed.query.machine || parsed.query.machine_id || '');
+      if (!machineKey) {
+        sendJson(res, 400, { ok: false, error: { code: 'MISSING_PARAMS', message: 'machine (Nayax-Nummer) erforderlich.' } });
+        return;
+      }
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      const webhookUrl = process.env.NAYAX_ABGLEICH_WEBHOOK_URL;
+      if (!webhookUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'NAYAX_WEBHOOK_UNCONFIGURED', message: 'NAYAX_ABGLEICH_WEBHOOK_URL nicht gesetzt.' } });
+        return;
+      }
+      try {
+        const diff = await computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey);
+        sendJson(res, 200, { ok: true, ...diff });
+      } catch (err) {
+        const code = err.code === 'NAYAX_WEBHOOK_ERROR' ? 502 : 503;
+        sendJson(res, code, { ok: false, error: { code: err.code || 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    // Übernahme (admin-only, 403 für Gast): rechnet den Plan serverseitig aus
+    // FRISCHEN Daten neu (kein Vertrauen auf Client-Operationen), prüft optional
+    // den vom Nutzer gesehenen Guard (Drift-Schutz) und triggert den apply-WF.
+    // Onboarding-/unmatchbare/PG-only-Slots werden NIE geschrieben (übersprungen).
+    if (parsed.pathname === '/api/v2/nayax-abgleich/apply' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        auditGuestAccess(viewer, 'nayax_abgleich_denied', {});
+        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Nur Admins dürfen den Abgleich übernehmen.' } });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await new Promise((resolve, reject) => {
+          let data = '';
+          req.on('data', (chunk) => { data += chunk; });
+          req.on('end', () => { try { resolve(data); } catch (e) { reject(e); } });
+          req.on('error', reject);
+        }));
+      } catch {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON.' } });
+        return;
+      }
+      const machineKey = clean((body && (body.machine || body.machine_id)) || '');
+      if (!machineKey) {
+        sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: 'machine (Nayax-Nummer) erforderlich.' } });
+        return;
+      }
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      const webhookUrl = process.env.NAYAX_ABGLEICH_WEBHOOK_URL;
+      if (!webhookUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'NAYAX_WEBHOOK_UNCONFIGURED', message: 'NAYAX_ABGLEICH_WEBHOOK_URL nicht gesetzt.' } });
+        return;
+      }
+      let plan; let diff;
+      try {
+        diff = await computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey);
+        plan = buildApplyPlan(diff);
+      } catch (err) {
+        const code = err.code === 'NAYAX_WEBHOOK_ERROR' ? 502 : 503;
+        sendJson(res, code, { ok: false, error: { code: err.code || 'PG_ERROR', message: err.message } });
+        return;
+      }
+      const validation = validateAbgleichApply({ machine_id: machineKey, operations: plan.operations });
+      if (!validation.valid) {
+        sendJson(res, 400, { ok: false, error: { code: 'VALIDATION_ERROR', message: validation.errors.map((e) => e.message).join(' '), errors: validation.errors } });
+        return;
+      }
+      // Drift-Schutz: bricht ab, wenn sich seit der gesehenen Vorschau die
+      // Anzahl/Summe der Änderungen verschoben hat (Übernahme = was du gesehen hast).
+      const expected = body.expected_guard;
+      if (expected
+          && (Number(expected.expected_changes) !== plan.guard.expected_changes
+            || Number(expected.expected_qty_sum) !== plan.guard.expected_qty_sum)) {
+        sendJson(res, 409, { ok: false, error: { code: 'PREVIEW_VERALTET', message: 'Die Daten haben sich seit der Vorschau geändert. Bitte Vorschau neu laden.' }, guard: plan.guard });
+        return;
+      }
+      const payload = buildAbgleichApplyPayload(plan, { triggered_by: viewer.login });
+      let wfResult = { ok: true, status_ref: `abgl-${Date.now()}`, message: 'Payload protokolliert.' };
+      try {
+        const wfResponse = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const wfText = await wfResponse.text();
+        let wfBody = null;
+        try { wfBody = JSON.parse(wfText); } catch { /* nicht-JSON Antwort */ }
+        wfResult = {
+          ok: wfResponse.ok && (wfBody == null || wfBody.ok !== false),
+          status_ref: (wfBody && wfBody.status_ref) || `abgl-${Date.now()}`,
+          message: wfResponse.ok ? 'Abgleich übernommen.' : `Webhook antwortete ${wfResponse.status}: ${wfText.slice(0, 200)}`,
+          wf: wfBody,
+        };
+      } catch (err) {
+        wfResult = { ok: false, status_ref: null, message: `Webhook nicht erreichbar: ${err.message}` };
+      }
+      const auditEntry = buildAbgleichAuditEntry(viewer, payload, wfResult);
+      const auditPath = path.join(__dirname, 'logs', 'nayax-abgleich-actions.jsonl');
+      try {
+        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
+        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
+      } catch { /* audit write failure must not block response */ }
+      sendJson(res, wfResult.ok ? 200 : 502, {
+        ok: wfResult.ok,
+        status_ref: auditEntry.status_ref,
+        machine_id: machineKey,
+        applied: plan.operations.length,
+        skipped: { onboarding: diff.onboarding.length, pg_only: diff.pg_only_slots.length },
+        guard: plan.guard,
         message: wfResult.message,
         ...(wfResult.ok ? {} : { error: { code: 'WEBHOOK_ERROR', message: wfResult.message } }),
       });
