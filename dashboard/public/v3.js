@@ -953,6 +953,16 @@
           '<span class="v3-lager-card__expiry-label">' + esc(urg.label) + '</span>' +
         '</div>'
       : '';
+    // Aussortieren-Knopf (admin-only). Bucht die Charge aus (status=ausgesondert,
+    // remaining_qty=0) — entfernt MHD-abgelaufene/entnommene Ware aus dem Bestand.
+    var writeOffBtn = (_lagerCanEdit && card.batch_key)
+      ? '<div class="v3-lager-card__actions">' +
+          '<button type="button" class="v3-lager-card__writeoff" data-writeoff-btn' +
+            ' data-batch-key="' + esc(card.batch_key) + '"' +
+            ' data-product-name="' + esc(card.product_name) + '"' +
+            ' data-remaining="' + esc(String(card.remaining_qty)) + '">Aussortieren</button>' +
+        '</div>'
+      : '';
     return '<article class="v3-lager-card' + mod + '">' +
       '<div class="v3-lager-card__head">' +
         '<span class="v3-lager-card__product">' + esc(card.product_name) + '</span>' +
@@ -980,6 +990,7 @@
         '</div>' +
       '</div>' +
       expiryBar +
+      writeOffBtn +
     '</article>';
   }
 
@@ -1098,6 +1109,8 @@
 
   /* Bind interactive filter events after lager page renders */
   var _lagerAllCards = [];
+  var _lagerCanEdit = false; /* Admin? -> Aussortieren-Knopf auf den Karten (Issue #21) */
+  var WRITE_OFF_REASONS = ['MHD abgelaufen', 'Bruch / Beschädigung', 'Schwund', 'Rückruf', 'Sonstiges'];
   function bindLagerFilters() {
     var grid    = viewEl.querySelector('[data-lager-grid]');
     var chart   = viewEl.querySelector('[data-lager-chart]');
@@ -1180,6 +1193,78 @@
         applyFilter();
       });
     }
+  }
+
+  /* Aussortieren (Issue #21): Knopf-Delegation auf dem Karten-Grid + Modal.
+     Wiederverwendet mountSlotDialog (Portal auf document.body — Pflicht wegen
+     transform-Vorfahr) + showSlotToast. Schreibt via POST /api/v2/inventory/write-off. */
+  function bindLagerWriteOff() {
+    var grid = viewEl.querySelector('[data-lager-grid]');
+    if (!grid || !_lagerCanEdit) { return; }
+    grid.addEventListener('click', function (ev) {
+      var btn = ev.target && ev.target.closest ? ev.target.closest('[data-writeoff-btn]') : null;
+      if (!btn) { return; }
+      openWriteOffDialog({
+        batch_key:    btn.getAttribute('data-batch-key') || '',
+        product_name: btn.getAttribute('data-product-name') || '',
+        remaining:    Number(btn.getAttribute('data-remaining')) || 0,
+      });
+    });
+  }
+
+  function openWriteOffDialog(info) {
+    var reasonOpts = WRITE_OFF_REASONS.map(function (r) {
+      return '<option value="' + esc(r) + '">' + esc(r) + '</option>';
+    }).join('');
+    var body = '' +
+      '<p class="v3-slots-dialog__eyebrow">Aussortieren</p>' +
+      '<p class="v3-slots-dialog__note"><b>' + esc(info.product_name) + '</b> — ' +
+        esc(String(info.remaining)) + ' Stk. werden ausgebucht und verschwinden aus dem Bestand.</p>' +
+      '<div class="v3-writeoff__fields">' +
+        '<label class="v3-writeoff__label" for="v3-writeoff-reason">Grund</label>' +
+        '<select id="v3-writeoff-reason" class="v3-writeoff__select" data-writeoff-reason>' + reasonOpts + '</select>' +
+        '<input type="text" class="v3-writeoff__note" data-writeoff-note maxlength="120"' +
+          ' placeholder="Notiz (optional, überschreibt den Grund)" aria-label="Notiz" />' +
+      '</div>' +
+      '<p class="v3-slots-dialog__error" data-writeoff-error hidden></p>' +
+      '<div class="v3-slots-dialog__actions">' +
+        '<button type="button" class="v3-btn" data-dialog-cancel>Abbrechen</button>' +
+        '<button type="button" class="v3-btn v3-btn--brand" data-writeoff-confirm>Ausbuchen bestätigen</button>' +
+      '</div>';
+    var modal = mountSlotDialog(body, 'Charge aussortieren');
+    var card = modal.card;
+    var confirmBtn = card.querySelector('[data-writeoff-confirm]');
+    var errEl = card.querySelector('[data-writeoff-error]');
+    confirmBtn.addEventListener('click', function () {
+      var sel  = card.querySelector('[data-writeoff-reason]');
+      var note = card.querySelector('[data-writeoff-note]');
+      var reason = (note && note.value.trim()) ? note.value.trim() : (sel ? sel.value : '');
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Wird ausgebucht …';
+      errEl.hidden = true;
+      postJson('/api/v2/inventory/write-off', {
+        batch_key: info.batch_key,
+        reason: reason,
+        expected_remaining_qty: info.remaining,
+      }).then(function (res) {
+        if (res.ok && res.json && res.json.ok) {
+          modal.close();
+          showSlotToast((res.json && res.json.message) || (info.product_name + ' ausgebucht.'));
+          renderRoute(ROUTE_BY_PATH['/lager']);
+        } else {
+          errEl.textContent = (res.json && res.json.error && res.json.error.message) ||
+            ('Ausbuchen fehlgeschlagen (' + res.status + ').');
+          errEl.hidden = false;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Ausbuchen bestätigen';
+        }
+      }).catch(function () {
+        errEl.textContent = 'Netzwerkfehler. Bitte erneut versuchen.';
+        errEl.hidden = false;
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Ausbuchen bestätigen';
+      });
+    });
   }
 
   /* ---- GuV-Seite (Wirtschaftlichkeit / /guv) ---------------------------- */
@@ -3008,6 +3093,7 @@
       } else if (route.path === '/lager' && result.lager) {
         viewEl.innerHTML = pageHead(route) + renderLagerPage(result.lager);
         bindLagerFilters();
+        bindLagerWriteOff();
       } else if (route.path === '/guv') {
         viewEl.innerHTML = pageHead(route) + renderGuvPage(result.guv);
         bindGuvControls();
