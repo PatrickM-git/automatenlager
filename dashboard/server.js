@@ -288,6 +288,9 @@ async function computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey) {
     productsById[Number(r.product_id)] = formatProductName(r.name) ?? r.name;
     if (r.product_key) productKeyById[Number(r.product_id)] = r.product_key;
   }
+  // Alte/Slot-Produktnamen ebenfalls als Klartext anzeigen (sonst rohe SKU im
+  // Diff, vgl. Issue #5); neue Namen kommen bereits formatiert aus productsById.
+  for (const s of pgSlots) { s.product_name = formatProductName(s.product_name) ?? s.product_name; }
   const diff = buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, { machineId: machineKey, productsById });
   return { diff, productKeyById };
 }

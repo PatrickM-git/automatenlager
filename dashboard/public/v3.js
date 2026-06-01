@@ -2199,6 +2199,41 @@
       '<button type="button" class="v3-slots-fill-close" data-abgleich-close aria-label="Schließen">&times;</button></div>';
   }
 
+  // WICHTIG: fetchJson() liefert den geparsten Body DIREKT zurueck (und wirft bei
+  // HTTP non-ok) — NICHT { ok, json }. Daher hier den Body direkt auswerten.
+  function nayaxAbgleichFetch(panel, machine, machineKey, btn, label, attempt) {
+    panel.hidden = false;
+    panel.innerHTML = '<div class="v3-state v3-state--loading" style="min-height:88px"><span class="v3-spinner"></span>' +
+      '<p class="v3-state__msg">Nayax-Bestand wird gelesen und abgeglichen …' + (attempt > 1 ? ' (erneuter Versuch)' : '') + '</p></div>';
+    fetchJson('/api/v2/nayax-abgleich/preview?machine=' + encodeURIComponent(machineKey)).then(function (data) {
+      if (data && data.ok) {
+        if (btn) { btn.disabled = false; btn.textContent = label; }
+        nayaxAbgleichRenderPreview(panel, machine, data, machineKey, _slotsState.canEdit);
+        return;
+      }
+      var reason = (data && data.error && (data.error.message || data.error.code)) || 'unerwartete Antwort';
+      nayaxAbgleichFailOrRetry(panel, machine, machineKey, btn, label, attempt, reason);
+    }).catch(function (e) {
+      nayaxAbgleichFailOrRetry(panel, machine, machineKey, btn, label, attempt, (e && e.message) ? ('HTTP ' + e.message) : 'Netzwerkfehler');
+    });
+  }
+
+  function nayaxAbgleichFailOrRetry(panel, machine, machineKey, btn, label, attempt, reason) {
+    // Transiente Aussetzer (langsamer Nayax-Call/Netz-Blip) einmal automatisch wiederholen.
+    if (attempt < 2) { window.setTimeout(function () { nayaxAbgleichFetch(panel, machine, machineKey, btn, label, attempt + 1); }, 1500); return; }
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+    panel.hidden = false;
+    panel.innerHTML = abgleichHead('Aus Nayax abgleichen') +
+      '<p class="v3-slots-fill-empty">Konnte nicht geladen werden (' + esc(reason) + ').</p>' +
+      '<div class="v3-slots-fill-actions">' +
+        '<button type="button" class="v3-btn" data-abgleich-close>Schließen</button>' +
+        '<button type="button" class="v3-btn v3-btn--brand" data-abgleich-retry>Nochmal versuchen</button>' +
+      '</div>';
+    bindAbgleichClose(panel);
+    var r = panel.querySelector('[data-abgleich-retry]');
+    if (r) { r.addEventListener('click', function () { nayaxAbgleichFetch(panel, machine, machineKey, null, '', 1); }); }
+  }
+
   function nayaxAbgleichStart(btn) {
     var machine = bulkActiveMachine();
     var panel = ensureAbgleichPanel();
@@ -2206,22 +2241,7 @@
     var machineKey = btn.getAttribute('data-slots-nayax-abgleich') || machine.machine_id;
     btn.disabled = true;
     var label = btn.textContent; btn.textContent = 'Nayax wird gelesen …';
-    panel.hidden = false;
-    panel.innerHTML = '<div class="v3-state v3-state--loading" style="min-height:88px"><span class="v3-spinner"></span><p class="v3-state__msg">Nayax-Bestand wird gelesen und abgeglichen …</p></div>';
-    fetchJson('/api/v2/nayax-abgleich/preview?machine=' + encodeURIComponent(machineKey)).then(function (res) {
-      btn.disabled = false; btn.textContent = label;
-      if (!res.ok || !res.json || !res.json.ok) {
-        var msg = (res.json && res.json.error && res.json.error.message) || 'Nayax-Abgleich konnte nicht geladen werden.';
-        panel.innerHTML = abgleichHead('Aus Nayax abgleichen') + '<p class="v3-slots-fill-empty">' + esc(msg) + '</p>';
-        bindAbgleichClose(panel);
-        return;
-      }
-      nayaxAbgleichRenderPreview(panel, machine, res.json, machineKey, _slotsState.canEdit);
-    }).catch(function () {
-      btn.disabled = false; btn.textContent = label;
-      panel.innerHTML = abgleichHead('Aus Nayax abgleichen') + '<p class="v3-slots-fill-empty">Netzwerkfehler beim Nayax-Abgleich.</p>';
-      bindAbgleichClose(panel);
-    });
+    nayaxAbgleichFetch(panel, machine, machineKey, btn, label, 1);
   }
 
   function abgleichArrow(a, b) { return esc(a) + ' &#8594; ' + esc(b); }
