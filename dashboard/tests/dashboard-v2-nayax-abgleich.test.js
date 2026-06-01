@@ -14,6 +14,7 @@ const {
   normalizeName,
   normalizeNayaxItems,
   buildAliasIndex,
+  buildNayaxIdIndex,
   matchNayaxProduct,
   buildAbgleichDiff,
   buildApplyPlan,
@@ -123,6 +124,60 @@ test('buildAliasIndex: mehrere Aliase pro Produkt erlaubt (alle mappen)', () => 
   ]);
   assert.equal(matchNayaxProduct({ product_name: 'Cola' }, idx), 200);
   assert.equal(matchNayaxProduct({ product_name: 'coca cola' }, idx), 200);
+});
+
+// ── Issue #18: Matching ueber NayaxProductID (robuster als Name) ─────────────
+
+test('normalizeNayaxItems: extrahiert nayax_product_id (NayaxProductID/ProductId)', () => {
+  const [a] = normalizeNayaxItems([{ MDBCode: 11, NayaxProductID: 457, Name: 'KitKat', PAR: 8, MissingStockByMDB: 0 }]);
+  assert.equal(a.nayax_product_id, '457');
+  const [b] = normalizeNayaxItems([{ mdb_code: 12, nayax_product_id: '99', product_name: 'X' }]);
+  assert.equal(b.nayax_product_id, '99');
+  const [c] = normalizeNayaxItems([{ mdb_code: 1, product_name: 'ohne id' }]);
+  assert.equal(c.nayax_product_id, null);
+});
+
+test('buildNayaxIdIndex: alias-Rows (numerische ID) -> Map ID->product_id', () => {
+  const idx = buildNayaxIdIndex([
+    { alias: '457', product_id: 6 },
+    { alias: '12345', product_id: 9 },
+    { alias: '', product_id: 7 },        // leer -> ignoriert
+    { alias: '777', product_id: 'x' },   // ungueltige pid -> ignoriert
+  ]);
+  assert.equal(idx.get('457'), 6);
+  assert.equal(idx.get('12345'), 9);
+  assert.equal(idx.size, 2);
+});
+
+test('matchNayaxProduct: NayaxProductID gewinnt vor dem Namen', () => {
+  const nameIdx = buildAliasIndex([{ alias: 'Falscher Name', product_id: 999 }]);
+  const idIdx = buildNayaxIdIndex([{ alias: '457', product_id: 6 }]);
+  // Name wuerde nicht matchen, aber die ID schon -> 6
+  assert.equal(matchNayaxProduct({ nayax_product_id: '457', product_name: 'voellig anders' }, nameIdx, idIdx), 6);
+});
+
+test('matchNayaxProduct: faellt auf Namen zurueck, wenn ID unbekannt/fehlt', () => {
+  const nameIdx = buildAliasIndex([{ alias: 'Snickers', product_id: 101 }]);
+  const idIdx = buildNayaxIdIndex([{ alias: '457', product_id: 6 }]);
+  // ID nicht im Index -> Name-Fallback
+  assert.equal(matchNayaxProduct({ nayax_product_id: '999', product_name: 'Snickers' }, nameIdx, idIdx), 101);
+  // gar keine ID -> Name-Fallback
+  assert.equal(matchNayaxProduct({ product_name: 'Snickers' }, nameIdx, idIdx), 101);
+  // leerer idIndex -> exakt altes Verhalten (rueckwaertskompatibel)
+  assert.equal(matchNayaxProduct({ nayax_product_id: '457', product_name: 'Snickers' }, nameIdx, new Map()), 101);
+});
+
+test('buildAbgleichDiff: ID-Match macht abweichenden Namen unschaedlich (kein Fehl-Umbuchen)', () => {
+  // Slot hat Produkt 6; Nayax meldet denselben Slot mit ABWEICHENDEM Namen,
+  // aber passender NayaxProductID -> per ID erkannt -> unchanged, keine Umbuchung.
+  const pgSlots = [{ slot_assignment_id: 1, mdb_code: 15, product_id: 6, current_machine_qty: 5, product_name: 'Snickers Creamy', product_slot_key: 'PS_1' }];
+  const nayaxItems = normalizeNayaxItems([{ MDBCode: 15, NayaxProductID: 457, Name: 'Snickers Cream Peanut Butter', PAR: 5, MissingStockByMDB: 0 }]);
+  const aliasIndex = buildAliasIndex([{ alias: 'Snickers Creamy', product_id: 6 }]); // Katalogname wuerde NICHT matchen
+  const idIndex = buildNayaxIdIndex([{ alias: '457', product_id: 6 }]);
+  const diff = buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, { machineId: '1', idIndex });
+  assert.equal(diff.assignment_changes.length, 0, 'keine Umbuchung trotz Namensabweichung');
+  assert.equal(diff.onboarding.length, 0, 'kein faelschliches Onboarding');
+  assert.equal(diff.unchanged.length, 1);
 });
 
 // ── buildAbgleichDiff: das Herzstueck ────────────────────────────────────────

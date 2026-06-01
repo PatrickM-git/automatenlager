@@ -27,6 +27,7 @@ const { SLOW_MOVER } = require('./lib/slow-mover.js');
 const {
   normalizeNayaxItems,
   buildAliasIndex,
+  buildNayaxIdIndex,
   buildAbgleichDiff,
   buildApplyPlan,
   buildSlotAssignmentEvents,
@@ -36,6 +37,7 @@ const {
   buildAbgleichAuditEntry,
   buildActiveSlotsQuery,
   buildNayaxAliasesQuery,
+  buildNayaxIdAliasesQuery,
   buildProductsByIdQuery,
 } = require('./lib/nayax-abgleich.js');
 
@@ -270,21 +272,24 @@ async function computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey) {
   const { Client } = require('pg');
   const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
   await client.connect();
-  let pgSlots; let aliasRows; let productRows;
+  let pgSlots; let aliasRows; let idAliasRows; let productRows;
   try {
     const slotsQ = buildActiveSlotsQuery({ machineKey });
     const aliasQ = buildNayaxAliasesQuery();
+    const idAliasQ = buildNayaxIdAliasesQuery();
     const prodQ = buildProductsByIdQuery();
-    const [sRes, aRes, pRes] = await Promise.all([
+    const [sRes, aRes, idRes, pRes] = await Promise.all([
       client.query(slotsQ.text, slotsQ.values),
       client.query(aliasQ.text, aliasQ.values),
+      client.query(idAliasQ.text, idAliasQ.values),
       client.query(prodQ.text, prodQ.values),
     ]);
-    pgSlots = sRes.rows; aliasRows = aRes.rows; productRows = pRes.rows;
+    pgSlots = sRes.rows; aliasRows = aRes.rows; idAliasRows = idRes.rows; productRows = pRes.rows;
   } finally {
     await client.end();
   }
   const aliasIndex = buildAliasIndex(aliasRows);
+  const idIndex = buildNayaxIdIndex(idAliasRows);
   const productsById = {};
   const productKeyById = {};
   for (const r of productRows) {
@@ -294,7 +299,7 @@ async function computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey) {
   // Alte/Slot-Produktnamen ebenfalls als Klartext anzeigen (sonst rohe SKU im
   // Diff, vgl. Issue #5); neue Namen kommen bereits formatiert aus productsById.
   for (const s of pgSlots) { s.product_name = formatProductName(s.product_name) ?? s.product_name; }
-  const diff = buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, { machineId: machineKey, productsById });
+  const diff = buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, { machineId: machineKey, productsById, idIndex });
   return { diff, productKeyById };
 }
 
