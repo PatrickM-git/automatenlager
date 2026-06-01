@@ -80,7 +80,7 @@ function buildMonitoringData(raw = {}) {
   const pgUnreachable = unresolvedWarnings(raw, 'PG_UNREACHABLE').length;
   const backupStale = unresolvedWarnings(raw, 'BACKUP_STALE').length;
   const backupFail = unresolvedWarnings(raw, 'BACKUP_FAIL').length;
-  const hasBackupOk = (raw.warnings || []).some((row) => clean(row.warning_type).toUpperCase() === 'BACKUP_OK');
+  const hasBackupOk = raw.hasBackupOk === true;
   const stale = buildStaleInfo(raw);
 
   const postgresState = pgUnreachable > 0 ? 'red' : 'green';
@@ -130,14 +130,21 @@ function buildOverviewData(raw = {}) {
     `${metrics.openWarningsCount} offene Warnung(en) erfordern Pruefung.`,
     metrics.openWarningsCount,
   );
-  addPriority(
-    priorities,
-    'mhd-risk',
-    'warning',
-    'MHD-Risiko',
-    `${metrics.mhdRiskCount} Produkt(e) mit MHD-Risiko gefunden.`,
-    metrics.mhdRiskCount,
-  );
+  {
+    // Eskaliere auf 'critical', sobald eine Charge bereits abgelaufen ist
+    // (days_remaining < 0). Das MHD-Fenster selbst bleibt wie im Cockpit-KPI
+    // bei 30 Tagen (siehe queryOverviewMonitoringPg), damit der Zaehler zur
+    // v3-Cockpit-Kachel deckungsgleich bleibt.
+    const anyExpired = (raw.mhdItems || []).some((it) => Number(it.days_remaining) < 0);
+    addPriority(
+      priorities,
+      'mhd-risk',
+      anyExpired ? 'critical' : 'warning',
+      'MHD-Risiko',
+      `${metrics.mhdRiskCount} Produkt(e) mit MHD-Risiko gefunden.`,
+      metrics.mhdRiskCount,
+    );
+  }
   addPriority(
     priorities,
     'low-stock',
@@ -159,6 +166,8 @@ function buildOverviewData(raw = {}) {
   return {
     metrics,
     priorities,
+    mhdItems: raw.mhdItems || [],
+    lowStockItems: raw.lowStockItems || [],
   };
 }
 
@@ -169,11 +178,12 @@ async function queryOverviewMonitoringPg(pgUrl) {
   try {
     const [
       openWarningsResult,
-      mhdRiskResult,
-      lowStockResult,
+      mhdItemsResult,
+      lowStockItemsResult,
       economicsResult,
       workflowRunsResult,
       warningsResult,
+      backupOkResult,
     ] = await Promise.all([
       client.query(
         // BACKUP_OK ist eine Erfolgsmeldung, keine offene Warnung — wie in der
@@ -192,22 +202,33 @@ async function queryOverviewMonitoringPg(pgUrl) {
            ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
          ) d`,
       ),
+      // MHD-Risiko: 30-Tage-Fenster wie bisher (KPI-deckungsgleich mit dem
+      // v3-Cockpit), liefert jetzt zusaetzlich die Chargen-Zeilen inkl.
+      // days_remaining fuer den Overview-Drilldown. Bereits abgelaufene Chargen
+      // (days_remaining < 0) sind eingeschlossen und eskalieren die Prioritaet.
       client.query(
-        `SELECT COUNT(*)::int AS count
+        `SELECT p.name AS product_name, sb.batch_key, sb.mhd_date::text,
+                (sb.mhd_date - CURRENT_DATE)::int AS days_remaining
            FROM automatenlager.stock_batches sb
+           JOIN automatenlager.products p ON p.product_id = sb.product_id
           WHERE sb.status IN ('aktiv', 'active')
             AND sb.remaining_qty > 0
             AND sb.mhd_date IS NOT NULL
-            AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'`,
+            AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'
+          ORDER BY sb.mhd_date`,
       ),
+      // Cockpit-KPI "Leere Slots": nur wirklich leere Slots (= 0), deckungsgleich
+      // mit der Detailseite (inventory-mhd.js). "Unter Zielbestand" war als Cockpit-
+      // Signal zu laut (Normalzustand), die echte Aktion ist der leere Slot.
+      // Liefert zusaetzlich die Slot-Zeilen fuer den Overview-Drilldown.
       client.query(
-        // Cockpit-KPI "Leere Slots": nur wirklich leere Slots (= 0), deckungsgleich
-        // mit der Detailseite (inventory-mhd.js). "Unter Zielbestand" war als Cockpit-
-        // Signal zu laut (Normalzustand), die echte Aktion ist der leere Slot.
-        `SELECT COUNT(*)::int AS count
-           FROM automatenlager.slot_assignments
-          WHERE active = TRUE
-            AND current_machine_qty = 0`,
+        `SELECT sa.product_slot_key, sa.machine_id, p.name AS product_name,
+                sa.current_machine_qty
+           FROM automatenlager.slot_assignments sa
+           JOIN automatenlager.products p ON p.product_id = sa.product_id
+          WHERE sa.active = TRUE
+            AND sa.current_machine_qty = 0
+          ORDER BY sa.machine_id, sa.product_slot_key`,
       ),
       client.query(
         `SELECT COALESCE(SUM(revenue_net), 0)::numeric AS revenue_net,
@@ -246,13 +267,27 @@ async function queryOverviewMonitoringPg(pgUrl) {
            created_at DESC
          LIMIT 40`,
       ),
+      // BACKUP_OK separat zaehlen: aus der Warnungs-Liste oben gefiltert, aber
+      // fuer die Backup-Ampel (gruen bei frischem BACKUP_OK) weiterhin noetig.
+      client.query(
+        `SELECT COUNT(*)::int AS count FROM automatenlager.warnings
+          WHERE warning_type = 'BACKUP_OK'
+            AND resolved = FALSE
+            AND created_at >= now() - INTERVAL '3 days'`,
+      ),
     ]);
+
+    const mhdItems = mhdItemsResult.rows || [];
+    const lowStockItems = lowStockItemsResult.rows || [];
 
     return {
       nowIso: new Date().toISOString(),
       openWarningsCount: toNum(openWarningsResult.rows?.[0]?.count),
-      mhdRiskCount: toNum(mhdRiskResult.rows?.[0]?.count),
-      lowStockCount: toNum(lowStockResult.rows?.[0]?.count),
+      mhdRiskCount: mhdItems.length,
+      mhdItems,
+      lowStockCount: lowStockItems.length,
+      lowStockItems,
+      hasBackupOk: toNum(backupOkResult.rows?.[0]?.count) > 0,
       economicsToday: {
         revenueNet: toNum(economicsResult.rows?.[0]?.revenue_net),
         dbNet: toNum(economicsResult.rows?.[0]?.db_net),

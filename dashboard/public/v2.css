@@ -3746,6 +3746,23 @@ h2 {
 .v2-warn-type-chip--critical { background: rgba(220,38,38,.10); color: #dc2626; }
 .v2-warn-type-chip--warning  { background: rgba(196,122,0,.10);  color: #c47a00; }
 .v2-warn-type-chip--info     { background: rgba(37,99,235,.10);  color: #2563eb; }
+.v2-warn-type-chip--error    { background: rgba(220,38,38,.15); color: #b91c1c; }
+.v2-warn-type-chip--sm { padding: 1px 6px; font-size: 0.56rem; }
+
+.v2-warn-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 160px;
+}
+
+.v2-warn-field-ts {
+  display: block;
+  font-size: 0.65rem;
+  color: var(--v2-muted);
+  margin-top: 1px;
+}
 
 .v2-warn-summary {
   display: flex;
