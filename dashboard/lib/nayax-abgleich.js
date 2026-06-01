@@ -76,8 +76,11 @@ function normalizeNayaxItems(rawItems) {
   return rawItems.map((raw) => {
     const par = pick(raw, ['par', 'PAR']);
     const missingMdb = pick(raw, ['missing_mdb', 'MissingStockByMDB']);
+    const rawNid = pick(raw, ['nayax_product_id', 'NayaxProductID', 'ProductId', 'productId']);
+    const nayaxProductId = rawNid == null || String(rawNid).trim() === '' ? null : String(rawNid).trim();
     return {
       mdb_code: toNum(pick(raw, ['mdb_code', 'MDBCode', 'mdbCode'])),
+      nayax_product_id: nayaxProductId,
       product_name: String(pick(raw, ['product_name', 'Name', 'ProductName', 'productName']) ?? '').trim(),
       par: toNum(par),
       missing_mdb: toNum(missingMdb),
@@ -101,8 +104,30 @@ function buildAliasIndex(aliasRows) {
   return index;
 }
 
-/** Nayax-Item -> product_id (oder null), per normalisiertem Namen. */
-function matchNayaxProduct(nayaxItem, aliasIndex) {
+/** id-Rows [{alias|nayax_product_id, product_id}] -> Map String(NayaxProductID) -> product_id.
+ *  Exakter String-Schluessel (keine Namensnormalisierung) — die ID ist eindeutig. */
+function buildNayaxIdIndex(idRows) {
+  const index = new Map();
+  for (const row of idRows || []) {
+    const raw = row && (row.alias != null ? row.alias : row.nayax_product_id);
+    const key = raw == null ? '' : String(raw).trim();
+    if (!key) continue;
+    const pid = Number(row.product_id);
+    if (!Number.isFinite(pid)) continue;
+    if (!index.has(key)) index.set(key, pid); // erster Treffer gewinnt (deterministisch)
+  }
+  return index;
+}
+
+/** Nayax-Item -> product_id (oder null). Bevorzugt die eindeutige NayaxProductID
+ *  (schreibweise-invariant, Issue #18); faellt sonst auf den Produktnamen zurueck. */
+function matchNayaxProduct(nayaxItem, aliasIndex, idIndex) {
+  // 1) Robust: ueber die NayaxProductID (sofern bekannt + gemappt).
+  if (idIndex && nayaxItem && nayaxItem.nayax_product_id != null) {
+    const idKey = String(nayaxItem.nayax_product_id).trim();
+    if (idKey && idIndex.has(idKey)) return idIndex.get(idKey);
+  }
+  // 2) Fallback: ueber den normalisierten Produktnamen.
   if (!aliasIndex) return null;
   const key = normalizeName(nayaxItem && nayaxItem.product_name);
   if (!key) return null;
@@ -120,6 +145,7 @@ function matchNayaxProduct(nayaxItem, aliasIndex) {
  */
 function buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, opts = {}) {
   const productsById = opts.productsById || {};
+  const idIndex = opts.idIndex || null;
   const slotsByMdb = new Map();
   for (const s of pgSlots || []) slotsByMdb.set(toNum(s.mdb_code), s);
 
@@ -133,7 +159,7 @@ function buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, opts = {}) {
     const mdb = toNum(item.mdb_code);
     seenMdb.add(mdb);
     const slot = slotsByMdb.get(mdb);
-    const matchedId = matchNayaxProduct(item, aliasIndex);
+    const matchedId = matchNayaxProduct(item, aliasIndex, idIndex);
     const onHand = toNum(item.on_hand);
 
     if (!slot) {
@@ -462,6 +488,18 @@ function buildNayaxAliasesQuery() {
   return { text, values: [] };
 }
 
+/** Nayax-ID-Aliase (source='nayax_id'): NayaxProductID -> product_id (Issue #18). */
+function buildNayaxIdAliasesQuery() {
+  const text = `
+    SELECT
+      a.alias       AS alias,
+      a.product_id  AS product_id
+    FROM automatenlager.product_aliases a
+    WHERE a.source = 'nayax_id'
+    ORDER BY a.product_id, a.alias`;
+  return { text, values: [] };
+}
+
 /** product_id -> name, fuer die Aufloesung neuer Produktnamen im Diff. */
 function buildProductsByIdQuery() {
   const text = `
@@ -479,6 +517,7 @@ module.exports = {
   normalizeName,
   normalizeNayaxItems,
   buildAliasIndex,
+  buildNayaxIdIndex,
   matchNayaxProduct,
   buildAbgleichDiff,
   buildApplyPlan,
@@ -489,5 +528,6 @@ module.exports = {
   buildAbgleichAuditEntry,
   buildActiveSlotsQuery,
   buildNayaxAliasesQuery,
+  buildNayaxIdAliasesQuery,
   buildProductsByIdQuery,
 };
