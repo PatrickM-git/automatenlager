@@ -1444,6 +1444,27 @@ a.v3-chip:focus-visible {
 .v3-lager-card--crit .v3-lager-card__expiry-label { color: var(--crit); font-weight: 600; }
 .v3-lager-card--warn .v3-lager-card__expiry-label { color: var(--warn); }
 
+/* Aussortieren-Knopf auf den Lager-Karten (admin-only, Issue #21) */
+.v3-lager-card__actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+.v3-lager-card__writeoff {
+  appearance: none; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  padding: 5px 12px; border-radius: 8px;
+  border: 1px solid var(--line-strong); background: var(--card); color: var(--ink-soft);
+  transition: background 0.16s var(--ease), border-color 0.16s var(--ease), color 0.16s var(--ease);
+}
+.v3-lager-card__writeoff:hover {
+  background: rgba(185,28,28,0.08); border-color: var(--crit); color: var(--crit);
+}
+/* Felder im Aussortieren-Dialog (reuse v3-slots-dialog Hülle) */
+.v3-writeoff__fields { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.v3-writeoff__label { font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+.v3-writeoff__select, .v3-writeoff__note {
+  font: inherit; font-size: 14px; width: 100%; box-sizing: border-box;
+  padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong);
+  background: var(--card); color: var(--ink);
+}
+.v3-writeoff__select:focus, .v3-writeoff__note:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+
 /* Empty state within the cards grid */
 .v3-lager-empty {
   grid-column: 1 / -1;
