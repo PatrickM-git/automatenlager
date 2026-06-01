@@ -21,14 +21,24 @@ function clean(value) {
   return String(value ?? '').trim();
 }
 
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
 function toIsoDate(value) {
+  // node-pg liefert DATE-Spalten als JS-Date zur LOKALEN Mitternacht. toISOString()
+  // würde in Zeitzonen mit positivem UTC-Offset (z. B. Europe/Berlin = Prod) auf den
+  // Vortag rutschen (DB 2026-05-27 -> '2026-05-26'). Daher die LOKALEN Datumsteile.
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
+    return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
   }
   const str = clean(value);
   if (!str) return '';
+  // Bereits ein ISO-Datum ('YYYY-MM-DD…')? Direkt übernehmen, kein TZ-Reparse.
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
   const parsed = new Date(str);
-  return Number.isNaN(parsed.getTime()) ? str.slice(0, 10) : parsed.toISOString().slice(0, 10);
+  if (Number.isNaN(parsed.getTime())) return str.slice(0, 10);
+  return `${parsed.getFullYear()}-${pad2(parsed.getMonth() + 1)}-${pad2(parsed.getDate())}`;
 }
 
 function normalizeSeverity(row) {
