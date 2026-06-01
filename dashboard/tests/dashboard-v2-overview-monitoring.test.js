@@ -322,3 +322,66 @@ test('AC-CK2-4: cockpit.js KPI label for low-stock reflects empty slots', () => 
   const src = fs.readFileSync(path.join(process.cwd(), 'lib', 'cockpit.js'), 'utf8');
   assert.match(src, /'low-stock'[\s\S]{0,40}'Leere Slots'/, 'cockpit.js low-stock KPI must be labelled "Leere Slots"');
 });
+
+// ── #17: Overview-Drilldown (MHD-/Leere-Slots-Detaillisten) + BACKUP_OK-Ampel ──
+
+test('AC-DD1: buildOverviewData passes mhdItems and lowStockItems through for the overview drilldown', () => {
+  const overview = buildOverviewData({
+    ...RAW_DATA,
+    mhdItems: [
+      { product_name: 'SKU_NICK_NACKS', batch_key: 'B_NICK_NACKS_1', mhd_date: '2026-06-03', days_remaining: 2 },
+    ],
+    lowStockItems: [
+      { product_slot_key: 'PSID_1', machine_id: 'LH001', product_name: '7 Days Croissant', current_machine_qty: 0 },
+    ],
+  });
+
+  assert.ok(Array.isArray(overview.mhdItems), 'overview.mhdItems must be an array');
+  assert.ok(Array.isArray(overview.lowStockItems), 'overview.lowStockItems must be an array');
+  assert.equal(overview.mhdItems.length, 1);
+  assert.equal(overview.lowStockItems.length, 1);
+  assert.equal(overview.mhdItems[0].batch_key, 'B_NICK_NACKS_1');
+  assert.equal(overview.lowStockItems[0].product_slot_key, 'PSID_1');
+});
+
+test('AC-DD2: buildOverviewData defaults mhdItems/lowStockItems to empty arrays when raw omits them', () => {
+  const overview = buildOverviewData(RAW_DATA);
+
+  assert.deepEqual(overview.mhdItems, []);
+  assert.deepEqual(overview.lowStockItems, []);
+});
+
+test('AC-DD3: mhd-risk priority escalates to critical when a batch is already expired (days_remaining < 0)', () => {
+  const expired = buildOverviewData({
+    ...RAW_DATA,
+    mhdItems: [
+      { product_name: 'A', batch_key: 'B1', mhd_date: '2026-05-30', days_remaining: -2 },
+      { product_name: 'B', batch_key: 'B2', mhd_date: '2026-06-04', days_remaining: 3 },
+    ],
+  });
+  const mhdExpired = expired.priorities.find((p) => p.id === 'mhd-risk');
+  assert.equal(mhdExpired.severity, 'critical', 'expired batch must escalate mhd-risk to critical');
+
+  const soonOnly = buildOverviewData({
+    ...RAW_DATA,
+    mhdItems: [{ product_name: 'B', batch_key: 'B2', mhd_date: '2026-06-04', days_remaining: 3 }],
+  });
+  const mhdSoon = soonOnly.priorities.find((p) => p.id === 'mhd-risk');
+  assert.equal(mhdSoon.severity, 'warning', 'without expired batch mhd-risk stays warning');
+});
+
+test('AC-BO1: backups ampel is green when raw.hasBackupOk is true, yellow when false', () => {
+  const ok = buildMonitoringData({ ...RAW_DATA, warnings: [], hasBackupOk: true });
+  assert.equal(ok.ampels.find((a) => a.key === 'backups').state, 'green');
+
+  const missing = buildMonitoringData({ ...RAW_DATA, warnings: [], hasBackupOk: false });
+  assert.equal(missing.ampels.find((a) => a.key === 'backups').state, 'yellow');
+});
+
+test('AC-BO2: queryOverviewMonitoringPg sources hasBackupOk from a dedicated query, not the filtered warnings list', () => {
+  const src = fs.readFileSync(path.join(process.cwd(), 'lib', 'overview-monitoring.js'), 'utf8');
+
+  // The monitoring ampel must read the explicit flag, since the warnings list filters BACKUP_OK out.
+  assert.match(src, /hasBackupOk\s*=\s*raw\.hasBackupOk\s*===\s*true/, 'hasBackupOk must come from raw.hasBackupOk');
+  assert.match(src, /warning_type\s*=\s*'BACKUP_OK'/, 'a dedicated query must count BACKUP_OK rows');
+});

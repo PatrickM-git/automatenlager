@@ -48,12 +48,23 @@ function renderOverview(payload) {
     if (!priorities.length) {
       prioritiesEl.innerHTML = '<div class="v2-priority-empty">Keine offenen Prioritaeten fuer heute.</div>';
     } else {
+      const DRILLDOWN_IDS = {
+        'warnings-open': 'warningsDrilldownList',
+        'mhd-risk':       'mhdDrilldownList',
+        'low-stock':      'lowStockDrilldownList',
+      };
+
       prioritiesEl.innerHTML = priorities.map((item) => {
-        const isWarn = item.id === 'warnings-open';
-        const toggle = isWarn ? `data-toggle="warningsDrilldownList" aria-expanded="false" role="button" tabindex="0"` : '';
-        const chevron = isWarn ? `<span class="v2-priority-chevron" aria-hidden="true">›</span>` : '';
+        const drillId = DRILLDOWN_IDS[item.id];
+        const isToggleable = !!drillId;
+        const toggleAttrs = isToggleable
+          ? `data-toggle="${escapeHtml(drillId)}" aria-expanded="false" role="button" tabindex="0"`
+          : '';
+        const chevron = isToggleable
+          ? `<span class="v2-priority-chevron" aria-hidden="true">&#8250;</span>`
+          : '';
         return `
-          <div class="v2-priority-item v2-priority-item--${escapeHtml(item.severity)}${isWarn ? ' v2-priority-item--toggleable' : ''}" ${toggle}>
+          <div class="v2-priority-item v2-priority-item--${escapeHtml(item.severity)}${isToggleable ? ' v2-priority-item--toggleable' : ''}" ${toggleAttrs}>
             <div class="v2-priority-main">
               <strong>${escapeHtml(item.title)}</strong>
               <span>${escapeHtml(item.message)}</span>
@@ -65,28 +76,134 @@ function renderOverview(payload) {
           </div>`;
       }).join('');
 
-      // Wire toggle for warnings-open card
-      const warnCard = prioritiesEl.querySelector('[data-toggle="warningsDrilldownList"]');
-      if (warnCard) {
-        const drilldown = document.getElementById('warningsDrilldownList');
+      // Wire all toggleable priority cards generically
+      prioritiesEl.querySelectorAll('[data-toggle]').forEach((card) => {
+        const drilldown = document.getElementById(card.dataset.toggle);
         const toggle = () => {
-          const expanded = warnCard.getAttribute('aria-expanded') === 'true';
-          warnCard.setAttribute('aria-expanded', String(!expanded));
+          const expanded = card.getAttribute('aria-expanded') === 'true';
+          // Collapse all other drilldowns first
+          prioritiesEl.querySelectorAll('[data-toggle]').forEach((other) => {
+            if (other !== card) {
+              other.setAttribute('aria-expanded', 'false');
+              const otherId = other.dataset.toggle;
+              const otherEl = document.getElementById(otherId);
+              if (otherEl) otherEl.hidden = true;
+            }
+          });
+          card.setAttribute('aria-expanded', String(!expanded));
           if (drilldown) drilldown.hidden = expanded;
         };
-        warnCard.addEventListener('click', toggle);
-        warnCard.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
-      }
+        card.addEventListener('click', toggle);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+      });
     }
   }
 
   renderAmpelGrid('#overviewAmpels', data.ampels || []);
 
-  // Drilldown starts hidden — user opens it by clicking the warnings card
-  const drilldownEl = document.getElementById('warningsDrilldownList');
-  if (drilldownEl) drilldownEl.hidden = true;
+  // All drilldowns start hidden
+  ['warningsDrilldownList', 'mhdDrilldownList', 'lowStockDrilldownList'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = true;
+  });
+
   renderWarningsDrilldown(data.warnings || []);
+  renderMhdDrilldown(data.mhdItems || []);
+  renderLowStockDrilldown(data.lowStockItems || []);
 }
+
+function renderMhdDrilldown(items) {
+  const el = document.getElementById('mhdDrilldownList');
+  if (!el) return;
+
+  if (!items || !items.length) {
+    el.innerHTML = `<div class="v2-warn-empty"><span class="v2-warn-empty-icon">&#10003;</span><span>Keine MHD-Risiken.</span></div>`;
+    return;
+  }
+
+  const rows = items.map((item) => {
+    const days = Number(item.days_remaining);
+    const isExpired = days < 0;
+    const sev = isExpired ? 'critical' : days <= 1 ? 'error' : 'warning';
+    const dayLabel = isExpired
+      ? `${Math.abs(days)} Tag(e) abgelaufen`
+      : days === 0 ? 'L&#228;uft heute ab'
+      : days === 1 ? 'L&#228;uft morgen ab'
+      : `Noch ${days} Tage`;
+    const mhdFormatted = item.mhd_date
+      ? new Date(item.mhd_date).toLocaleDateString('de-DE')
+      : '&#8212;';
+    const rawName = String(item.product_name || '');
+    const displayName = rawName.startsWith('SKU_')
+      ? rawName.slice(4).split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+      : rawName || '\u2014';
+    const productName = escapeHtml(displayName);
+    const batchKey = escapeHtml(String(item.batch_key || '&#8212;'));
+    return `
+      <div class="v2-warn-item v2-warn-item--${sev}">
+        <div class="v2-warn-row">
+          <span class="v2-warn-type-chip v2-warn-type-chip--${sev}">${dayLabel}</span>
+          <div class="v2-warn-summary">
+            <span class="v2-warn-entity">${productName}</span>
+            <span class="v2-warn-msg">MHD: ${mhdFormatted} &middot; ${batchKey}</span>
+          </div>
+          <button class="v2-warn-action-btn" data-action="scroll" data-target="inventory">&#8594; Lager pr&#252;fen</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  el.innerHTML = `<div class="v2-warn-list">${rows}</div>`;
+  el.querySelectorAll('.v2-warn-action-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (btn.dataset.action === 'scroll') {
+        document.getElementById(btn.dataset.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
+}
+
+function renderLowStockDrilldown(items) {
+  const el = document.getElementById('lowStockDrilldownList');
+  if (!el) return;
+
+  if (!items || !items.length) {
+    el.innerHTML = `<div class="v2-warn-empty"><span class="v2-warn-empty-icon">&#10003;</span><span>Keine leeren Slots.</span></div>`;
+    return;
+  }
+
+  const rows = items.map((item) => {
+    const rawName = String(item.product_name || '');
+    const displayName = rawName.startsWith('SKU_')
+      ? rawName.slice(4).split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+      : rawName || '\u2014';
+    const productName = escapeHtml(displayName);
+    const slotKey = escapeHtml(String(item.product_slot_key || '&#8212;'));
+    const machineId = escapeHtml(String(item.machine_id || '&#8212;'));
+    return `
+      <div class="v2-warn-item v2-warn-item--critical">
+        <div class="v2-warn-row">
+          <span class="v2-warn-type-chip v2-warn-type-chip--critical">Leer</span>
+          <div class="v2-warn-summary">
+            <span class="v2-warn-entity">${productName}</span>
+            <span class="v2-warn-msg">Slot: ${slotKey} &middot; Automat: ${machineId}</span>
+          </div>
+          <button class="v2-warn-action-btn" data-action="scroll" data-target="inventory">&#8594; Bestand pr&#252;fen</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  el.innerHTML = `<div class="v2-warn-list">${rows}</div>`;
+  el.querySelectorAll('.v2-warn-action-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (btn.dataset.action === 'scroll') {
+        document.getElementById(btn.dataset.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
+}
+
 
 function warnIcon(type) {
   if (!type) return '!';
@@ -119,7 +236,7 @@ function renderWarningsDrilldown(warnings) {
   if (!open.length) {
     el.innerHTML = `
       <div class="v2-warn-empty">
-        <span class="v2-warn-empty-icon">✓</span>
+        <span class="v2-warn-empty-icon">&#10003;</span>
         <span>Keine offenen Warnungen</span>
       </div>`;
     return;
@@ -137,51 +254,93 @@ function renderWarningsDrilldown(warnings) {
     if (t === 'SCHEDULE_GAP')   return { label: 'Workflow-Lücke',        action: null };
     if (t === 'VALIDATION_DRIFT_SHEETS_PG') return { label: 'Datendrift', action: null };
     if (t === 'BACKUP_STALE' || t === 'BACKUP_FAIL') return { label: 'Backup-Problem', action: null };
-    return { label: type || '—', action: null };
+    return { label: type || '\u2014', action: null };
   }
 
-  const items = open.map((w, idx) => {
-    const id  = `wdl-${idx}`;
-    const sev = String(w.severity || 'warning').toLowerCase();
-    const info   = warnTypeInfo(w.warning_type);
-    const entity = escapeHtml(w.entity || w.warning_type || '—');
-    const msg    = escapeHtml(w.message || '—');
-    const ts     = formatWarnTs(w.created_at);
+  const SEV_ORDER = { critical: 0, error: 1, warning: 2, info: 3 };
 
-    let actionBtn = '';
-    if (info.action) {
+  // Group warnings by entity (product name) so each product shows as one card
+  const groups = new Map();
+  for (const w of open) {
+    const key = w.entity || w.warning_type || '\u2014';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(w);
+  }
+
+  // Sort groups by worst severity first
+  const groupEntries = [...groups.entries()].sort((a, b) => {
+    const worstA = Math.min(...a[1].map((w) => SEV_ORDER[w.severity] ?? 4));
+    const worstB = Math.min(...b[1].map((w) => SEV_ORDER[w.severity] ?? 4));
+    return worstA - worstB;
+  });
+
+  const items = groupEntries.map(([entity, ws], idx) => {
+    const id = `wdl-${idx}`;
+
+    // Use worst severity for card border color
+    const worstSev = ws.reduce((best, w) =>
+      (SEV_ORDER[w.severity] ?? 4) < (SEV_ORDER[best] ?? 4) ? w.severity : best,
+    ws[0].severity);
+    const sev = String(worstSev || 'warning').toLowerCase();
+
+    // Type chips (one per warning type in group)
+    const chips = ws.map((w) => {
+      const info = warnTypeInfo(w.warning_type);
+      const chipSev = String(w.severity || 'warning').toLowerCase();
+      return `<span class="v2-warn-type-chip v2-warn-type-chip--${escapeHtml(chipSev)}">${escapeHtml(info.label)}</span>`;
+    }).join('');
+
+    // Action buttons, deduplicated by target
+    const seenTargets = new Set();
+    const actionBtns = [];
+    for (const w of ws) {
+      const info = warnTypeInfo(w.warning_type);
+      if (!info.action) continue;
+      const tk = info.action.target + (info.action.target === 'link' ? (w.correction_link || '') : '');
+      if (seenTargets.has(tk)) continue;
+      seenTargets.add(tk);
       const aLabel = escapeHtml(info.action.label);
       if (info.action.target === 'link' && w.correction_link) {
-        actionBtn = `<button class="v2-warn-action-btn" data-action="link" data-href="${escapeHtml(w.correction_link)}">→ ${aLabel}</button>`;
+        actionBtns.push(`<button class="v2-warn-action-btn" data-action="link" data-href="${escapeHtml(w.correction_link)}">&#8594; ${aLabel}</button>`);
       } else if (info.action.target && info.action.target !== 'link') {
-        actionBtn = `<button class="v2-warn-action-btn" data-action="scroll" data-target="${escapeHtml(info.action.target)}">→ ${aLabel}</button>`;
+        actionBtns.push(`<button class="v2-warn-action-btn" data-action="scroll" data-target="${escapeHtml(info.action.target)}">&#8594; ${aLabel}</button>`);
       }
     }
+
+    // Primary summary: first (most severe) message
+    const primaryMsg = escapeHtml(ws[0].message || '\u2014');
+
+    // Detail: one row per warning in the group
+    const detailRows = ws.map((w) => {
+      const info = warnTypeInfo(w.warning_type);
+      const chipSev = String(w.severity || 'warning').toLowerCase();
+      const ts = formatWarnTs(w.created_at);
+      return `
+        <div class="v2-warn-field">
+          <span class="v2-warn-field-label">
+            <span class="v2-warn-type-chip v2-warn-type-chip--${escapeHtml(chipSev)} v2-warn-type-chip--sm">${escapeHtml(info.label)}</span>
+          </span>
+          <span class="v2-warn-field-value">${escapeHtml(w.message || '\u2014')} <span class="v2-warn-field-ts">${escapeHtml(ts)}</span></span>
+        </div>`;
+    }).join('');
 
     return `
       <div class="v2-warn-item v2-warn-item--${escapeHtml(sev)}" data-id="${id}">
         <div class="v2-warn-row">
           <button class="v2-warn-trigger" aria-expanded="false" aria-controls="wdl-detail-${id}">
-            <span class="v2-warn-type-chip v2-warn-type-chip--${escapeHtml(sev)}">${escapeHtml(info.label)}</span>
+            <div class="v2-warn-chips">${chips}</div>
             <div class="v2-warn-summary">
-              <span class="v2-warn-entity">${entity}</span>
-              <span class="v2-warn-msg">${msg}</span>
+              <span class="v2-warn-entity">${escapeHtml(entity)}</span>
+              <span class="v2-warn-msg">${primaryMsg}</span>
             </div>
-            <span class="v2-warn-chevron" aria-hidden="true">›</span>
+            <span class="v2-warn-chevron" aria-hidden="true">&#8250;</span>
           </button>
-          ${actionBtn ? `<div class="v2-warn-action-wrap">${actionBtn}</div>` : ''}
+          ${actionBtns.length ? `<div class="v2-warn-action-wrap">${actionBtns.join('')}</div>` : ''}
         </div>
         <div class="v2-warn-detail" id="wdl-detail-${id}" role="region" aria-hidden="true">
           <div class="v2-warn-detail-inner">
             <div class="v2-warn-detail-body">
-              <div class="v2-warn-field">
-                <span class="v2-warn-field-label">Meldung</span>
-                <span class="v2-warn-field-value">${msg}</span>
-              </div>
-              <div class="v2-warn-field">
-                <span class="v2-warn-field-label">Zeitpunkt</span>
-                <span class="v2-warn-field-value v2-warn-field-value--ts">${escapeHtml(ts)}</span>
-              </div>
+              ${detailRows}
             </div>
           </div>
         </div>
@@ -213,6 +372,7 @@ function renderWarningsDrilldown(warnings) {
     });
   });
 }
+
 
 async function loadV2Overview() {
   const status = document.querySelector('#v2Status');
