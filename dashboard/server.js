@@ -9,7 +9,6 @@ const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/asso
 const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = require('./lib/overview-monitoring.js');
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
 const { availableBatchStatusSqlList } = require('./lib/stock-status.js');
-const { validateWriteOff, canWriteOff, buildWriteOffAuditEntry, WRITE_OFF_STATUS } = require('./lib/write-off.js');
 const { buildSlotChangePreview, validateSlotChange, buildSlotChangePayload, buildSlotChangeAuditEntry } = require('./lib/slot-change.js');
 const { buildProductOnboardingData, queryProductOnboardingPg } = require('./lib/product-onboarding.js');
 const { buildReportCsv, buildReportFilename } = require('./lib/reports.js');
@@ -1918,93 +1917,6 @@ const server = http.createServer(async (req, res) => {
         message: wfResult.message,
         ...(wfResult.ok ? {} : { error: { code: 'WF7_ERROR', message: wfResult.message } }),
       });
-      return;
-    }
-
-    // ── Inventory write-off (Aussortieren / Ausbuchen) ─────────────────────────
-    // Setzt eine Charge auf status='ausgesondert' + remaining_qty=0 (PG-direkt,
-    // kein Sheet-Patch). Guard per FOR UPDATE: nur verfügbare, nicht-leere
-    // Chargen; optimistic lock über expected_remaining_qty. Issue #21.
-    if (parsed.pathname === '/api/v2/inventory/write-off' && req.method === 'POST') {
-      const viewer = getViewer(req);
-      if (!viewer.canTriggerActions) {
-        auditGuestAccess(viewer, 'write_off_denied', {});
-        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer dürfen keine Charge ausbuchen.' } });
-        return;
-      }
-      let body;
-      try {
-        body = JSON.parse(await new Promise((resolve, reject) => {
-          let data = '';
-          req.on('data', (chunk) => { data += chunk; });
-          req.on('end', () => resolve(data));
-          req.on('error', reject);
-        }));
-      } catch {
-        sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON im Request-Body.' } });
-        return;
-      }
-      const check = validateWriteOff(body);
-      if (!check.valid) {
-        sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: check.errors.map((e) => e.message).join(' ') } });
-        return;
-      }
-      const pgUrl = dashboardV2PgUrl();
-      if (!pgUrl) {
-        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
-        return;
-      }
-      const expectedRemaining = body && body.expected_remaining_qty;
-      const { Client } = require('pg');
-      const client = new Client({ connectionString: pgUrl });
-      let outcome = null;
-      try {
-        await client.connect();
-        await client.query('BEGIN');
-        const sel = await client.query(
-          `SELECT sb.batch_id, sb.product_id, sb.remaining_qty, sb.status
-             FROM automatenlager.stock_batches sb
-            WHERE sb.batch_key = $1
-            FOR UPDATE`,
-          [check.batch_key],
-        );
-        const batch = sel.rows[0] || null;
-        const verdict = canWriteOff(batch, expectedRemaining);
-        if (!verdict.ok) {
-          await client.query('ROLLBACK');
-          const statusCode = verdict.code === 'NOT_FOUND' ? 404 : 409;
-          const messages = {
-            NOT_FOUND: 'Charge nicht gefunden.',
-            ALREADY_WRITTEN_OFF: 'Charge ist bereits ausgebucht.',
-            EMPTY: 'Charge hat keinen Bestand mehr.',
-            DRIFT: `Bestand hat sich geändert (jetzt ${verdict.remaining_qty}). Bitte neu laden.`,
-          };
-          sendJson(res, statusCode, { ok: false, error: { code: verdict.code, message: messages[verdict.code] || 'Ausbuchen nicht möglich.' } });
-          return;
-        }
-        const writtenOff = verdict.remaining_qty;
-        await client.query(
-          `UPDATE automatenlager.stock_batches sb
-              SET status = $2, remaining_qty = 0, updated_at = now()
-            WHERE sb.batch_id = $1`,
-          [batch.batch_id, WRITE_OFF_STATUS],
-        );
-        await client.query('COMMIT');
-        outcome = { ok: true, product_id: Number(batch.product_id) || null, written_off_qty: writtenOff, message: `${writtenOff} Stk. ausgebucht (${check.reason}).` };
-      } catch (err) {
-        try { await client.query('ROLLBACK'); } catch { /* ignore */ }
-        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
-        return;
-      } finally {
-        await client.end();
-      }
-      const auditEntry = buildWriteOffAuditEntry(viewer, check, outcome);
-      const auditPath = path.join(__dirname, 'logs', 'writeoff-actions.jsonl');
-      try {
-        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
-      } catch { /* audit write failure must not block response */ }
-      sendJson(res, 200, { ok: true, data: { batch_key: check.batch_key, product_id: outcome.product_id, written_off_qty: outcome.written_off_qty }, message: outcome.message });
       return;
     }
 
