@@ -1,6 +1,7 @@
 'use strict';
 
 const { formatProductName } = require('./economics.js');
+const { availableBatchStatusSqlList } = require('./stock-status.js');
 
 const SEVERITY_RANK = {
   critical: 0,
@@ -189,7 +190,7 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
                        w2.created_at DESC
               LIMIT 1
            ) w ON TRUE
-          WHERE sb.status IN ('aktiv', 'active')
+          WHERE sb.status IN (${availableBatchStatusSqlList()})
             AND sb.remaining_qty > 0
             AND sb.mhd_date IS NOT NULL
             AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'
@@ -202,7 +203,7 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
         `WITH batch_totals AS (
            SELECT product_id, SUM(remaining_qty)::int AS total_qty
              FROM automatenlager.stock_batches
-            WHERE status IN ('aktiv', 'active')
+            WHERE status IN (${availableBatchStatusSqlList()})
             GROUP BY product_id
          )
          SELECT p.product_id,

@@ -1,5 +1,7 @@
 'use strict';
 
+const { isAvailableBatchStatus } = require('./stock-status.js');
+
 function searchRefillTargets(query, slotRows) {
   if (!query || !query.trim()) return slotRows.slice();
   const q = query.toLowerCase().trim();
@@ -16,7 +18,7 @@ function searchRefillTargets(query, slotRows) {
 
 function buildRefillDetails(slotRow, batchRows, today = new Date()) {
   const freeCap = (slotRow.capacity || 0) - (slotRow.current_machine_qty || 0);
-  const activeBatches = (batchRows || []).filter((b) => b.status === 'aktiv' || b.status === 'active' || b.status == null);
+  const activeBatches = (batchRows || []).filter((b) => isAvailableBatchStatus(b.status));
   const totalBackstock = activeBatches.reduce((sum, b) => sum + (Number(b.remaining_qty) || 0), 0);
 
   const mhdBatches = activeBatches

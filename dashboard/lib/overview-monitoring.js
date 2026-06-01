@@ -1,5 +1,7 @@
 'use strict';
 
+const { availableBatchStatusSqlList } = require('./stock-status.js');
+
 const PIPELINE_STALE_THRESHOLD_MINUTES = 24 * 60;
 
 function clean(value) {
@@ -211,7 +213,7 @@ async function queryOverviewMonitoringPg(pgUrl) {
                 (sb.mhd_date - CURRENT_DATE)::int AS days_remaining
            FROM automatenlager.stock_batches sb
            JOIN automatenlager.products p ON p.product_id = sb.product_id
-          WHERE sb.status IN ('aktiv', 'active')
+          WHERE sb.status IN (${availableBatchStatusSqlList()})
             AND sb.remaining_qty > 0
             AND sb.mhd_date IS NOT NULL
             AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'
