@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/hooks/secret-guard.js"],
+            "timeout": 10,
+            "statusMessage": "Secret-Guard prueft…"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/hooks/wf-encoding-guard.js"],
+            "timeout": 10,
+            "statusMessage": "Encoding-Guard prueft…"
+          }
+        ]
+      }
+    ]
+  }
+}
