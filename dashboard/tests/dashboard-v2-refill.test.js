@@ -143,6 +143,31 @@ test('AC2: buildRefillDetails sums backstock from active batches', () => {
   assert.equal(result.backstock.batches_count, 3);
 });
 
+// Regression Pick-Up-Drift (Session 31): 'reserve'-Chargen sind echter Bestand
+// und muessen mitgezaehlt werden. Vorher filterte refill nur 'aktiv'/'active' →
+// 22 Stk. Pick Up erschienen faelschlich als Backstock 0.
+test('AC2: buildRefillDetails zaehlt reserve-Chargen als Backstock', () => {
+  const reserveBatch = [
+    { batch_key: 'B_PICK_UP', product_id: 66, remaining_qty: 22, mhd_date: '2026-09-01', status: 'reserve', unit_cost_net: '0.50' },
+  ];
+  const slot = { ...SLOT_ROWS[0], product_id: 66, product_name: 'Pick Up' };
+  const result = buildRefillDetails(slot, reserveBatch, TODAY);
+  assert.equal(result.backstock.total_qty, 22);
+  assert.equal(result.backstock.batches_count, 1);
+});
+
+// Gegenprobe: ausgesonderte/leere Chargen bleiben unsichtbar.
+test('AC2: buildRefillDetails ignoriert ausgesondert/leer', () => {
+  const batches = [
+    { batch_key: 'X1', product_id: 10, remaining_qty: 9, mhd_date: null, status: 'ausgesondert', unit_cost_net: '0.50' },
+    { batch_key: 'X2', product_id: 10, remaining_qty: 0, mhd_date: null, status: 'leer', unit_cost_net: '0.50' },
+    { batch_key: 'X3', product_id: 10, remaining_qty: 3, mhd_date: null, status: 'aktiv', unit_cost_net: '0.50' },
+  ];
+  const result = buildRefillDetails(SLOT_ROWS[0], batches, TODAY);
+  assert.equal(result.backstock.total_qty, 3);
+  assert.equal(result.backstock.batches_count, 1);
+});
+
 test('AC2: buildRefillDetails lists only batches with mhd_date in mhd_batches with days_until_mhd', () => {
   const result = buildRefillDetails(SLOT_ROWS[0], BATCH_ROWS, TODAY);
   assert.equal(result.mhd_batches.length, 2); // only B1 and B2 have mhd_date

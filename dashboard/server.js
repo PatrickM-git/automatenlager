@@ -8,9 +8,10 @@ const { buildInventoryMhdData, queryInventoryMhdPg } = require('./lib/inventory-
 const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/assortment-slots.js');
 const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = require('./lib/overview-monitoring.js');
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
+const { availableBatchStatusSqlList } = require('./lib/stock-status.js');
 const { buildSlotChangePreview, validateSlotChange, buildSlotChangePayload, buildSlotChangeAuditEntry } = require('./lib/slot-change.js');
 const { buildProductOnboardingData, queryProductOnboardingPg } = require('./lib/product-onboarding.js');
-const { buildCsvExport, buildCsvFilename } = require('./lib/reports.js');
+const { buildReportCsv, buildReportFilename } = require('./lib/reports.js');
 const { buildLocationProfile, buildLocationComparison, queryLocationsPg, upsertLocationPg } = require('./lib/location-profiles.js');
 const { buildCorrectionCases, queryCorrectionCasesPg } = require('./lib/correction-cases.js');
 const { buildMachineProfile, getMachineOptions, queryMachineProfilesPg, upsertMachineProfilePg } = require('./lib/machine-profiles.js');
@@ -18,6 +19,7 @@ const { buildProductSuggestion, validateCorrectionAction, buildCorrectionActionP
 const { buildOnboardingStartPayload, validateOnboardingStart, buildOnboardingStartAuditEntry } = require('./lib/onboarding-start.js');
 const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buildSlotAssignAuditEntry } = require('./lib/slot-assign-inline.js');
 const { buildProductCatalog } = require('./lib/product-catalog.js');
+const { buildEconomicsScope } = require('./lib/automaten-view.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
 const { SLOW_MOVER } = require('./lib/slow-mover.js');
@@ -1838,7 +1840,7 @@ const server = http.createServer(async (req, res) => {
         const batchResult = await client.query(`
           SELECT batch_key, product_id, remaining_qty, mhd_date::text AS mhd_date, status, unit_cost_net::text AS unit_cost_net
           FROM automatenlager.stock_batches
-          WHERE product_id = $1 AND remaining_qty > 0 AND status = 'aktiv'
+          WHERE product_id = $1 AND remaining_qty > 0 AND status IN (${availableBatchStatusSqlList()})
           ORDER BY mhd_date ASC NULLS LAST
         `, [slotRow.product_id]);
         await client.end();
@@ -2452,20 +2454,25 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
-      const from = clean(parsed.query.from) || new Date().toISOString().slice(0, 7);
-      const to   = clean(parsed.query.to)   || from;
+      // Voller Zeitraum-Query wie die GuV-Seite (Monat/Quartal/Jahr/Eigener)
+      // plus optionaler Standort-/Automaten-Filter (?machines=ID1,ID2).
+      const exportQuery = {
+        mode:     clean(parsed.query.mode),
+        year:     clean(parsed.query.year),
+        quarter:  clean(parsed.query.quarter),
+        from:     clean(parsed.query.from),
+        to:       clean(parsed.query.to),
+        machines: clean(parsed.query.machines),
+      };
       try {
-        const rawData = await queryEconomicsPg(pgUrl, { from, to });
-        const economicsData = buildEconomicsData(rawData, { from, to });
-        const fields = [
-          { key: 'product_name',  label: 'Produkt' },
-          { key: 'revenue_net',   label: 'Umsatz (netto)' },
-          { key: 'db_net',        label: 'Deckungsbeitrag' },
-          { key: 'margin_pct',    label: 'Marge %' },
-          { key: 'qty',           label: 'Menge' },
-        ];
-        const csv = buildCsvExport(economicsData.byProduct, fields);
-        const filename = buildCsvFilename(from, to);
+        const rawData = await queryEconomicsPg(pgUrl, exportQuery);
+        const economicsData = buildEconomicsData(rawData, exportQuery);
+        const { from, to } = economicsData.period;
+        // Brutto-Werte wie auf der Seite, sortiert nach Brutto-Umsatz,
+        // mit Summenzeile + UTF-8-BOM für sauberes Excel.
+        const rows = [...economicsData.byProduct].sort((a, b) => b.revenue_gross - a.revenue_gross);
+        const csv = buildReportCsv(rows);
+        const filename = buildReportFilename(from, to, 'csv');
         res.writeHead(200, {
           'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': `attachment; filename="${filename}"`,
@@ -2514,6 +2521,27 @@ const server = http.createServer(async (req, res) => {
         } finally {
           await client.end();
         }
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    // ── GuV-Filter: Auswahlbaum Standorte + Automaten ─────────────────────────
+
+    if (parsed.pathname === '/api/v2/economics/scope' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      try {
+        const [machines, locations] = await Promise.all([
+          queryMachineProfilesPg(pgUrl),
+          queryLocationsPg(pgUrl),
+        ]);
+        const scope = buildEconomicsScope(machines, locations);
+        sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), data: scope });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
       }
