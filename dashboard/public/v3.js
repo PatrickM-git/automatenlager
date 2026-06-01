@@ -1748,10 +1748,11 @@
         '</div>' +
         palettePanel +
       '</div>' +
-      '<div class="v3-slots-fillpanel" data-slots-fillpanel hidden></div>' +
-      '<div class="v3-slots-fillpanel" data-slots-abgleichpanel hidden></div>';
+      '<div class="v3-slots-fillpanel" data-slots-fillpanel hidden></div>';
     // Dialog + Toast werden auf document.body portiert (mountSlotDialog/showSlotToast),
     // damit position:fixed am Viewport haftet (Vorfahren der View tragen ein transform).
+    // Das Nayax-Abgleich-Panel ebenso: ensureAbgleichPanel() erzeugt es auf
+    // document.body (sonst rendert das fixe Panel weit unten im transformierten View).
   }
 
   /* Client-Spiegel der getesteten lib/slot-editor.js (Swap + Refill) */
@@ -2180,7 +2181,14 @@
      PG-only-Slots). Übernahme (admin-only, Confirm) -> /api/v2/nayax-abgleich/apply
      mit expected_guard (Drift-Schutz). Onboarding/unmatchbar wird übersprungen.
      Reine Vanilla-JS, gespiegelt am Bulk-Panel (gleiche v3-slots-fill*-Klassen). */
-  function ensureAbgleichPanel() { return viewEl.querySelector('[data-slots-abgleichpanel]'); }
+  function ensureAbgleichPanel() {
+    // Auf document.body portiert (via slotsBodyHost), damit das position:fixed-
+    // Bottom-Sheet relativ zum Viewport sitzt und nicht vom transform-Vorfahr
+    // der View weit nach unten gezogen wird (sonst auf dem Handy "unsichtbar").
+    var p = slotsBodyHost('v3-slots-abgleich-host', 'v3-slots-fillpanel');
+    p.setAttribute('data-slots-abgleichpanel', '');
+    return p;
+  }
   function bindAbgleichClose(panel) {
     panel.querySelectorAll('[data-abgleich-close]').forEach(function (b) {
       b.addEventListener('click', function () { panel.hidden = true; panel.innerHTML = ''; });

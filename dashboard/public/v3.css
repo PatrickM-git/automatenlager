@@ -2341,6 +2341,27 @@ a.v3-chip:focus-visible {
   animation: v3-fade 0.24s var(--ease) both;
 }
 .v3-slots-fillpanel[hidden] { display: none; }
+/* Nayax-Abgleich-Panel: festes, zentriertes Floating-Panel (Bottom-Sheet) mit
+   Scrim — auf dem Handy sofort sichtbar, unabhaengig von der Scrollposition der
+   langen Slots-Seite (sonst rendert das Ergebnis weit unten ausserhalb des Sicht-
+   bereichs und der Nutzer sieht nach dem Klick scheinbar "nichts"). */
+.v3-slots-fillpanel[data-slots-abgleichpanel]:not([hidden]) {
+  position: fixed;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom, 16px));
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 24px));
+  max-height: min(82vh, 720px);
+  overflow-y: auto;
+  margin-top: 0;
+  z-index: 1200;
+  box-shadow: var(--shadow-pop), 0 0 0 100vmax rgba(23, 24, 28, 0.38);
+  animation: v3-abgleich-pop 0.2s var(--ease) both;
+}
+@keyframes v3-abgleich-pop {
+  from { opacity: 0; transform: translate(-50%, 14px); }
+  to   { opacity: 1; transform: translateX(-50%); }
+}
 .v3-slots-fill-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .v3-slots-fill-title { font-family: var(--font-display); font-weight: 700; font-size: 17px; }
 .v3-slots-fill-close {
