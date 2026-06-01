@@ -18,8 +18,10 @@
  *
  * Hinweis: Die Bedeutung von `remaining_qty` (Gesamtbestand vs. Lager-only)
  * ist zwischen WF7/WF3/Dashboard noch uneinheitlich — das ist ein separates
- * Datenmodell-Thema (siehe Aussortieren-/Reconciliation-Issue) und wird hier
- * NICHT angefasst. Diese Konstante regelt nur, WELCHE Chargen zählen.
+ * Datenmodell-Thema (dokumentiert in docs/data-model/remaining-qty-semantics.md)
+ * und wird hier NICHT angefasst. Diese Konstante regelt nur, WELCHE Chargen
+ * zählen. Verwandtes Invariant „inaktive Slots zählen nie als Bestand": siehe
+ * tests/dashboard-inactive-slot-stock-invariant.test.js.
  */
 
 const AVAILABLE_BATCH_STATUSES = ['aktiv', 'active', 'reserve'];
