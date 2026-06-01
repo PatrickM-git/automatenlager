@@ -24,6 +24,8 @@
     onboarding:   icon('<circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M18 7v6"/><path d="M15 10h6"/>'),
     automaten:    icon('<rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M8.5 6h3"/><path d="M8.5 9.5h3"/><path d="M8.5 13h3"/><circle cx="16" cy="17.5" r="1"/>'),
     einstellungen:icon('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'),
+    export:       icon('<path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>'),
+    print:        icon('<path d="M6 9V3h12v6"/><rect x="6" y="13" width="12" height="8" rx="1"/><path d="M6 17H4a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2"/>'),
   };
 
   /* ---- Routen-Definition (einzige Quelle der Wahrheit) ----------------- */
@@ -773,11 +775,14 @@
       return Promise.all([
         fetchJson('/api/v2/inventory-mhd'),
         fetchJson('/api/v2/assortment-slots').catch(function () { return {}; }),
+        fetchJson('/api/dashboard').catch(function () { return {}; }),
       ]).then(function (results) {
         var res  = results[0];
         var rows = (res && res.data && res.data.mhdRisks) || [];
         if (rows.length === 0) { return { status: 'empty' }; }
         var slots = (results[1] && results[1].data && results[1].data.slots) || [];
+        var viewer = (results[2] && results[2].viewer) || {};
+        _lagerCanEdit = !!viewer.canTriggerActions;
         var classByKey = {};
         slots.forEach(function (s) {
           if (s && s.turnover_class) {
@@ -793,6 +798,7 @@
           var tclass = classByKey[tkey] || (r.turnover_class != null ? String(r.turnover_class) : null);
           return {
             batch_id:        Number(r.batch_id)      || 0,
+            batch_key:       String(r.batch_key      || ''),
             product_id:      Number(r.product_id)    || 0,
             product_name:    String(r.product_name   || r.product_id || ''),
             mhd_date:        String(r.mhd_date       || ''),
@@ -1192,6 +1198,18 @@
     if (parts.length < 2) { return String(ym || ''); }
     return (GUV_MON[parseInt(parts[1], 10) - 1] || '?') + ' ' + parts[0].slice(2);
   }
+  /* Tages-Label: kurz '15.05.' (Achse) bzw. lang '15. Mai' (Tooltip) */
+  function dayLabel(ymd, long) {
+    var p = String(ymd || '').split('-');
+    if (p.length < 3) { return monthLabel(ymd); }
+    var d = parseInt(p[2], 10), m = parseInt(p[1], 10);
+    if (long) { return d + '. ' + (GUV_MON[m - 1] || ''); }
+    return d + '.' + (m < 10 ? '0' : '') + m + '.';
+  }
+  /* Bucket-Label: erkennt Tages- ('YYYY-MM-DD') vs. Monatsschlüssel ('YYYY-MM') */
+  function bucketLabel(key, long) {
+    return String(key || '').length > 7 ? dayLabel(key, long) : monthLabel(key);
+  }
 
   /* Period-State: was die /guv-Seite gerade abfragt */
   var _guvQuery = (function () {
@@ -1199,18 +1217,27 @@
     return {
       mode: 'month', month: currentYM(), year: now.getFullYear(),
       quarter: Math.floor(now.getMonth() / 3) + 1, from: currentYM(), to: currentYM(),
-      sort: 'revenue_gross', order: 'desc', limit: 10, filter: '',
+      sort: 'revenue_gross', order: 'desc', limit: 10, filter: '', machines: [],
     };
   })();
   var _guvData = null;
+  var _guvScope = null; /* { locations: [...], machines: [...] } – einmal geladen */
 
-  function guvBuildUrl(q) {
+  /* Zeitraum-Parameter (ohne den Maschinen-Filter) – von Daten- und Export-URL geteilt */
+  function guvPeriodParams(q) {
     var p = ['mode=' + encodeURIComponent(q.mode)];
     if (q.mode === 'quarter')      { p.push('year=' + encodeURIComponent(q.year), 'quarter=' + encodeURIComponent(q.quarter)); }
     else if (q.mode === 'year')    { p.push('year=' + encodeURIComponent(q.year)); }
     else if (q.mode === 'custom')  { p.push('from=' + encodeURIComponent(q.from), 'to=' + encodeURIComponent(q.to)); }
     else                           { p.push('from=' + encodeURIComponent(q.month), 'to=' + encodeURIComponent(q.month)); }
-    return '/api/v2/economics?' + p.join('&');
+    if (q.machines && q.machines.length) { p.push('machines=' + encodeURIComponent(q.machines.join(','))); }
+    return p;
+  }
+  function guvBuildUrl(q) {
+    return '/api/v2/economics?' + guvPeriodParams(q).join('&');
+  }
+  function guvExportUrl(q) {
+    return '/api/v2/reports/export?' + guvPeriodParams(q).join('&');
   }
   function loadGuvData(q) {
     return fetchJson(guvBuildUrl(q)).then(function (res) { return (res && res.data) ? res.data : null; });
@@ -1245,36 +1272,53 @@
     });
   }
 
-  /* Spiegelung von lib/guv-chart.js::buildLineSeries */
-  function guvLineSeries(series, valueKey, width, height, pad) {
+  /* Spiegelung von lib/guv-chart.js::buildLineSeries, aber mit asymmetrischem
+     Rand (links Platz für Y-Achsen-Werte, unten für die Zeit-Labels). */
+  function guvLineSeries(series, valueKey, geo) {
     var data = (series || []).map(function (d) { return { month: d.month, value: Number(d[valueKey]) || 0 }; });
     if (data.length === 0) { return { points: [], min: 0, max: 0, path: '', area: '' }; }
     var vals = data.map(function (d) { return d.value; });
     var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals), span = max - min;
-    var innerW = width - pad * 2, innerH = height - pad * 2, bottom = height - pad;
+    var innerW = geo.W - geo.padL - geo.padR, innerH = geo.H - geo.padT - geo.padB;
+    var top = geo.padT, bottom = geo.H - geo.padB;
     var r2 = function (n) { return Math.round(n * 100) / 100; };
+    var yOf = function (v) {
+      return span === 0 ? r2(top + innerH / 2) : r2(top + (1 - (v - min) / span) * innerH);
+    };
     var points = data.map(function (d, i) {
-      var x = data.length === 1 ? pad : r2(pad + (i / (data.length - 1)) * innerW);
-      var y = span === 0 ? r2(height / 2) : r2(pad + (1 - (d.value - min) / span) * innerH);
-      return { x: x, y: y, value: d.value, month: d.month };
+      var x = data.length === 1 ? r2(geo.padL + innerW / 2) : r2(geo.padL + (i / (data.length - 1)) * innerW);
+      return { x: x, y: yOf(d.value), value: d.value, month: d.month };
     });
     var path = 'M' + points.map(function (p) { return p.x + ' ' + p.y; }).join(' L');
     var area = path + ' L' + points[points.length - 1].x + ' ' + bottom + ' L' + points[0].x + ' ' + bottom + ' Z';
-    return { points: points, min: min, max: max, path: path, area: area };
+    return { points: points, min: min, max: max, span: span, path: path, area: area, yOf: yOf, bottom: bottom };
   }
 
-  /* Ein Zeitreihen-Flächen-/Linienchart (reines SVG) */
+  /* Ein Zeitreihen-Flächen-/Linienchart (reines SVG) inkl. Y-Achse, Gridlines
+     und ausgedünnten X-Labels (für die Tagessicht mit ~30 Punkten). */
   function renderLineChartSvg(series, valueKey, opts) {
     opts = opts || {};
-    var W = 340, H = 138, PAD = 20;
-    var chart = guvLineSeries(series, valueKey, W, H, PAD);
+    var W = 340, H = 152;
+    var geo = { W: W, H: H, padL: 42, padR: 12, padT: 12, padB: 24 };
+    var chart = guvLineSeries(series, valueKey, geo);
     if (chart.points.length === 0) { return '<p class="v3-guv-chart__empty">Keine Daten im Zeitraum</p>'; }
     var fmt = opts.fmt || fmtEuro;
     var color = opts.color || 'var(--brand)';
     var gradId = 'guvgrad-' + (opts.id || valueKey);
+    var isPct = /pct/.test(valueKey);
+    var axisFmt = function (v) { return isPct ? fmtPct(v) : Math.round(v).toLocaleString('de-DE'); };
+
+    /* Y-Achse: Gridlines + Werte (max / Mitte / min); bei flacher Reihe nur eine */
+    var ticks = chart.span === 0 ? [chart.max] : [chart.max, (chart.max + chart.min) / 2, chart.min];
+    var grid = ticks.map(function (v) {
+      var y = chart.yOf(v);
+      return '<line class="v3-guv-grid" x1="' + geo.padL + '" y1="' + y + '" x2="' + (W - geo.padR) + '" y2="' + y + '"/>' +
+        '<text class="v3-guv-axisy" x="' + (geo.padL - 6) + '" y="' + (y + 3) + '" text-anchor="end">' + esc(axisFmt(v)) + '</text>';
+    }).join('');
+
     /* Hoverbare Punkte: große transparente Trefferfläche + Punkt + Wert-Tooltip */
     var dots = chart.points.map(function (p) {
-      var txt = monthLabel(p.month) + ' · ' + fmt(p.value);
+      var txt = bucketLabel(p.month, true) + ' · ' + fmt(p.value);
       var tw = Math.max(48, txt.length * 6.4 + 16);
       var tx = Math.min(W - tw / 2 - 2, Math.max(tw / 2 + 2, p.x));
       var ty = Math.max(24, p.y);
@@ -1288,15 +1332,22 @@
         '<title>' + esc(txt) + '</title>' +
       '</g>';
     }).join('');
-    var axis = chart.points.map(function (p) {
-      return '<text class="v3-guv-axis" x="' + p.x + '" y="' + (H - 4) + '" text-anchor="middle">' + esc(monthLabel(p.month)) + '</text>';
+
+    /* X-Labels ausdünnen, damit Tages-Labels sich nicht überlappen */
+    var n = chart.points.length;
+    var step = n <= 7 ? 1 : Math.ceil(n / 6);
+    var axis = chart.points.map(function (p, i) {
+      if (i % step !== 0 && i !== n - 1) { return ''; }
+      return '<text class="v3-guv-axis" x="' + p.x + '" y="' + (H - 6) + '" text-anchor="middle">' + esc(bucketLabel(p.month)) + '</text>';
     }).join('');
+
     return '<svg class="v3-guv-chartsvg" viewBox="0 0 ' + W + ' ' + H + '" role="img" ' +
         'aria-label="' + esc(opts.label || valueKey) + '" style="width:100%;height:auto;display:block;overflow:visible">' +
         '<defs><linearGradient id="' + gradId + '" x1="0" y1="0" x2="0" y2="1">' +
           '<stop offset="0%" stop-color="' + color + '" stop-opacity="0.20"/>' +
           '<stop offset="100%" stop-color="' + color + '" stop-opacity="0"/>' +
         '</linearGradient></defs>' +
+        grid +
         '<path class="v3-guv-area" d="' + chart.area + '" fill="url(#' + gradId + ')"/>' +
         '<path class="v3-guv-line" d="' + chart.path + '" fill="none" stroke="' + color + '"/>' +
         dots + axis +
@@ -1328,7 +1379,67 @@
         field('from',    q.mode === 'custom',  '<span>Von</span><input type="month" data-guv-from value="' + esc(q.from) + '">') +
         field('to',      q.mode === 'custom',  '<span>Bis</span><input type="month" data-guv-to value="' + esc(q.to) + '">') +
       '</div>' +
+      '<div class="v3-guv-period__filter" data-guv-filter-wrap>' + guvFilterControl(q) + '</div>' +
     '</div>';
+  }
+
+  /* Standort-/Automaten-Mehrfachauswahl (Chips + Dropdown mit Checkboxen).
+     Wird auch nach dem Laden von _guvScope per data-guv-filter-wrap neu gerendert. */
+  function guvFilterControl(q) {
+    var sel = (q.machines || []);
+    var scope = _guvScope;
+    /* Solange der Auswahlbaum noch nicht (oder nicht) verfügbar ist: dezenter Hinweis. */
+    if (!scope || !scope.machines || scope.machines.length === 0) {
+      return '<span class="v3-guv-filter__label">Automat</span>' +
+        '<span class="v3-guv-filter__summary is-muted">Alle Automaten</span>';
+    }
+    var selSet = {};
+    sel.forEach(function (id) { selSet[id] = true; });
+    var summary = sel.length === 0
+      ? 'Alle Automaten'
+      : (sel.length === 1
+          ? (guvMachineLabel(sel[0]) )
+          : sel.length + ' Automaten');
+
+    function checkbox(id, label, sub, cls) {
+      var on = !!selSet[id];
+      return '<label class="v3-guv-opt' + (cls ? ' ' + cls : '') + (on ? ' is-on' : '') + '">' +
+        '<input type="checkbox" ' + (on ? 'checked ' : '') + 'data-guv-mid="' + esc(id) + '">' +
+        '<span class="v3-guv-opt__txt">' + esc(label) + (sub ? '<span class="v3-guv-opt__sub">' + esc(sub) + '</span>' : '') + '</span>' +
+      '</label>';
+    }
+
+    var locItems = (scope.locations || []).filter(function (l) { return l.machine_ids && l.machine_ids.length; })
+      .map(function (l) {
+        var all = l.machine_ids.every(function (id) { return selSet[id]; });
+        return '<label class="v3-guv-opt v3-guv-opt--loc' + (all && l.machine_ids.length ? ' is-on' : '') + '">' +
+          '<input type="checkbox" ' + (all ? 'checked ' : '') + 'data-guv-loc="' + esc(l.machine_ids.join(',')) + '">' +
+          '<span class="v3-guv-opt__txt">' + esc(l.name) + '<span class="v3-guv-opt__sub">' + l.machine_ids.length + ' Automaten</span></span>' +
+        '</label>';
+      }).join('');
+    var macItems = (scope.machines || []).map(function (m) {
+      return checkbox(m.machine_id, m.label || m.machine_id, m.location_name || null, 'v3-guv-opt--mac');
+    }).join('');
+
+    return '<span class="v3-guv-filter__label">Automat</span>' +
+      '<details class="v3-guv-filter" data-guv-filterbox>' +
+        '<summary class="v3-guv-filter__summary">' + esc(summary) +
+          (sel.length ? '<button type="button" class="v3-guv-filter__clear" data-guv-clear aria-label="Auswahl zurücksetzen">×</button>' : '') +
+        '</summary>' +
+        '<div class="v3-guv-filter__panel">' +
+          (locItems ? '<p class="v3-guv-filter__group">Standorte</p>' + locItems : '') +
+          (macItems ? '<p class="v3-guv-filter__group">Automaten</p>' + macItems : '') +
+        '</div>' +
+      '</details>';
+  }
+
+  function guvMachineLabel(id) {
+    if (_guvScope && _guvScope.machines) {
+      for (var i = 0; i < _guvScope.machines.length; i++) {
+        if (_guvScope.machines[i].machine_id === id) { return _guvScope.machines[i].label || id; }
+      }
+    }
+    return id;
   }
 
   /* KPI-Strip mit den Totalen des Zeitraums (Brutto wie Legacy) */
@@ -1349,7 +1460,8 @@
     '</div>';
   }
 
-  /* Drei Diagramme über die Zeit */
+  /* Drei Diagramme über die Zeit. Auf dem Desktop ein 3-Spalten-Raster, auf
+     dem Handy ein horizontales Snap-Karussell mit Punkt-Indikatoren. */
   function guvChartsPanel(series) {
     function card(label, valueKey, color, fmt, id) {
       return '<section class="v3-guv-chart v3-card" aria-label="' + label + '">' +
@@ -1357,10 +1469,18 @@
         renderLineChartSvg(series, valueKey, { label: label, color: color, fmt: fmt, id: id }) +
       '</section>';
     }
-    return '<div class="v3-guv-charts">' +
-      card('Umsatz (brutto)', 'revenue_gross', 'var(--brand)', fmtEuro, 'rev') +
-      card('GuV / Deckungsbeitrag', 'gross_profit', 'var(--ok)', fmtEuro, 'gp') +
-      card('Marge', 'margin_gross_pct', 'var(--warn)', fmtPct, 'mg') +
+    var cards = [
+      card('Umsatz (brutto)', 'revenue_gross', 'var(--brand)', fmtEuro, 'rev'),
+      card('GuV / Deckungsbeitrag', 'gross_profit', 'var(--ok)', fmtEuro, 'gp'),
+      card('Marge', 'margin_gross_pct', 'var(--warn)', fmtPct, 'mg'),
+    ];
+    var dots = cards.map(function (_, i) {
+      return '<button type="button" class="v3-guv-cardot' + (i === 0 ? ' is-active' : '') +
+        '" data-guv-cardot="' + i + '" aria-label="Diagramm ' + (i + 1) + ' anzeigen"></button>';
+    }).join('');
+    return '<div class="v3-guv-chartsblock">' +
+      '<div class="v3-guv-charts" data-guv-charts>' + cards.join('') + '</div>' +
+      '<div class="v3-guv-cardots" data-guv-cardots>' + dots + '</div>' +
     '</div>';
   }
 
@@ -1371,6 +1491,7 @@
     if (f) { rows = rows.filter(function (r) { return r.product_name.toLowerCase().indexOf(f) >= 0; }); }
     var key = q.sort || 'revenue_gross', dir = q.order === 'asc' ? 1 : -1;
     rows.sort(function (a, b) { var av = a[key] || 0, bv = b[key] || 0; return (av < bv ? -1 : av > bv ? 1 : 0) * dir; });
+    if (q.limit === 'all') { return rows; }
     return rows.slice(0, Number(q.limit) || 10);
   }
   function guvRowsHtml(rows) {
@@ -1410,7 +1531,14 @@
           '<input type="search" class="v3-guv-search" data-guv-filter placeholder="Produkt filtern …" value="' + esc(q.filter || '') + '" aria-label="Produkt filtern">' +
           '<select class="v3-guv-limit v3-filter-select" data-guv-limit aria-label="Anzahl Zeilen">' +
             [5, 10, 20, 50].map(function (n) { return '<option value="' + n + '"' + (Number(q.limit) === n ? ' selected' : '') + '>Top ' + n + '</option>'; }).join('') +
+            '<option value="all"' + (q.limit === 'all' ? ' selected' : '') + '>Alle</option>' +
           '</select>' +
+          '<div class="v3-guv-export" role="group" aria-label="Bericht exportieren">' +
+            '<button type="button" class="v3-guv-export__btn" data-guv-export="csv" title="Als CSV/Excel herunterladen">' +
+              ICONS.export + '<span>Excel</span></button>' +
+            '<button type="button" class="v3-guv-export__btn" data-guv-export="pdf" title="Als PDF speichern (Druckdialog)">' +
+              ICONS.print + '<span>PDF</span></button>' +
+          '</div>' +
         '</div>' +
       '</div>' +
       '<div class="v3-guv-tablewrap" data-guv-tablewrap>' + renderGuvTableEl(byProduct, q) + '</div>' +
@@ -1444,6 +1572,73 @@
     '</div>';
   }
 
+  /* Lesbare Filter-Zusammenfassung für PDF/Druck-Kopf */
+  function guvFilterSummaryText() {
+    var m = _guvQuery.machines || [];
+    if (!m.length) { return 'Alle Automaten'; }
+    return m.map(guvMachineLabel).join(', ');
+  }
+
+  /* PDF-Export: öffnet ein sauberes Druck-Layout (eigenes Fenster) mit
+     Zeitraum-/Filter-Kopf, vollständiger Produkttabelle (Brutto) + Summenzeile
+     und ruft den Druckdialog auf ("Als PDF speichern"). Dependency-frei. */
+  function guvPrintReport() {
+    var data = _guvData || {};
+    var rows = guvTopProducts(data.byProduct || []).sort(function (a, b) { return b.revenue_gross - a.revenue_gross; });
+    var totals = data.totals || {};
+    var period = data.period || {};
+    var range = (!period.from || !period.to) ? '–'
+      : (period.from === period.to ? monthLabel(period.from) : monthLabel(period.from) + ' – ' + monthLabel(period.to));
+    var marge = Number(totals.revenue_gross) > 0 ? (totals.gross_profit / totals.revenue_gross) * 100 : 0;
+    var today = new Date().toLocaleDateString('de-DE');
+
+    var rowsHtml = rows.map(function (r) {
+      return '<tr><td>' + esc(r.product_name) + '</td>' +
+        '<td class="n">' + fmtEuro(r.revenue_gross) + '</td>' +
+        '<td class="n">' + fmtEuro(r.gross_profit) + '</td>' +
+        '<td class="n">' + fmtPct(r.margin_gross_pct) + '</td>' +
+        '<td class="n">' + fmtInt(r.qty) + '</td></tr>';
+    }).join('') || '<tr><td colspan="5" class="empty">Keine Daten im Zeitraum</td></tr>';
+    var sumRow = '<tr class="sum"><td>Summe</td>' +
+      '<td class="n">' + fmtEuro(totals.revenue_gross) + '</td>' +
+      '<td class="n">' + fmtEuro(totals.gross_profit) + '</td>' +
+      '<td class="n">' + fmtPct(marge) + '</td>' +
+      '<td class="n">' + fmtInt(totals.qty) + '</td></tr>';
+
+    var win = window.open('', '_blank');
+    if (!win) { return; }
+    var css = 'body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1b1c1f;margin:32px;}' +
+      'h1{font-size:20px;margin:0 0 4px;}' +
+      '.meta{color:#555;font-size:12px;margin:0 0 18px;line-height:1.5;}' +
+      '.meta b{color:#1b1c1f;}' +
+      '.kpis{display:flex;gap:24px;margin:0 0 18px;flex-wrap:wrap;}' +
+      '.kpi{font-size:12px;color:#555;}.kpi b{display:block;font-size:17px;color:#1b1c1f;}' +
+      'table{width:100%;border-collapse:collapse;font-size:12px;}' +
+      'th,td{padding:7px 10px;border-bottom:1px solid #e4e0d8;text-align:left;}' +
+      'th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#666;border-bottom:1.5px solid #b8b2a6;}' +
+      'td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;}' +
+      'tr.sum td{font-weight:700;border-top:2px solid #b8b2a6;border-bottom:none;}' +
+      '.empty{color:#888;text-align:center;padding:24px;}' +
+      '@media print{body{margin:12mm;}}';
+    var doc = '<!doctype html><html lang="de"><head><meta charset="utf-8">' +
+      '<title>GuV-Bericht ' + esc(range) + '</title><style>' + css + '</style></head><body>' +
+      '<h1>GuV-Bericht</h1>' +
+      '<p class="meta">Zeitraum: <b>' + esc(range) + '</b><br>Automat: <b>' + esc(guvFilterSummaryText()) + '</b><br>Erstellt am ' + esc(today) + '</p>' +
+      '<div class="kpis">' +
+        '<div class="kpi">Umsatz (brutto)<b>' + fmtEuro(totals.revenue_gross) + ' €</b></div>' +
+        '<div class="kpi">GuV (brutto)<b>' + fmtEuro(totals.gross_profit) + ' €</b></div>' +
+        '<div class="kpi">Marge<b>' + fmtPct(marge) + '</b></div>' +
+        '<div class="kpi">Stück<b>' + fmtInt(totals.qty) + '</b></div>' +
+      '</div>' +
+      '<table><thead><tr><th>Produkt</th><th class="n">Umsatz brutto</th><th class="n">GuV brutto</th><th class="n">Marge</th><th class="n">Stück</th></tr></thead>' +
+      '<tbody>' + rowsHtml + sumRow + '</tbody></table>' +
+      '<script>window.onload=function(){setTimeout(function(){window.print();},180);};<\/script>' +
+      '</body></html>';
+    win.document.open();
+    win.document.write(doc);
+    win.document.close();
+  }
+
   function bindGuvControls() {
     var root = viewEl.querySelector('.v3-guv');
     if (!root) { return; }
@@ -1471,7 +1666,7 @@
         body.classList.remove('is-loading');
         body.setAttribute('aria-busy', 'false');
         body.innerHTML = renderGuvBody(data, _guvQuery);
-        bindTable();
+        bindBody();
       }).catch(function () {
         if (!body) { return; }
         body.classList.remove('is-loading');
@@ -1496,12 +1691,132 @@
         });
       });
     }
-    function bindTable() {
+
+    /* Nach jedem Body-Render neu binden: Tabellen-Controls, Karussell, Export */
+    function bindBody() {
       var search = root.querySelector('[data-guv-filter]');
       if (search) { search.addEventListener('input', function (e) { _guvQuery.filter = e.target.value; redrawTable(); }); }
       var limit = root.querySelector('[data-guv-limit]');
       if (limit) { limit.addEventListener('change', function (e) { _guvQuery.limit = e.target.value; redrawTable(); }); }
       bindSortButtons();
+      bindCarousel();
+      bindExport();
+    }
+
+    /* Handy-Karussell: aktiven Punkt beim Wischen markieren, Klick scrollt hin */
+    function bindCarousel() {
+      var charts = root.querySelector('[data-guv-charts]');
+      var dotsWrap = root.querySelector('[data-guv-cardots]');
+      if (!charts || !dotsWrap) { return; }
+      var dots = [].slice.call(dotsWrap.querySelectorAll('[data-guv-cardot]'));
+      function update() {
+        var w = charts.clientWidth || 1;
+        var idx = Math.round(charts.scrollLeft / w);
+        dots.forEach(function (d, i) { d.classList.toggle('is-active', i === idx); });
+      }
+      charts.addEventListener('scroll', function () { window.requestAnimationFrame(update); });
+      dots.forEach(function (d, i) {
+        d.addEventListener('click', function () {
+          charts.scrollTo({ left: i * charts.clientWidth, behavior: 'smooth' });
+        });
+      });
+      update();
+    }
+
+    /* Export: CSV/Excel als Datei-Download, PDF über das Druck-Layout */
+    function bindExport() {
+      root.querySelectorAll('[data-guv-export]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          if (btn.getAttribute('data-guv-export') === 'csv') {
+            var a = document.createElement('a');
+            a.href = guvExportUrl(_guvQuery);
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          } else {
+            guvPrintReport();
+          }
+        });
+      });
+    }
+
+    /* ---- Standort-/Automaten-Filter -------------------------------------- */
+    function loadGuvScope() {
+      if (_guvScope) { return Promise.resolve(_guvScope); }
+      return fetchJson('/api/v2/economics/scope')
+        .then(function (res) { _guvScope = (res && res.data) ? res.data : { locations: [], machines: [] }; return _guvScope; })
+        .catch(function () { _guvScope = { locations: [], machines: [] }; return _guvScope; });
+    }
+    function bindClear() {
+      var clear = root.querySelector('[data-guv-clear]');
+      if (clear) {
+        clear.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          _guvQuery.machines = []; syncFilterUi(); reload();
+        });
+      }
+    }
+    function syncFilterUi() {
+      var sel = {};
+      _guvQuery.machines.forEach(function (id) { sel[id] = true; });
+      root.querySelectorAll('[data-guv-mid]').forEach(function (cb) {
+        var on = !!sel[cb.getAttribute('data-guv-mid')];
+        cb.checked = on;
+        var opt = cb.closest('.v3-guv-opt'); if (opt) { opt.classList.toggle('is-on', on); }
+      });
+      root.querySelectorAll('[data-guv-loc]').forEach(function (cb) {
+        var ids = cb.getAttribute('data-guv-loc').split(',').filter(Boolean);
+        var all = ids.length > 0 && ids.every(function (id) { return sel[id]; });
+        cb.checked = all;
+        var opt = cb.closest('.v3-guv-opt'); if (opt) { opt.classList.toggle('is-on', all); }
+      });
+      var sum = root.querySelector('.v3-guv-filter__summary');
+      if (sum) {
+        var n = _guvQuery.machines.length;
+        var text = n === 0 ? 'Alle Automaten' : (n === 1 ? guvMachineLabel(_guvQuery.machines[0]) : n + ' Automaten');
+        sum.innerHTML = esc(text) + (n ? '<button type="button" class="v3-guv-filter__clear" data-guv-clear aria-label="Auswahl zurücksetzen">×</button>' : '');
+        bindClear();
+      }
+    }
+    function afterFilterChange() { syncFilterUi(); reload(); }
+    function bindFilter() {
+      root.querySelectorAll('[data-guv-mid]').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          var id = cb.getAttribute('data-guv-mid');
+          var set = {}; _guvQuery.machines.forEach(function (x) { set[x] = true; });
+          if (cb.checked) { set[id] = true; } else { delete set[id]; }
+          _guvQuery.machines = Object.keys(set);
+          afterFilterChange();
+        });
+      });
+      root.querySelectorAll('[data-guv-loc]').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          var ids = cb.getAttribute('data-guv-loc').split(',').filter(Boolean);
+          var set = {}; _guvQuery.machines.forEach(function (x) { set[x] = true; });
+          if (cb.checked) { ids.forEach(function (id) { set[id] = true; }); }
+          else { ids.forEach(function (id) { delete set[id]; }); }
+          _guvQuery.machines = Object.keys(set);
+          afterFilterChange();
+        });
+      });
+      // Dropdown schließt bei Klick außerhalb bzw. Escape (Listener nur solange offen)
+      var box = root.querySelector('[data-guv-filterbox]');
+      if (box && !box.__outsideBound) {
+        box.__outsideBound = true;
+        var onDocDown = function (e) { if (box.open && !box.contains(e.target)) { box.open = false; } };
+        box.addEventListener('toggle', function () {
+          if (box.open) { document.addEventListener('mousedown', onDocDown); }
+          else { document.removeEventListener('mousedown', onDocDown); }
+        });
+        box.addEventListener('keydown', function (e) { if (e.key === 'Escape') { box.open = false; } });
+      }
+      bindClear();
+    }
+    function renderFilter() {
+      var wrap = root.querySelector('[data-guv-filter-wrap]');
+      if (!wrap) { return; }
+      wrap.innerHTML = guvFilterControl(_guvQuery);
+      bindFilter();
     }
 
     /* Zeitraum-Segment + Felder lösen einen Server-Reload aus */
@@ -1524,7 +1839,8 @@
     onChange('[data-guv-from]',    function (e) { _guvQuery.from    = e.target.value; reload(); });
     onChange('[data-guv-to]',      function (e) { _guvQuery.to      = e.target.value; reload(); });
 
-    bindTable();
+    loadGuvScope().then(renderFilter);
+    bindBody();
   }
 
   /* ---- Sortiment & Slots: Etagen-Slot-Editor (/slots) ------------------ */

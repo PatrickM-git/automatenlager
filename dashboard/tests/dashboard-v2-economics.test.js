@@ -175,12 +175,22 @@ test('AC2: byProduct can be sorted by qty', () => {
 });
 
 test('AC3: machine filter is reflected in result metadata', () => {
+  // machineFilter ist seit der Standort-/Automaten-Mehrfachauswahl eine Liste.
   const result = buildEconomicsData(
     { byProduct: PRODUCT_ROWS, bySlot: SLOT_ROWS, inventoryValue: INVENTORY_ROWS },
     { machine: 'VM01' },
   );
 
-  assert.equal(result.machineFilter, 'VM01');
+  assert.deepEqual(result.machineFilter, ['VM01']);
+});
+
+test('AC3: machines-Mehrfachauswahl landet als Liste in den Metadaten', () => {
+  const result = buildEconomicsData(
+    { byProduct: PRODUCT_ROWS, bySlot: SLOT_ROWS, inventoryValue: INVENTORY_ROWS },
+    { machines: 'VM01,VM02' },
+  );
+
+  assert.deepEqual(result.machineFilter, ['VM01', 'VM02']);
 });
 
 test('AC5: historic_backfill rows are excluded from byProduct', () => {
