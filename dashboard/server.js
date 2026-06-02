@@ -17,6 +17,7 @@ const { buildLocationProfile, buildLocationComparison, queryLocationsPg, upsertL
 const { buildCorrectionCases, queryCorrectionCasesPg } = require('./lib/correction-cases.js');
 const { buildMachineProfile, getMachineOptions, queryMachineProfilesPg, upsertMachineProfilePg } = require('./lib/machine-profiles.js');
 const { buildMachineCreatePayload, createMachinePg, setMachineActivePg } = require('./lib/machine-create.js');
+const { queryNayaxDevicesPg, shapeNayaxDevices } = require('./lib/nayax-devices.js');
 const { buildProductSuggestion, validateCorrectionAction, buildCorrectionActionPayload, buildCorrectionActionAuditEntry } = require('./lib/correction-action.js');
 const { buildOnboardingStartPayload, validateOnboardingStart, buildOnboardingStartAuditEntry } = require('./lib/onboarding-start.js');
 const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buildSlotAssignAuditEntry } = require('./lib/slot-assign-inline.js');
@@ -2858,6 +2859,20 @@ const server = http.createServer(async (req, res) => {
           : err.code === 'NOT_FOUND' ? 404
           : (/erforderlich/i.test(err.message) ? 400 : 503);
         sendJson(res, code, { ok: false, error: { code: err.code || 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    // #3: Verfügbare Nayax-Geräte fürs Anlege-Combobox (liest den DB-Spiegel,
+    // markiert bereits angelegte). Leere Liste -> Frontend fällt auf Freitext.
+    if (parsed.pathname === '/api/v2/nayax-devices' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) { sendJson(res, 200, { ok: true, data: [] }); return; }
+      try {
+        const rows = await queryNayaxDevicesPg(pgUrl);
+        sendJson(res, 200, { ok: true, data: shapeNayaxDevices(rows) });
+      } catch (err) {
+        sendJson(res, 200, { ok: true, data: [], error: { code: 'PG_ERROR', message: err.message } });
       }
       return;
     }

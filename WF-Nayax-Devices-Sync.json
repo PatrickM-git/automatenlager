@@ -1,0 +1,160 @@
+{
+  "name": "WF-Nayax-Devices-Sync",
+  "nodes": [
+    {
+      "id": "man",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "sch",
+      "name": "Schedule - taeglich 04:20",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        200,
+        480
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 4,
+              "triggerAtMinute": 20
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "http",
+      "name": "Nayax - Get Machines",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        380
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://lynx.nayax.com/operational/v1/machines",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ResultsLimit",
+              "value": "500"
+            }
+          ]
+        },
+        "sendHeaders": false,
+        "sendBody": false,
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6JLrl6bb2ns3ISYe",
+          "name": "Nayax Lynx API"
+        }
+      }
+    },
+    {
+      "id": "code",
+      "name": "Map Devices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        380
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Jedes Eingangs-Item ist eine Nayax-Maschine (httpRequest hat das Array gesplittet).\nconst items = $input.all();\nfunction f(o, keys){ for (const k of keys){ if (o && o[k] != null && String(o[k]).trim() !== '') return String(o[k]).trim(); } return ''; }\nconst rows = items.map(i => i.json).filter(Boolean).map(it => ({\n  nayax_machine_id: f(it, ['MachineID','MachineId','machineId','machine_id']),\n  machine_number: f(it, ['MachineNumber','MachineNo','machine_number']),\n  machine_name: f(it, ['MachineName','Description','machine_name'])\n})).filter(r => r.nayax_machine_id !== '');\nreturn rows.map(r => ({ json: r }));"
+      }
+    },
+    {
+      "id": "pg",
+      "name": "Upsert nayax_devices",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        940,
+        380
+      ],
+      "parameters": {
+        "resource": "database",
+        "operation": "executeQuery",
+        "query": "INSERT INTO automatenlager.nayax_devices (nayax_machine_id, machine_number, machine_name, last_seen_at, synced_at)\nVALUES ($1, $2, $3, now(), now())\nON CONFLICT (nayax_machine_id) DO UPDATE SET\n  machine_number = EXCLUDED.machine_number,\n  machine_name = EXCLUDED.machine_name,\n  last_seen_at = now(), synced_at = now()",
+        "options": {
+          "queryReplacement": "={{ $json.nayax_machine_id }},={{ $json.machine_number }},={{ $json.machine_name }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Nayax - Get Machines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule - taeglich 04:20": {
+      "main": [
+        [
+          {
+            "node": "Nayax - Get Machines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nayax - Get Machines": {
+      "main": [
+        [
+          {
+            "node": "Map Devices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Devices": {
+      "main": [
+        [
+          {
+            "node": "Upsert nayax_devices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "EaVcB3REMttuKZPa"
+}
