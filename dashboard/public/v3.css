@@ -2396,6 +2396,26 @@ a.v3-chip:focus-visible {
 .v3-auto-form__msg { font-size: 13px; color: var(--ink-faint); }
 .v3-auto-form__msg.is-ok { color: var(--ok); }
 .v3-auto-form__msg.is-err { color: var(--crit, #b4232a); }
+/* Karten-Aktionen: Aussondern / Reaktivieren / Standort löschen */
+.v3-auto-card__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: auto; }
+.v3-auto-card__retire, .v3-auto-loc-card__del {
+  background: none; border: none; padding: 4px 2px; cursor: pointer;
+  font-size: 12.5px; color: var(--crit, #b4232a); font-weight: 600;
+}
+.v3-auto-card__retire:hover, .v3-auto-loc-card__del:hover { text-decoration: underline; }
+.v3-auto-card--retired { opacity: 0.72; }
+.v3-auto-card__retiredtag {
+  font-size: 11px; font-weight: 600; color: var(--ink-faint);
+  border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin-left: 4px; white-space: nowrap;
+}
+.v3-auto-card__reactivate { font-size: 12.5px; padding: 5px 12px; }
+.v3-auto-loc-card__actions { margin-top: 8px; }
+.v3-auto-retired-toggle {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: none; padding: 0; cursor: pointer; text-align: left; color: inherit;
+}
+.v3-auto-retired-caret { color: var(--ink-faint); transition: transform 0.15s ease; }
+.v3-auto-retired-toggle[aria-expanded="true"] .v3-auto-retired-caret { transform: rotate(180deg); }
 .v3-auto-stat {
   flex: 1; min-width: 96px; display: flex; flex-direction: column; gap: 2px;
   padding: 14px 16px; border-radius: var(--radius); background: var(--card);

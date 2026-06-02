@@ -494,29 +494,34 @@
     var unassigned = 0;
     var builtMachines = machines.map(function (m) {
       var loc = locByMachine[String(m.machine_id == null ? '' : m.machine_id).trim()] || null;
-      if (!loc) { unassigned++; }
+      var isActive = m.active !== false;
+      if (!loc && isActive) { unassigned++; }
       return {
         machine_id: m.machine_id,
+        active: isActive,
         label: (m.label && String(m.label).trim()) || String(m.machine_id || ''),
         area: m.area || null, type: m.type || null, position: m.position || null, nickname: m.nickname || null,
         location_name: loc ? loc.name : null,
         location_status: loc ? loc.status : null,
       };
     });
+    var activeMachines = builtMachines.filter(function (m) { return m.active; });
+    var retiredMachines = builtMachines.filter(function (m) { return !m.active; });
     var builtLocations = locations.map(function (l) {
       return {
         location_id: l.location_id != null ? l.location_id : null,
+        location_key: l.location_key || null,
         name: l.name, status: l.status || null,
         machineCount: (l.machine_ids || []).length,
       };
     });
     return {
-      machines: builtMachines, locations: builtLocations,
-      total: builtMachines.length, locationsTotal: builtLocations.length, unassignedCount: unassigned,
+      machines: activeMachines, retiredMachines: retiredMachines, locations: builtLocations,
+      total: activeMachines.length, locationsTotal: builtLocations.length, unassignedCount: unassigned,
     };
   }
 
-  function renderAutoCard(m) {
+  function renderAutoCard(m, isAdmin) {
     var attrs = [];
     if (m.area) { attrs.push(esc(m.area)); }
     if (m.type) { attrs.push(esc(m.type)); }
@@ -525,23 +530,36 @@
     var locChip = m.location_name
       ? '<span class="v3-auto-loc-chip v3-auto-loc-chip--' + (m.location_status || 'none') + '">' + esc(m.location_name) + '</span>'
       : '<span class="v3-auto-loc-chip v3-auto-loc-chip--none">Ohne Standort</span>';
-    return '<article class="v3-auto-card">' +
+    var jump = '<button type="button" class="v3-btn v3-auto-card__jump" data-auto-jump="' + esc(m.machine_id) + '">Zur Slot-Ansicht <span aria-hidden="true">&#8594;</span></button>';
+    // Admin: aktiv -> aussondern; ausgesondert -> reaktivieren.
+    var adminAction = '';
+    if (isAdmin) {
+      adminAction = m.active
+        ? '<button type="button" class="v3-auto-card__retire" data-auto-retire="' + esc(m.machine_id) + '" data-auto-name="' + esc(m.label) + '">Aussondern</button>'
+        : '<button type="button" class="v3-btn v3-auto-card__reactivate" data-auto-reactivate="' + esc(m.machine_id) + '">Reaktivieren</button>';
+    }
+    return '<article class="v3-auto-card' + (m.active ? '' : ' v3-auto-card--retired') + '">' +
       '<div class="v3-auto-card__top">' +
         '<span class="v3-auto-card__id">' + esc(m.machine_id) + '</span>' + locChip +
       '</div>' +
-      '<p class="v3-auto-card__label">' + esc(m.label) + '</p>' +
+      '<p class="v3-auto-card__label">' + esc(m.label) + (m.active ? '' : ' <span class="v3-auto-card__retiredtag">ausgesondert</span>') + '</p>' +
       (attrs.length ? '<div class="v3-auto-card__attrs">' + attrs.map(function (a) { return '<span class="v3-auto-attr">' + a + '</span>'; }).join('') + '</div>' : '') +
-      '<button type="button" class="v3-btn v3-auto-card__jump" data-auto-jump="' + esc(m.machine_id) + '">Zur Slot-Ansicht <span aria-hidden="true">&#8594;</span></button>' +
+      '<div class="v3-auto-card__actions">' + (m.active ? jump : '') + adminAction + '</div>' +
     '</article>';
   }
 
-  function renderAutoLocationCard(l) {
+  function renderAutoLocationCard(l, isAdmin) {
+    var del = (isAdmin && l.location_key)
+      ? '<button type="button" class="v3-auto-loc-card__del" data-auto-loc-del="' + esc(l.location_key) +
+        '" data-auto-loc-name="' + esc(l.name) + '" data-auto-loc-count="' + l.machineCount + '">Löschen</button>'
+      : '';
     return '<article class="v3-auto-loc-card">' +
       '<div class="v3-auto-loc-card__top">' +
         '<span class="v3-auto-loc-card__name">' + esc(l.name) + '</span>' +
         '<span class="v3-auto-loc-chip v3-auto-loc-chip--' + (l.status || 'none') + '">' + esc(AUTO_STATUS[l.status] || l.status || '—') + '</span>' +
       '</div>' +
       '<p class="v3-auto-loc-card__meta">' + l.machineCount + ' Automat' + (l.machineCount === 1 ? '' : 'en') + '</p>' +
+      (del ? '<div class="v3-auto-loc-card__actions">' + del + '</div>' : '') +
     '</article>';
   }
 
@@ -593,16 +611,25 @@
         '<div class="v3-auto-stat"><span class="v3-auto-stat__num">' + view.locationsTotal + '</span><span class="v3-auto-stat__label">Standorte</span></div>' +
         '<div class="v3-auto-stat"><span class="v3-auto-stat__num">' + view.unassignedCount + '</span><span class="v3-auto-stat__label">Ohne Standort</span></div>' +
       '</div>';
+    var isAdmin = !!view.isAdmin;
     var machines = view.machines.length === 0
-      ? '<div class="v3-mon-cases-empty">Noch keine Automatenprofile angelegt.</div>'
-      : '<div class="v3-auto-grid">' + view.machines.map(renderAutoCard).join('') + '</div>';
+      ? '<div class="v3-mon-cases-empty">Noch keine aktiven Automaten.</div>'
+      : '<div class="v3-auto-grid">' + view.machines.map(function (m) { return renderAutoCard(m, isAdmin); }).join('') + '</div>';
+    var retired = view.retiredMachines || [];
+    var retiredSection = retired.length === 0 ? '' :
+      '<section class="v3-auto-section">' +
+        '<div class="v3-mon-section__head"><button type="button" class="v3-auto-retired-toggle" data-auto-retired-toggle aria-expanded="false">' +
+          '<h2 class="v3-mon-section__title">Ausgesonderte Automaten</h2>' +
+          '<span class="v3-mon-section__count">' + retired.length + '</span><span class="v3-auto-retired-caret" aria-hidden="true">▾</span></button></div>' +
+        '<div class="v3-auto-grid" data-auto-retired-grid hidden>' + retired.map(function (m) { return renderAutoCard(m, isAdmin); }).join('') + '</div>' +
+      '</section>';
     var locations = view.locations.length === 0 ? '' :
       '<section class="v3-auto-section">' +
         '<div class="v3-mon-section__head"><h2 class="v3-mon-section__title">Standorte</h2>' +
           '<span class="v3-mon-section__count">' + view.locationsTotal + '</span></div>' +
-        '<div class="v3-auto-loc-grid">' + view.locations.map(renderAutoLocationCard).join('') + '</div>' +
+        '<div class="v3-auto-loc-grid">' + view.locations.map(function (l) { return renderAutoLocationCard(l, isAdmin); }).join('') + '</div>' +
       '</section>';
-    return summary + automatenAdminForms(view) + machines + locations;
+    return summary + automatenAdminForms(view) + machines + retiredSection + locations;
   }
 
   function automatenJump(machineId) {
@@ -632,6 +659,54 @@
     for (var g = 0; g < formEls.length; g++) {
       formEls[g].addEventListener('submit', submitAutomatenForm);
     }
+    // Ausgesonderte-Sektion ein-/ausklappen.
+    var rt = viewEl.querySelector('[data-auto-retired-toggle]');
+    if (rt) {
+      rt.addEventListener('click', function () {
+        var grid = viewEl.querySelector('[data-auto-retired-grid]');
+        if (grid) { grid.hidden = !grid.hidden; this.setAttribute('aria-expanded', grid.hidden ? 'false' : 'true'); }
+      });
+    }
+    // Automat aussondern (mit Rückfrage).
+    bindClick('[data-auto-retire]', function (el) {
+      var name = el.getAttribute('data-auto-name') || el.getAttribute('data-auto-retire');
+      if (!window.confirm('Automat „' + name + '" aussondern?\n\nEr verschwindet aus den aktiven Ansichten (Slot, Sortiment), die Verkaufs-/GuV-Historie bleibt vollständig erhalten. Reaktivieren ist jederzeit möglich.')) { return; }
+      autoPost('/api/v2/machines/active', { machine_key: el.getAttribute('data-auto-retire'), active: false }, el);
+    });
+    // Automat reaktivieren.
+    bindClick('[data-auto-reactivate]', function (el) {
+      autoPost('/api/v2/machines/active', { machine_key: el.getAttribute('data-auto-reactivate'), active: true }, el);
+    });
+    // Standort löschen (mit Rückfrage; Guard serverseitig).
+    bindClick('[data-auto-loc-del]', function (el) {
+      var name = el.getAttribute('data-auto-loc-name') || '';
+      var count = Number(el.getAttribute('data-auto-loc-count') || 0);
+      if (count > 0) {
+        window.alert('Standort „' + name + '" hat noch ' + count + ' Automat' + (count === 1 ? '' : 'en') + '.\nBitte zuerst die Automaten umziehen oder aussondern.');
+        return;
+      }
+      if (!window.confirm('Standort „' + name + '" wirklich löschen? Das kann nicht rückgängig gemacht werden.')) { return; }
+      autoPost('/api/v2/locations', { location_key: el.getAttribute('data-auto-loc-del') }, el, 'DELETE');
+    });
+  }
+
+  function bindClick(sel, fn) {
+    var els = viewEl.querySelectorAll(sel);
+    for (var i = 0; i < els.length; i++) {
+      els[i].addEventListener('click', function () { fn(this); });
+    }
+  }
+
+  // POST/DELETE + Refresh; bei Fehler eine kurze Meldung (alert), sonst stilles Reload.
+  function autoPost(url, data, el, method) {
+    if (el) { el.disabled = true; }
+    fetch(url, { method: method || 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (res.ok && res.j && res.j.ok) { dispatch(); }
+        else { window.alert((res.j && res.j.error && res.j.error.message) || 'Aktion fehlgeschlagen.'); if (el) { el.disabled = false; } }
+      })
+      .catch(function () { window.alert('Netzwerkfehler.'); if (el) { el.disabled = false; } });
   }
 
   function submitAutomatenForm(e) {

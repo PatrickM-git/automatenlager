@@ -75,6 +75,7 @@ function buildLocationComparison(profiles, kpiRows) {
 const LOCATIONS_SELECT_SQL = `
   SELECT
     l.location_id,
+    l.location_key,
     l.name,
     l.notes,
     l.customer_group AS target_group,
@@ -108,6 +109,7 @@ function mapLocationRow(row) {
     : row.machine_ids != null ? [row.machine_ids] : [];
   return {
     location_id:  row.location_id ?? null,
+    location_key: row.location_key ?? null,
     name:         row.name,
     status:       row.status ?? null,
     notes:        row.notes ?? null,
@@ -119,6 +121,59 @@ function mapLocationRow(row) {
 
 // Erzeugt einen deterministischen location_key aus dem Namen (NOT NULL/UNIQUE
 // in der Produktiv-Tabelle), z. B. "DPFA Weiterbildung Chemnitz" → "LOC_DPFA_WEITERBILDUNG_CHEMNITZ".
+// #1: Ein Standort darf nur gelöscht werden, wenn KEIN Automat mehr dran hängt
+// (machines.location_id ist NOT NULL -> sonst stünden Automaten ohne Standort da).
+function buildLocationDeleteGuard(machineCount) {
+  if (machineCount == null) {
+    return { allowed: false, reason: 'Automatenzahl unbekannt – Löschen vorsichtshalber blockiert.' };
+  }
+  const n = Number(machineCount);
+  if (!Number.isFinite(n)) {
+    return { allowed: false, reason: 'Automatenzahl unbekannt – Löschen vorsichtshalber blockiert.' };
+  }
+  if (n > 0) {
+    return {
+      allowed: false,
+      reason: `Standort hat noch ${n} Automat${n === 1 ? '' : 'en'} – bitte zuerst umziehen oder aussondern.`,
+    };
+  }
+  return { allowed: true, reason: '' };
+}
+
+async function deleteLocationPg(pgUrl, locationKey, clientFactory) {
+  const key = String(locationKey || '').trim();
+  if (!key) throw new Error('location_key ist erforderlich.');
+  const client = (clientFactory || defaultClientFactory)(pgUrl);
+  await client.connect();
+  try {
+    const cnt = await client.query(
+      `SELECT count(*)::int AS n
+         FROM automatenlager.machines m
+         JOIN automatenlager.locations l ON l.location_id = m.location_id
+        WHERE l.location_key = $1`,
+      [key],
+    );
+    const guard = buildLocationDeleteGuard(cnt.rows[0] ? cnt.rows[0].n : 0);
+    if (!guard.allowed) {
+      const err = new Error(guard.reason);
+      err.code = 'LOCATION_NOT_EMPTY';
+      throw err;
+    }
+    const res = await client.query(
+      `DELETE FROM automatenlager.locations WHERE location_key = $1 RETURNING location_id`,
+      [key],
+    );
+    if (res.rowCount === 0) {
+      const err = new Error(`Standort "${key}" nicht gefunden.`);
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    return { deleted: key };
+  } finally {
+    await client.end();
+  }
+}
+
 function slugifyLocationKey(name) {
   const slug = String(name ?? '')
     .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue')
@@ -179,8 +234,10 @@ function avg(arr) { return arr.length ? arr.reduce((s, v) => s + v, 0) / arr.len
 module.exports = {
   buildLocationProfile,
   buildLocationComparison,
+  buildLocationDeleteGuard,
   queryLocationsPg,
   upsertLocationPg,
+  deleteLocationPg,
   mapLocationRow,
   slugifyLocationKey,
   LOCATIONS_SELECT_SQL,

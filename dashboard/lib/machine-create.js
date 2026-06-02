@@ -118,8 +118,41 @@ async function createMachinePg(pgUrl, payload, clientFactory) {
   }
 }
 
+// #2: Automat aussondern/reaktivieren = Soft-Delete (machines.active). Hartes
+// Löschen scheidet aus (FK von sales_transactions/slot_assignments/guv_daily/…
+// und Historienverlust). Reine SQL-Bauteile -> testbar ohne DB.
+function buildMachineActiveSql(machineKey, active) {
+  const key = s(machineKey);
+  if (!key) throw new Error('machine_key ist erforderlich.');
+  const sql = `UPDATE automatenlager.machines
+                  SET active = $2, updated_at = now()
+                WHERE machine_key = $1
+                RETURNING machine_id, machine_key, name, active`;
+  return { sql, values: [key, !!active] };
+}
+
+async function setMachineActivePg(pgUrl, machineKey, active, clientFactory) {
+  const { Client } = require('pg');
+  const { sql, values } = buildMachineActiveSql(machineKey, active);
+  const client = clientFactory ? clientFactory(pgUrl) : new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
+  await client.connect();
+  try {
+    const res = await client.query(sql, values);
+    if (res.rowCount === 0) {
+      const err = new Error(`Automat "${values[0]}" nicht gefunden.`);
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    return res.rows[0];
+  } finally {
+    await client.end();
+  }
+}
+
 module.exports = {
   buildMachineCreatePayload,
   buildMachineInsertPlan,
   createMachinePg,
+  buildMachineActiveSql,
+  setMachineActivePg,
 };
