@@ -7,6 +7,7 @@ const { buildEconomicsData, queryEconomicsPg, queryEconomicsProvisionalPg, forma
 const { buildInventoryMhdData, queryInventoryMhdPg, toIsoDate } = require('./lib/inventory-mhd.js');
 const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/assortment-slots.js');
 const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = require('./lib/overview-monitoring.js');
+const { buildAlertDigest, queryAlertDigestPg } = require('./lib/alert-digest.js');
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
 const { availableBatchStatusSqlList } = require('./lib/stock-status.js');
 const { validateWriteOff, canWriteOff, buildWriteOffAuditEntry, WRITE_OFF_STATUS } = require('./lib/write-off.js');
@@ -2681,6 +2682,27 @@ const server = http.createServer(async (req, res) => {
       try {
         const live = await queryEconomicsLivePg(pgUrl, parsed.query || {});
         sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), data: live });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    // ── Alert-Digest: Single-Source für die tägliche WF5-Report-Mail ─────────
+    // Berechnet alle Mail-Sektionen aus PG-Fakten (MHD, Lagerchargen, leere
+    // Slots) + klassifiziert Daten-/Workflowfehler korrekt (kein AUTO_REFILL_
+    // SLOT-Fehlalarm mehr). Löst die Sheet-basierte Bestandsanzeige der Mail ab.
+    if (parsed.pathname === '/api/v2/alerts/digest' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      try {
+        const lowBatchThreshold = Number((parsed.query || {}).lowBatchThreshold);
+        const raw = await queryAlertDigestPg(pgUrl, Number.isFinite(lowBatchThreshold) ? { lowBatchThreshold } : {});
+        const data = buildAlertDigest(raw);
+        sendJson(res, 200, { ok: true, source: 'postgres', generatedAt: new Date().toISOString(), data });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
       }
