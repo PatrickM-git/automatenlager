@@ -19,6 +19,7 @@ function buildLocationProfile(raw) {
     notes: raw.notes ?? null,
     start_date: raw.start_date ?? null,
     target_group: raw.target_group ?? null,
+    location_type: (raw.location_type != null && String(raw.location_type).trim()) ? String(raw.location_type).trim() : null,
     machine_ids,
   };
 }
@@ -79,8 +80,8 @@ const LOCATIONS_SELECT_SQL = `
     l.customer_group AS target_group,
     NULL::date AS start_date,
     COALESCE(
-      array_agg(m.machine_id::text ORDER BY m.machine_id)
-        FILTER (WHERE m.machine_id IS NOT NULL),
+      array_agg(m.machine_key ORDER BY m.machine_key)
+        FILTER (WHERE m.machine_key IS NOT NULL),
       ARRAY[]::text[]
     ) AS machine_ids,
     CASE

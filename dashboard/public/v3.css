@@ -2362,6 +2362,40 @@ a.v3-chip:focus-visible {
    ========================================================================= */
 
 .v3-auto-summary { display: flex; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+/* Admin: Anlegen-Formulare (Standort/Automat) */
+.v3-auto-admin { margin: 0 0 20px; }
+.v3-auto-admin__bar { display: flex; gap: 10px; flex-wrap: wrap; }
+.v3-auto-form {
+  margin-top: 12px;
+  padding: 16px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 560px) { .v3-auto-form { grid-template-columns: 1fr 1fr; } }
+.v3-auto-field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--ink-soft); }
+.v3-auto-field span { font-weight: 600; }
+.v3-auto-field input, .v3-auto-field select {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper-deep);
+  color: var(--ink);
+  font-size: 14px;
+}
+.v3-auto-field input:focus, .v3-auto-field select:focus {
+  outline: none; border-color: var(--brand);
+}
+.v3-auto-form__actions {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.v3-auto-form__msg { font-size: 13px; color: var(--ink-faint); }
+.v3-auto-form__msg.is-ok { color: var(--ok); }
+.v3-auto-form__msg.is-err { color: var(--crit, #b4232a); }
 .v3-auto-stat {
   flex: 1; min-width: 96px; display: flex; flex-direction: column; gap: 2px;
   padding: 14px 16px; border-radius: var(--radius); background: var(--card);

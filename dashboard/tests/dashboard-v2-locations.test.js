@@ -155,3 +155,14 @@ test('slugifyLocationKey transliteriert Umlaute und erzeugt LOC_-Prefix', () => 
   assert.equal(slugifyLocationKey('Straße 1'), 'LOC_STRASSE_1');
   assert.equal(slugifyLocationKey('   '), 'LOC_STANDORT');
 });
+
+test('REGRESSION: machine_ids wird aus machine_key aggregiert (behebt "Ohne Standort" trotz location_id)', () => {
+  // Die v3-Automaten-Seite matcht location.machine_ids gegen die
+  // machine-profiles-Identität (= machine_key, z. B. "457107528"). Trüge
+  // machine_ids die bigint machine_id (z. B. "1"), zeigte ein korrekt
+  // verknuepfter Automat faelschlich "Ohne Standort".
+  assert.match(LOCATIONS_SELECT_SQL, /array_agg\(\s*m\.machine_key/i,
+    'machine_ids muss aus m.machine_key aggregiert werden');
+  assert.doesNotMatch(LOCATIONS_SELECT_SQL, /array_agg\(\s*m\.machine_id\b/i,
+    'nicht die bigint m.machine_id (ID-Raum-Mismatch zur machine-profiles-Identitaet)');
+});

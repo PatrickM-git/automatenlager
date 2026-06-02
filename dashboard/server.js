@@ -16,6 +16,7 @@ const { buildReportCsv, buildReportFilename } = require('./lib/reports.js');
 const { buildLocationProfile, buildLocationComparison, queryLocationsPg, upsertLocationPg } = require('./lib/location-profiles.js');
 const { buildCorrectionCases, queryCorrectionCasesPg } = require('./lib/correction-cases.js');
 const { buildMachineProfile, getMachineOptions, queryMachineProfilesPg, upsertMachineProfilePg } = require('./lib/machine-profiles.js');
+const { buildMachineCreatePayload, createMachinePg } = require('./lib/machine-create.js');
 const { buildProductSuggestion, validateCorrectionAction, buildCorrectionActionPayload, buildCorrectionActionAuditEntry } = require('./lib/correction-action.js');
 const { buildOnboardingStartPayload, validateOnboardingStart, buildOnboardingStartAuditEntry } = require('./lib/onboarding-start.js');
 const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buildSlotAssignAuditEntry } = require('./lib/slot-assign-inline.js');
@@ -2781,6 +2782,34 @@ const server = http.createServer(async (req, res) => {
         } else {
           sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
         }
+      }
+      return;
+    }
+
+    if (parsed.pathname === '/api/v2/machines' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        sendJson(res, 403, { ok: false, error: { code: 'FORBIDDEN', message: 'Nur Admins können Automaten anlegen.' } });
+        return;
+      }
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      await new Promise((resolve) => req.on('end', resolve));
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      try {
+        const payload = buildMachineCreatePayload(JSON.parse(body || '{}'));
+        const saved = await createMachinePg(pgUrl, payload);
+        sendJson(res, 200, { ok: true, data: saved });
+      } catch (err) {
+        const isValidation = /erforderlich|existiert nicht|Standort/i.test(err.message);
+        sendJson(res, isValidation ? 400 : 503, {
+          ok: false,
+          error: { code: isValidation ? 'VALIDATION_ERROR' : 'PG_ERROR', message: err.message },
+        });
       }
       return;
     }
