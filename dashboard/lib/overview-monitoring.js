@@ -4,6 +4,33 @@ const { availableBatchStatusSqlList } = require('./stock-status.js');
 
 const PIPELINE_STALE_THRESHOLD_MINUTES = 24 * 60;
 
+// Live-Abgleich: Die warnings-Tabelle wird nachts von WF5 aus dem Google-Sheet
+// geschrieben und veraltet (driftet von PG). Bestands-bezogene Warnungen
+// (MHD/Slot leer/Charge fast leer) werden daher gegen den AKTUELLEN PG-Stand
+// geprueft und nur gezeigt, wenn die Bedingung jetzt noch zutrifft. System-/
+// Betriebswarnungen (CONTAINER_DOWN, WORKFLOW_ERROR, …) bleiben unberuehrt.
+const LIVE_WARNING_RECONCILE_SQL = `
+  CASE
+    WHEN w.warning_type IN ('MHD_NEAR', 'MHD_EXPIRED') THEN EXISTS (
+      SELECT 1 FROM automatenlager.stock_batches sb
+       WHERE sb.product_id = w.product_id
+         AND sb.remaining_qty > 0
+         AND sb.status IN (${availableBatchStatusSqlList()})
+         AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'
+    )
+    WHEN w.warning_type = 'LOW_STOCK' THEN EXISTS (
+      SELECT 1 FROM automatenlager.slot_assignments sa
+       WHERE sa.product_id = w.product_id AND sa.active = TRUE
+         AND sa.current_machine_qty = 0
+    )
+    WHEN w.warning_type = 'LOW_BATCH' THEN (
+      SELECT COALESCE(SUM(sb.remaining_qty), 0) FROM automatenlager.stock_batches sb
+       WHERE sb.product_id = w.product_id
+         AND sb.status IN (${availableBatchStatusSqlList()})
+    ) <= 5
+    ELSE TRUE
+  END`;
+
 function clean(value) {
   return String(value ?? '').trim();
 }
@@ -201,6 +228,7 @@ async function queryOverviewMonitoringPg(pgUrl) {
                AND w.product_id IS NOT NULL
                AND (SELECT COUNT(*) FROM automatenlager.slot_assignments sa WHERE sa.active = TRUE AND sa.product_id = w.product_id) > 1
              )
+             AND (${LIVE_WARNING_RECONCILE_SQL})
            ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
          ) d`,
       ),
@@ -264,6 +292,7 @@ async function queryOverviewMonitoringPg(pgUrl) {
                AND w.product_id IS NOT NULL
                AND (SELECT COUNT(*) FROM automatenlager.slot_assignments sa WHERE sa.active = TRUE AND sa.product_id = w.product_id) > 1
              )
+             AND (${LIVE_WARNING_RECONCILE_SQL})
            ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
          )
          SELECT warning_type, severity, resolved, created_at, warning_key, message
