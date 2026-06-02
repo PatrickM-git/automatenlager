@@ -582,9 +582,21 @@
         '<div class="v3-auto-form__actions"><button type="submit" class="v3-btn v3-btn--brand">Standort anlegen</button>' +
           '<span class="v3-auto-form__msg" data-auto-msg="standort"></span></div>' +
       '</form>';
+    // #3: Nayax-Geräte als natives Combobox (datalist) — Tippfilter + scrollbar,
+    // freier Text bleibt möglich; leer -> reines Freitextfeld.
+    var devices = view.nayaxDevices || [];
+    var deviceOpts = devices.map(function (d) {
+      return '<option value="' + esc(d.machineId) + '">' + esc(d.label) + '</option>';
+    }).join('');
+    var hasDevices = devices.length > 0;
+    var machineKeyField =
+      '<label class="v3-auto-field"><span>Automaten-/Nayax-Nr *</span>' +
+        '<input type="text" name="machine_key" required ' + (hasDevices ? 'list="nayaxDeviceList" ' : '') +
+        'placeholder="' + (hasDevices ? 'Nayax-Gerät wählen oder Nr tippen' : 'z. B. 457107529') + '"></label>' +
+      (hasDevices ? '<datalist id="nayaxDeviceList">' + deviceOpts + '</datalist>' : '');
     var automatForm =
       '<form class="v3-auto-form" data-auto-formel="automat" hidden>' +
-        field('Automaten-/Nayax-Nr', 'machine_key', 'z. B. 457107529', true) +
+        machineKeyField +
         field('Bezeichnung', 'name', 'z. B. Snackautomat Foyer', true) +
         '<label class="v3-auto-field"><span>Standort *</span><select name="location_key" required>' +
           (locOpts ? '<option value="">— wählen —</option>' + locOpts
@@ -1032,12 +1044,16 @@
       return Promise.all([
         fetchJson('/api/v2/machine-profiles'),
         fetchJson('/api/v2/locations').catch(function () { return { data: [] }; }),
+        fetchJson('/api/v2/nayax-devices').catch(function () { return { data: [] }; }),
       ]).then(function (results) {
         var machines  = (results[0] && results[0].data) || [];
         var locations = (results[1] && results[1].data) || [];
+        var devices   = (results[2] && results[2].data) || [];
         var isAdmin   = !!(results[0] && results[0].is_admin);
         var view = automatenClientView(machines, locations);
         view.isAdmin = isAdmin;
+        // Nayax-Geräte fürs Anlege-Combobox: nur noch nicht angelegte vorschlagen.
+        view.nayaxDevices = devices.filter(function (d) { return !d.alreadyCreated; });
         // Standort-Optionen für das "Neuer Automat"-Dropdown (key + Name).
         view.locationOptions = locations.map(function (l) {
           return { key: l.location_key || l.location_id, name: l.name };
