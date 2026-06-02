@@ -2245,11 +2245,44 @@
       '</button>';
   }
 
+  /* Etagen-Klappzustand: pro Automat+Etage in localStorage gemerkt, damit das
+     Ein-/Ausklappen über Reloads und Automatenwechsel hinweg stabil bleibt.
+     Default = aufgeklappt (kein Eintrag); nur eingeklappte Etagen werden gespeichert. */
+  var FLOOR_COLLAPSE_KEY = 'v3.slots.collapsedFloors';
+  function floorKey(machineId, floor) { return String(machineId) + '::' + String(floor); }
+  function loadCollapsedFloors() {
+    try { return JSON.parse(window.localStorage.getItem(FLOOR_COLLAPSE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function saveCollapsedFloors(map) {
+    try { window.localStorage.setItem(FLOOR_COLLAPSE_KEY, JSON.stringify(map)); } catch (e) { /* Speicher voll/gesperrt → still ignorieren */ }
+  }
+  /* Default-Zustand ohne ausdrückliche Nutzer-Entscheidung: am Handy eingeklappt
+     (kompakte Übersicht, kein endloses Scrollen), am Desktop aufgeklappt. Die
+     Schwelle 880px entspricht dem Umschaltpunkt zur Sidebar-/Desktop-Ansicht. */
+  function floorDefaultCollapsed() {
+    try { return window.matchMedia('(max-width: 879px)').matches; } catch (e) { return false; }
+  }
+  var FLOOR_CHEVRON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+
   function renderMachineStage(machine, canEdit) {
+    var collapsed = loadCollapsedFloors();
+    var defCollapsed = floorDefaultCollapsed();
     var floorsHtml = machine.floors.map(function (f) {
+      var total = f.slots.length;
+      var occ = f.slots.filter(function (s) { return Number(s.product_id) > 0; }).length;
+      var key = floorKey(machine.machine_id, f.floor);
+      // Ausdrückliche Wahl (true/false) schlägt den Viewport-Default; sonst Default.
+      var isCollapsed = (key in collapsed) ? !!collapsed[key] : defCollapsed;
       return '' +
-        '<div class="v3-slots-floor">' +
-          '<span class="v3-slots-floor__label">Etage ' + esc(f.floor) + '</span>' +
+        '<div class="v3-slots-floor" data-slots-floor data-floor-key="' + esc(key) + '"' +
+          ' data-floor-collapsed="' + (isCollapsed ? 'true' : 'false') + '">' +
+          '<button type="button" class="v3-slots-floor__toggle" data-floor-toggle' +
+            ' aria-expanded="' + (isCollapsed ? 'false' : 'true') + '">' +
+            '<span class="v3-slots-floor__label">Etage ' + esc(f.floor) + '</span>' +
+            '<span class="v3-slots-floor__summary">' + occ + ' / ' + total + ' belegt</span>' +
+            '<span class="v3-slots-floor__chev">' + FLOOR_CHEVRON + '</span>' +
+          '</button>' +
           '<div class="v3-slots-floor__row">' +
             f.slots.map(function (s) { return renderSlotCell(s, canEdit); }).join('') +
           '</div>' +
@@ -3164,6 +3197,25 @@
         var stagewrap = viewEl.querySelector('[data-slots-stagewrap]');
         if (stagewrap) { stagewrap.innerHTML = renderMachineStage(_slotsState.machines[_slotsState.activeMachine], _slotsState.canEdit); }
       });
+    });
+
+    // Etagen ein-/ausklappen – reine Ansicht-Steuerung, daher auch für Gäste.
+    // Delegiert auf root, damit der Handler den Stage-Neuaufbau (Automatenwechsel)
+    // übersteht; Zustand wird pro Automat+Etage in localStorage gemerkt.
+    root.addEventListener('click', function (e) {
+      var tg = e.target.closest && e.target.closest('[data-floor-toggle]');
+      if (!tg) { return; }
+      var floor = tg.closest('[data-slots-floor]');
+      if (!floor) { return; }
+      var willCollapse = floor.getAttribute('data-floor-collapsed') !== 'true';
+      floor.setAttribute('data-floor-collapsed', willCollapse ? 'true' : 'false');
+      tg.setAttribute('aria-expanded', willCollapse ? 'false' : 'true');
+      // Ausdrückliche Wahl explizit merken (true=zu, false=auf), damit sie auch
+      // gegen den Viewport-Default (Handy=zu) bestehen bleibt.
+      var map = loadCollapsedFloors();
+      var key = floor.getAttribute('data-floor-key');
+      map[key] = !!willCollapse;
+      saveCollapsedFloors(map);
     });
 
     // „Aus Nayax abgleichen" – Vorschau ist read-only (auch Gäste), daher VOR

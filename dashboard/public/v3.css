@@ -209,7 +209,13 @@ a { color: inherit; }
 /* ---- Inhaltsbereich ----------------------------------------------------- */
 
 /* unten Platz für die fixierte Handy-Bottom-Nav (Desktop überschreibt das). */
-.v3-main { padding: 18px 16px calc(88px + env(safe-area-inset-bottom)); outline: none; }
+/* min-width:0 ist entscheidend: .v3-main ist ein Grid-Item von .v3-shell und
+   würde mit dem Default min-width:auto nicht unter die min-content-Breite seines
+   Inhalts (breite Tabellen/Slot-Etagen) schrumpfen. Ohne diese Zeile wird das
+   ganze Layout breiter als der Viewport → Handy zoomt raus und die fixierte
+   Bottom-Nav rutscht weg. Breite Tabellen scrollen stattdessen in ihrem eigenen
+   overflow-x:auto-Wrapper. */
+.v3-main { min-width: 0; padding: 18px 16px calc(88px + env(safe-area-inset-bottom)); outline: none; }
 .v3-view { max-width: 1040px; margin: 0 auto; animation: v3-fade 0.32s var(--ease) both; }
 
 .v3-page__head { margin: 4px 2px 18px; }
@@ -1933,10 +1939,11 @@ a.v3-chip:focus-visible {
 .v3-slots__machines { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
 
 /* Layout: Stage + Palette */
-.v3-slots-layout { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.v3-slots-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 
 /* Geräte-Rahmen (Etagen-Stapel) */
 .v3-slots-stage {
+  min-width: 0;
   background: linear-gradient(180deg, var(--card), var(--paper));
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
@@ -1944,7 +1951,7 @@ a.v3-chip:focus-visible {
   padding: 16px 16px 12px;
 }
 .v3-slots-stage__top {
-  display: flex; align-items: baseline; gap: 10px;
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px;
   padding: 0 2px 12px; margin-bottom: 12px;
   border-bottom: 1px dashed var(--line);
 }
@@ -1957,21 +1964,43 @@ a.v3-chip:focus-visible {
   box-shadow: inset 0 2px 4px rgba(23,24,28,0.12);
 }
 
-/* Eine Etage */
+/* Eine Etage – einklappbarer Block: Kopfzeile (Tap-Ziel) + Slot-Reihe darunter. */
 .v3-slots-floor {
-  display: grid;
-  grid-template-columns: 64px 1fr;
-  align-items: center;
-  gap: 12px;
+  min-width: 0;
+  border-radius: var(--radius-sm);
 }
+/* Kopfzeile: volle Breite, gut tippbar, zeigt Belegung + Auf-/Zuklapp-Pfeil. */
+.v3-slots-floor__toggle {
+  appearance: none; font: inherit; width: 100%; cursor: pointer;
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px;
+  background: transparent; border: none; border-radius: var(--radius-sm);
+  color: var(--ink-soft); text-align: left;
+  transition: background 0.14s var(--ease);
+}
+.v3-slots-floor__toggle:hover { background: var(--paper-deep); }
+.v3-slots-floor__toggle:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-tint); }
 .v3-slots-floor__label {
   font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--ink-faint); text-align: right;
+  color: var(--ink-faint);
 }
+.v3-slots-floor__summary {
+  font-size: 12px; font-weight: 600; color: var(--ink-faint);
+}
+.v3-slots-floor__chev {
+  margin-left: auto; flex: none;
+  width: 18px; height: 18px; color: var(--ink-faint);
+  transition: transform 0.18s var(--ease);
+}
+.v3-slots-floor__chev svg { width: 18px; height: 18px; stroke-width: 2; display: block; }
+.v3-slots-floor[data-floor-collapsed="true"] .v3-slots-floor__chev { transform: rotate(-90deg); }
+.v3-slots-floor[data-floor-collapsed="true"] .v3-slots-floor__row { display: none; }
+
 .v3-slots-floor__row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
   gap: 8px;
+  margin-top: 4px;
   padding: 8px;
   background: var(--paper-deep);
   border-radius: var(--radius-sm);
