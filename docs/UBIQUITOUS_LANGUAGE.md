@@ -78,3 +78,79 @@ Festlegungen:
   PG-Schema ohne eigene Spalte; lesend aus der Maschinen-Aktivität abgeleitet
   (≥ 1 aktive Maschine → `aktiv`, Maschinen aber keine aktiv → `inaktiv`, keine →
   `geplant`). Siehe `dashboard/lib/location-profiles.js`.
+
+---
+
+## Zugriffsrollen & Fähigkeiten (RBAC)
+
+> Quelle: SPEC `docs/specs/auth-sicherheitskonzept-v1.md`. Berechtigungen werden als
+> **Fähigkeiten (Verben)** modelliert, nicht pro Reiter. Ein Reiter wird sichtbar,
+> sobald der Viewer **mindestens eine** passende Fähigkeit hat. Durchsetzung erfolgt
+> **serverseitig** (HTTP `403` bei fehlender Fähigkeit); das Ausblenden in der UI ist
+> nur Komfort, nicht der Schutz.
+
+- **Fähigkeit (Verb):** Eine einzelne, benannte Berechtigung. Kanonisch genau sechs:
+  - **`betrieb.lesen`** — Tagesgeschäft ansehen (Reiter Heute, Bestand, Monitoring, Automaten).
+  - **`finanzen.lesen`** — GuV/Umsatz/Marge sehen (Reiter GuV). Eigener Vertraulichkeits-Schalter.
+  - **`bestand.schreiben`** — Korrektur, Slot-Editor, Onboarding, Refill schreiben (Wahrheitsquelle WF4).
+  - **`workflows.starten`** — n8n-Workflows triggern (querschnittlich, kein einzelner Reiter).
+  - **`nayax.schreiben`** — Nayax-Apply/Push ausführen. **Höchstes Risiko.**
+  - **`system.verwalten`** — Einstellungen + Zugangsdaten verwalten. **Master-Fähigkeit.**
+- **Rolle:** Ein benanntes **Bündel** von Fähigkeiten (Voreinstellung). Kanonisch drei:
+  - **Eigentümer** — alle sechs Fähigkeiten.
+  - **Auffüller** (*Synonym Operator; bevorzugt: Auffüller*) — `betrieb.lesen` + `bestand.schreiben`
+    (optional `workflows.starten`); **kein** `finanzen.lesen`, `system.verwalten`, `nayax.schreiben`.
+  - **Gast** — nur `betrieb.lesen` (read-only). *Zu vermeiden: „Read-Only-Benutzer" als Rollenname.*
+- **Viewer:** Das vom Server pro Anfrage aufgelöste Subjekt (`getViewer`) mit Login,
+  Rolle, Fähigkeiten und `tenantId`. Einziger Knotenpunkt der Identitätsauflösung.
+
+Beziehungen: Rolle **bündelt** 1..n Fähigkeiten · Reiter/Endpunkt **fordert** 1..n Fähigkeiten ·
+Viewer **hat** genau eine Rolle (und damit deren Fähigkeiten).
+
+---
+
+## Authentifizierung & Vertrauen
+
+> Identität ist nur dann vertrauenswürdig, wenn sie über den richtigen **Pfad** kommt
+> (Sicherheits-Review **F1**). Der Loopback-Bind allein genügt nicht gegen Spoofing.
+
+- **Identity-Header:** Der `Tailscale-User-Login`-Header. Nur **Tailscale Serve** setzt
+  bzw. überschreibt ihn vertrauenswürdig; client-gesetzte Werte werden dort verworfen.
+- **Serve-Pfad:** Zugriff über **Tailscale Serve, HTTPS auf `:8443`**. **Nur hier** wird
+  der Identity-Header ausgewertet. *Zu vermeiden: roher TCP-Zugang auf `:8787`.*
+- **Interner Pfad:** Zugriff übers Docker-Netz `homelab-network` (z. B.
+  `homelab-dashboard:8787`, etwa durch WF-Monitor). `Tailscale-*`-Header werden hier
+  **verworfen**; der Aufruf gilt **immer als Gast/read-only**. = **pfad-basiertes Vertrauen**.
+- **Default-Deny:** „Kein Identity-Header → **kein** Admin." Kehrt das frühere
+  Fehlverhalten (`!header → Admin`) um. *Zu vermeiden: „Operator-Trust".*
+- **Loopback-Notausgang (Dev-Flag):** Kein Header + lokaler Loopback ⇒ Admin **nur**, wenn
+  `DASHBOARD_DEV_LOCAL_ADMIN` gesetzt ist (Entwicklung). In Produktion **aus**.
+- **Exakte Allowlist:** Nur **exakt** hinterlegte Logins erhalten eine Rolle. Die alte
+  Präfix-Regel (`startsWith('patrick')`) entfällt ersatzlos.
+
+---
+
+## Mandant & editierbare Schwellwerte
+
+- **Mandant / `tenant_id`:** Logische Eigentümer-Einheit der Daten. Aktuell **ein** Mandant
+  (der Eigentümer), das Datenmodell ist aber durchgängig `tenant_id`/`machine_id`-**parametrisch**
+  — Fundament für spätere Mandantenfähigkeit und Supabase-RLS. *Zu vermeiden: „Kunde" als Code-Begriff.*
+- **Schwellwert (editierbar):** In `/einstellungen` (`system.verwalten`) änderbarer Wert. Kanonisch:
+  **Ladenhüter-Tage** (Default 30, vgl. Slow-Mover-Cluster) und **MHD-Risiko-Fenster** (Default 30 Tage).
+- **Globaler Default vs. Pro-Automat-Override:** Ein Schwellwert gilt **global**, solange kein
+  Automat per `machine_id` abweicht; ein **Override** ist eine Wert-pro-Automat-Festlegung, die den
+  globalen Default schlägt.
+- **„Auf Standard zurücksetzen":** Reset eines Schwellwerts auf den Code-Default — **pro Wert** (↺)
+  und als **globale** Aktion (alles zurücksetzen).
+
+---
+
+## Secret-Handling & Audit
+
+- **Secret-Handling:** Zugangsdaten (z. B. n8n-API-Key) sind **nur mit `system.verwalten`**
+  editierbar, gehen **nie im Klartext** an den Browser (immer maskiert, z. B. `••••gesetzt`),
+  erscheinen **nie in Logs/Audit** und werden im Datenmodell **je Mandant** getrennt gehalten.
+- **Audit-Trail:** Append-only-Protokoll **aller** privilegierten Aktionen (Workflow-Trigger,
+  Nayax-Apply, Settings-/Schwellwert-Änderung, Rollenvergabe) inkl. **abgewiesener** Versuche
+  (`403`) und interner-Pfad-Aufrufe. Erweitert das bisherige Gast-Zugriffs-Log (`auditGuestAccess`),
+  das heute nur Gäste erfasst. *Zu vermeiden: „Logging" für diesen sicherheitsrelevanten Trail.*
