@@ -2558,3 +2558,56 @@ a.v3-chip:focus-visible {
 }
 .v3-slots-fill-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
 .v3-slots-fill-sum { font-weight: 700; font-variant-numeric: tabular-nums; margin-right: auto; }
+
+/* ---- Lager-Tabelle (Bestand & MHD) --------------------------------------- */
+.v3-lager-table-wrap {
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-card);
+  background: var(--card);
+}
+.v3-lager-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.v3-lager-th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  border-bottom: 2px solid var(--line);
+  white-space: nowrap;
+  background: var(--paper);
+}
+.v3-lager-th--sortable { cursor: pointer; user-select: none; }
+.v3-lager-th--sortable:hover { color: var(--ink); }
+.v3-lager-th__arrow { margin-left: 4px; font-size: 10px; }
+.v3-lager-th__arrow--idle { opacity: 0.4; }
+.v3-lager-td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+  color: var(--ink);
+}
+.v3-lager-td--name { font-weight: 600; max-width: 200px; }
+.v3-lager-td--mhd  { color: var(--ink-soft); font-size: 13px; }
+.v3-lager-td--days { white-space: nowrap; }
+.v3-lager-td--qty  { font-weight: 600; text-align: right; }
+.v3-lager-td--action { width: 40px; text-align: center; }
+.v3-lager-row:last-child .v3-lager-td { border-bottom: none; }
+.v3-lager-row--crit .v3-lager-td--name { color: var(--crit); }
+.v3-lager-row--warn .v3-lager-td--name { color: var(--warn); }
+.v3-lager-row:hover { background: var(--paper); }
+.v3-lager-row__writeoff {
+  border: none; background: none; cursor: pointer;
+  color: var(--ink-faint); font-size: 16px; line-height: 1;
+  padding: 4px 8px; border-radius: 6px;
+  transition: color .15s, background .15s;
+}
+.v3-lager-row__writeoff:hover { color: var(--crit); background: rgba(185,28,28,.08); }
+.v3-badge--ok { background: rgba(21,128,61,.08); color: var(--ok); border-color: rgba(21,128,61,.2); }

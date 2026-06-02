@@ -239,13 +239,30 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
       ),
     ]);
 
+    const allBatchesResult = await client.query(
+      `SELECT sb.batch_id,
+              sb.batch_key,
+              p.product_id,
+              p.name        AS product_name,
+              sb.mhd_date,
+              sb.remaining_qty,
+              sb.status,
+              (sb.mhd_date::date - CURRENT_DATE)::int AS days_until_mhd
+         FROM automatenlager.stock_batches sb
+         JOIN automatenlager.products p ON p.product_id = sb.product_id
+        WHERE sb.status IN (${availableBatchStatusSqlList()})
+          AND sb.remaining_qty > 0
+        ORDER BY sb.mhd_date ASC NULLS LAST, p.name`,
+    );
+
     return {
       mhdRisks: mhdResult.rows,
       lowStock: lowStockResult.rows,
+      allBatches: allBatchesResult.rows,
     };
   } finally {
     await client.end();
   }
 }
 
-module.exports = { buildInventoryMhdData, queryInventoryMhdPg };
+module.exports = { buildInventoryMhdData, queryInventoryMhdPg, toIsoDate };

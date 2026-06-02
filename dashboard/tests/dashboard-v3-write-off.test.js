@@ -13,8 +13,10 @@ test('AC-WO1: /lager-Loader lädt den Viewer (Admin-Gating)', () => {
   assert.ok(/_lagerCanEdit\s*=\s*!!viewer\.canTriggerActions/.test(v3js));
 });
 
-test('AC-WO2: Karten-Mapping reicht batch_key durch', () => {
-  assert.ok(/batch_key:\s*String\(r\.batch_key/.test(v3js));
+test('AC-WO2: Tabellen-Zeile reicht batch_key als data-Attribut durch', () => {
+  // Lager nutzt jetzt eine Tabelle statt Karten; batch_key wird als data-batch-key
+  // auf den Aussortieren-Button geschrieben.
+  assert.ok(/data-batch-key.*esc\(b\.batch_key\)/.test(v3js), 'data-batch-key im Button-HTML');
 });
 
 test('AC-WO3: Aussortieren-Knopf nur für Admins gerendert', () => {

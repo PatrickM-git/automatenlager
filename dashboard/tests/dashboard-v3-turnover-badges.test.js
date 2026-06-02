@@ -56,17 +56,19 @@ test('AC-TB5: Slots-Seite hat einen Drehzahl-Klassen-Filter', () => {
   assert.match(V3_JS, /data-turnover-filter/, 'Filter setzt data-turnover-filter auf den Stage-Wrapper');
 });
 
-test('AC-TB6: Lager-Seite hat einen Drehzahl-Klassen-Filter', () => {
-  assert.match(V3_JS, /data-lager-turnover="/, 'Lager-Filter-Chips müssen existieren');
-  assert.match(V3_JS, /filters\.turnover_class/, 'Lager-Filter wertet turnover_class aus');
+test('AC-TB6: Lager-Seite zeigt sortierbare Tabelle mit Dringlichkeit-Badge', () => {
+  // Lager wurde von Karten auf eine sortierbare allBatches-Tabelle umgestellt.
+  assert.match(V3_JS, /data-sort=/, 'Lager-Tabelle hat sortierbare Spalten-Header');
+  assert.match(V3_JS, /mhdSeverity/, 'Dringlichkeits-Berechnung vorhanden');
+  assert.match(V3_JS, /allBatches/, 'Lager nutzt allBatches als Datenquelle');
 });
 
-// ── Lager-Join: Klasse aus den Sortiment-Slots ──────────────────────────────────
+// ── Lager-Tabelle: Sortierung ─────────────────────────────────────────────────
 
-test('AC-TB7: Lager-Seite joint die Drehzahl-Klasse aus /api/v2/assortment-slots', () => {
-  assert.match(V3_JS, /\/api\/v2\/assortment-slots/, 'Lager lädt zusätzlich die Sortiment-Slots');
-  assert.match(V3_JS, /classByKey/, 'Klassen-Lookup nach machine_id+mdb_code');
-  assert.match(V3_JS, /turnover_class:\s*tclass/, 'Karte erhält die gejointe Klasse');
+test('AC-TB7: Lager-Seite sortiert nach MHD und Lagerbestand', () => {
+  assert.match(V3_JS, /sortBatches/, 'Sort-Funktion vorhanden');
+  assert.match(V3_JS, /mhd_date.*asc|asc.*mhd_date/, 'Standard-Sort MHD aufsteigend');
+  assert.match(V3_JS, /_lagerSort/, 'Sort-State gespeichert');
 });
 
 // ── CSS ─────────────────────────────────────────────────────────────────────────

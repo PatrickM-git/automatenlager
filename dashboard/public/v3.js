@@ -777,45 +777,12 @@
         fetchJson('/api/v2/assortment-slots').catch(function () { return {}; }),
         fetchJson('/api/dashboard').catch(function () { return {}; }),
       ]).then(function (results) {
-        var res  = results[0];
-        var rows = (res && res.data && res.data.mhdRisks) || [];
-        if (rows.length === 0) { return { status: 'empty' }; }
-        var slots = (results[1] && results[1].data && results[1].data.slots) || [];
+        var res    = results[0];
         var viewer = (results[2] && results[2].viewer) || {};
         _lagerCanEdit = !!viewer.canTriggerActions;
-        var classByKey = {};
-        slots.forEach(function (s) {
-          if (s && s.turnover_class) {
-            classByKey[String(s.machine_id) + '|' + String(s.mdb_code)] = s.turnover_class;
-          }
-        });
-        /* Client-side: build lager data (same logic as lib/lager.js, no server round-trip) */
-        var cards = rows.map(function (r) {
-          var s = String(r.severity || r.warning_severity || '').toLowerCase();
-          var sev = (s === 'critical' || s === 'error') ? 'critical' :
-                    (s === 'warning'  || s === 'warn')  ? 'warning'  : 'info';
-          var tkey = String(r.machine_id || '') + '|' + String(r.mdb_code || '');
-          var tclass = classByKey[tkey] || (r.turnover_class != null ? String(r.turnover_class) : null);
-          return {
-            batch_id:        Number(r.batch_id)      || 0,
-            batch_key:       String(r.batch_key      || ''),
-            product_id:      Number(r.product_id)    || 0,
-            product_name:    String(r.product_name   || r.product_id || ''),
-            mhd_date:        String(r.mhd_date       || ''),
-            remaining_qty:   Number(r.remaining_qty) || 0,
-            severity:        sev,
-            machine_id:      String(r.machine_id     || ''),
-            machine_name:    String(r.machine_name   || ''),
-            location_name:   String(r.location_name  || ''),
-            mdb_code:        String(r.mdb_code       || ''),
-            slow_mover_class: r.slow_mover_class != null ? String(r.slow_mover_class) : null,
-            turnover_class:  tclass,
-          };
-        });
-        _lagerAllCards = cards;
-        var crit = cards.filter(function (c) { return c.severity === 'critical'; }).length;
-        var warn = cards.filter(function (c) { return c.severity === 'warning';  }).length;
-        return { status: 'ok', lager: { cards: cards, summary: { total: cards.length, critical: crit, warning: warn } } };
+        var batches = (res && res.data && res.data.allBatches) || [];
+        if (batches.length === 0) { return { status: 'empty' }; }
+        return { status: 'ok', lager: { batches: batches } };
       }).catch(function () {
         return { status: 'error' };
       });
@@ -1084,124 +1051,143 @@
     '</div>';
   }
 
-  function renderLagerPage(data) {
-    var allCards = (data && data.cards) || [];
-    var summary  = (data && data.summary) || { total: 0, critical: 0, warning: 0 };
+  /* ---- Lager-Tabelle (Bestand & MHD / /lager) ------------------------------ */
+  var _lagerBatches = [];
+  var _lagerCanEdit = false;
+  var _lagerSort    = { col: 'mhd_date', dir: 'asc' };
+  var WRITE_OFF_REASONS = ['MHD abgelaufen', 'Bruch / Beschädigung', 'Schwund', 'Rückruf', 'Sonstiges'];
 
-    var cardsHtml = allCards.length === 0
-      ? '<div class="v3-lager-empty">' +
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4"/><path d="M12 11v10"/></svg>' +
-          '<p style="margin:0;font-weight:600">Keine Einträge</p>' +
-          '<p style="margin:0;font-size:13px">Alle Bestände sind in Ordnung.</p>' +
-        '</div>'
-      : allCards.map(renderLagerCard).join('');
-
-    return renderLagerKpis(summary) +
-      renderLagerBar(allCards) +
-      '<div class="v3-lager-layout">' +
-        '<div class="v3-lager-grid v3-lager-grid--fresh" data-lager-grid>' + cardsHtml + '</div>' +
-        '<aside class="v3-lager-chart-panel" aria-label="Restmengen-Übersicht">' +
-          '<p class="v3-lager-chart-panel__title">Restmengen im Überblick</p>' +
-          '<div data-lager-chart>' + renderBarChartSvg(allCards) + '</div>' +
-        '</aside>' +
-      '</div>';
+  function mhdSeverity(days) {
+    if (days === null || days === undefined) return 'ok';
+    if (days < 0)   return 'critical';
+    if (days <= 14) return 'critical';
+    if (days <= 30) return 'warning';
+    return 'ok';
   }
 
-  /* Bind interactive filter events after lager page renders */
-  var _lagerAllCards = [];
-  var _lagerCanEdit = false; /* Admin? -> Aussortieren-Knopf auf den Karten (Issue #21) */
-  var WRITE_OFF_REASONS = ['MHD abgelaufen', 'Bruch / Beschädigung', 'Schwund', 'Rückruf', 'Sonstiges'];
-  function bindLagerFilters() {
-    var grid    = viewEl.querySelector('[data-lager-grid]');
-    var chart   = viewEl.querySelector('[data-lager-chart]');
-    var sevBtns = viewEl.querySelectorAll('[data-lager-sev]');
-    var turnBtns = viewEl.querySelectorAll('[data-lager-turnover]');
-    var machSel = viewEl.querySelector('[data-lager-machine]');
-    var prodSel = viewEl.querySelector('[data-lager-product]');
-    if (!grid) { return; }
+  function mhdLabel(days) {
+    if (days === null || days === undefined) return '—';
+    if (days < 0)  return 'Abgelaufen (' + Math.abs(days) + ' Tage)';
+    if (days === 0) return 'Heute';
+    return 'In ' + days + ' Tag' + (days === 1 ? '' : 'en');
+  }
 
-    var filters = { severity: null, machine_id: null, product_id: null, turnover_class: null };
-
-    function applyFilter() {
-      var filtered = _lagerAllCards.filter(function (c) {
-        if (filters.severity   && c.severity   !== filters.severity)              return false;
-        if (filters.machine_id && c.machine_id !== filters.machine_id)             return false;
-        if (filters.product_id && c.product_id !== Number(filters.product_id))     return false;
-        if (filters.turnover_class && c.turnover_class !== filters.turnover_class) return false;
-        return true;
-      });
-      var critF = filtered.filter(function (c) { return c.severity === 'critical'; }).length;
-      var warnF = filtered.filter(function (c) { return c.severity === 'warning'; }).length;
-      /* Update summary KPIs */
-      var kpiEl = viewEl.querySelector('.v3-cockpit-kpis');
-      if (kpiEl) {
-        var vals = kpiEl.querySelectorAll('.v3-cockpit-kpi__value');
-        if (vals[0]) { vals[0].textContent = String(filtered.length); }
-        if (vals[1]) { vals[1].textContent = String(critF); }
-        if (vals[2]) { vals[2].textContent = String(warnF); }
+  function sortBatches(batches, col, dir) {
+    return batches.slice().sort(function (a, b) {
+      var va, vb;
+      if (col === 'mhd_date') {
+        va = a.mhd_date || 'zzz';
+        vb = b.mhd_date || 'zzz';
+        return dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
       }
-      /* Re-render cards */
-      grid.classList.remove('v3-lager-grid--fresh');
-      void grid.offsetWidth; /* reflow to retrigger animation */
-      grid.classList.add('v3-lager-grid--fresh');
-      grid.innerHTML = filtered.length === 0
-        ? '<div class="v3-lager-empty">' +
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4"/><path d="M12 11v10"/></svg>' +
-            '<p style="margin:0;font-weight:600">Kein Treffer</p>' +
-            '<p style="margin:0;font-size:13px">Filter anpassen, um Einträge anzuzeigen.</p>' +
-          '</div>'
-        : filtered.map(renderLagerCard).join('');
-      /* Re-render chart with same filtered set */
-      if (chart) { chart.innerHTML = renderBarChartSvg(filtered); }
-      /* Navigation links are handled by global click delegation — no rebind needed */
-    }
+      if (col === 'remaining_qty') {
+        va = a.remaining_qty;
+        vb = b.remaining_qty;
+        return dir === 'asc' ? va - vb : vb - va;
+      }
+      if (col === 'product_name') {
+        va = a.product_name || '';
+        vb = b.product_name || '';
+        return dir === 'asc' ? va.localeCompare(vb, 'de') : vb.localeCompare(va, 'de');
+      }
+      return 0;
+    });
+  }
 
-    sevBtns.forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var sev = btn.getAttribute('data-lager-sev') || null;
-        filters.severity = sev || null;
-        sevBtns.forEach(function (b) {
-          var active = b === btn;
-          b.setAttribute('aria-pressed', active ? 'true' : 'false');
-          if (active) { b.classList.add('v3-chip--active'); }
-          else { b.classList.remove('v3-chip--active'); }
-        });
-        applyFilter();
+  function sortArrow(col) {
+    if (_lagerSort.col !== col) return '<span class="v3-lager-th__arrow v3-lager-th__arrow--idle">↕</span>';
+    return '<span class="v3-lager-th__arrow">' + (_lagerSort.dir === 'asc' ? '↑' : '↓') + '</span>';
+  }
+
+  function renderLagerTable(batches) {
+    var sorted = sortBatches(batches, _lagerSort.col, _lagerSort.dir);
+    var rows = sorted.map(function (b) {
+      var sev   = mhdSeverity(b.days_until_mhd);
+      var label = mhdLabel(b.days_until_mhd);
+      var sevCls = sev === 'critical' ? ' v3-lager-row--crit' : sev === 'warning' ? ' v3-lager-row--warn' : '';
+      var tagCls = sev === 'critical' ? 'v3-badge--crit' : sev === 'warning' ? 'v3-badge--warn' : 'v3-badge--ok';
+      var mhdDisplay = b.mhd_date
+        ? b.mhd_date.split('-').reverse().join('.')
+        : '—';
+      var writeOffBtn = (_lagerCanEdit && b.batch_key)
+        ? '<button type="button" class="v3-lager-row__writeoff" data-writeoff-btn ' +
+            'data-batch-key="' + esc(b.batch_key) + '" ' +
+            'data-product-name="' + esc(b.product_name) + '" ' +
+            'data-remaining="' + b.remaining_qty + '" ' +
+            'title="Aussortieren">×</button>'
+        : '';
+      return '<tr class="v3-lager-row' + sevCls + '">' +
+        '<td class="v3-lager-td v3-lager-td--name">' + esc(b.product_name) + '</td>' +
+        '<td class="v3-lager-td v3-lager-td--mhd">' + esc(mhdDisplay) + '</td>' +
+        '<td class="v3-lager-td v3-lager-td--days">' +
+          '<span class="v3-badge ' + tagCls + '">' + esc(label) + '</span>' +
+        '</td>' +
+        '<td class="v3-lager-td v3-lager-td--qty">' + b.remaining_qty + ' Stk.</td>' +
+        (_lagerCanEdit ? '<td class="v3-lager-td v3-lager-td--action">' + writeOffBtn + '</td>' : '') +
+      '</tr>';
+    }).join('');
+
+    var actionCol = _lagerCanEdit ? '<th class="v3-lager-th"></th>' : '';
+    return '<div class="v3-lager-table-wrap" data-lager-table>' +
+      '<table class="v3-lager-table" aria-label="Lagerbestand nach MHD">' +
+        '<thead><tr>' +
+          '<th class="v3-lager-th v3-lager-th--sortable" data-sort="product_name">Produkt ' + sortArrow('product_name') + '</th>' +
+          '<th class="v3-lager-th v3-lager-th--sortable" data-sort="mhd_date">MHD ' + sortArrow('mhd_date') + '</th>' +
+          '<th class="v3-lager-th">Dringlichkeit</th>' +
+          '<th class="v3-lager-th v3-lager-th--sortable" data-sort="remaining_qty">Lagerbestand ' + sortArrow('remaining_qty') + '</th>' +
+          actionCol +
+        '</tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+      '</table>' +
+    '</div>';
+  }
+
+  function renderLagerPage(data) {
+    var batches = (data && data.batches) || [];
+    var total   = batches.length;
+    var totalQty = batches.reduce(function (s, b) { return s + b.remaining_qty; }, 0);
+
+    var kpis = '<div class="v3-cockpit-kpis" style="margin-bottom:18px">' +
+      '<div class="v3-cockpit-kpi"><span class="v3-cockpit-kpi__label">Chargen</span>' +
+        '<span class="v3-cockpit-kpi__value">' + total + '</span></div>' +
+      '<div class="v3-cockpit-kpi"><span class="v3-cockpit-kpi__label">Stück gesamt</span>' +
+        '<span class="v3-cockpit-kpi__value">' + totalQty + '</span></div>' +
+    '</div>';
+
+    return kpis + renderLagerTable(batches);
+  }
+
+  function rerenderLagerTable() {
+    var wrap = viewEl.querySelector('[data-lager-table]');
+    if (!wrap) { return; }
+    wrap.outerHTML = renderLagerTable(_lagerBatches);
+    bindLagerFilters();
+    bindLagerWriteOff();
+  }
+
+  function bindLagerFilters() {
+    var ths = viewEl.querySelectorAll('[data-sort]');
+    ths.forEach(function (th) {
+      th.addEventListener('click', function () {
+        var col = th.getAttribute('data-sort');
+        if (_lagerSort.col === col) {
+          _lagerSort.dir = _lagerSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          _lagerSort.col = col;
+          _lagerSort.dir = 'asc';
+        }
+        rerenderLagerTable();
       });
     });
-    turnBtns.forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        filters.turnover_class = btn.getAttribute('data-lager-turnover') || null;
-        turnBtns.forEach(function (b) {
-          var active = b === btn;
-          b.setAttribute('aria-pressed', active ? 'true' : 'false');
-          if (active) { b.classList.add('v3-chip--active'); }
-          else { b.classList.remove('v3-chip--active'); }
-        });
-        applyFilter();
-      });
-    });
-    if (machSel) {
-      machSel.addEventListener('change', function () {
-        filters.machine_id = machSel.value || null;
-        applyFilter();
-      });
-    }
-    if (prodSel) {
-      prodSel.addEventListener('change', function () {
-        filters.product_id = prodSel.value || null;
-        applyFilter();
-      });
-    }
   }
 
   /* Aussortieren (Issue #21): Knopf-Delegation auf dem Karten-Grid + Modal.
      Wiederverwendet mountSlotDialog (Portal auf document.body — Pflicht wegen
      transform-Vorfahr) + showSlotToast. Schreibt via POST /api/v2/inventory/write-off. */
   function bindLagerWriteOff() {
-    var grid = viewEl.querySelector('[data-lager-grid]');
-    if (!grid || !_lagerCanEdit) { return; }
-    grid.addEventListener('click', function (ev) {
+    var table = viewEl.querySelector('[data-lager-table]');
+    if (!table || !_lagerCanEdit) { return; }
+    table.addEventListener('click', function (ev) {
       var btn = ev.target && ev.target.closest ? ev.target.closest('[data-writeoff-btn]') : null;
       if (!btn) { return; }
       openWriteOffDialog({
@@ -3091,6 +3077,7 @@
         viewEl.innerHTML = pageHead(route) +
           renderState('empty', { message: 'Für „' + route.title + '" liegen aktuell keine Einträge vor.' });
       } else if (route.path === '/lager' && result.lager) {
+        _lagerBatches = (result.lager && result.lager.batches) || [];
         viewEl.innerHTML = pageHead(route) + renderLagerPage(result.lager);
         bindLagerFilters();
         bindLagerWriteOff();

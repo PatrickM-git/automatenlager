@@ -4,7 +4,7 @@ const path = require('path');
 const url = require('url');
 const zlib = require('zlib');
 const { buildEconomicsData, queryEconomicsPg, formatProductName } = require('./lib/economics.js');
-const { buildInventoryMhdData, queryInventoryMhdPg } = require('./lib/inventory-mhd.js');
+const { buildInventoryMhdData, queryInventoryMhdPg, toIsoDate } = require('./lib/inventory-mhd.js');
 const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/assortment-slots.js');
 const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = require('./lib/overview-monitoring.js');
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
@@ -646,7 +646,19 @@ async function buildDashboardV2Area(area, query = {}) {
           generatedAtDisplay: formatBerlinDateTime(now),
           lastSuccessfulAt: now.toISOString(),
           lastSuccessfulAtDisplay: formatBerlinDateTime(now),
-          data,
+          data: {
+            ...data,
+            allBatches: (pgRows.allBatches || []).map((r) => ({
+              batch_id:      Number(r.batch_id),
+              batch_key:     String(r.batch_key || ''),
+              product_id:    Number(r.product_id),
+              product_name:  formatProductName(String(r.product_name || '')),
+              mhd_date:      toIsoDate(r.mhd_date),
+              remaining_qty: Number(r.remaining_qty) || 0,
+              status:        String(r.status || ''),
+              days_until_mhd: r.days_until_mhd != null ? Number(r.days_until_mhd) : null,
+            })),
+          },
           error: null,
         },
       };
