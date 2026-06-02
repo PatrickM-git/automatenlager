@@ -1561,21 +1561,32 @@
     return id;
   }
 
-  /* KPI-Strip mit den Totalen des Zeitraums (Brutto wie Legacy) */
-  function guvKpiStrip(totals) {
-    totals = totals || {};
+  /* KPI-Strip mit den Totalen des Zeitraums (Brutto wie Legacy).
+     #40: Umsatz + Stück schließen den laufenden Tag (vorläufig, aus
+     sales_transactions) ein — konsistent zur Live-Kachel. GuV/Marge bleiben auf
+     den endgültigen guv_daily-Zahlen, weil der EK live nicht vorliegt. */
+  function guvKpiStrip(data) {
+    data = data || {};
+    var totals = data.totals || {};
+    var prov = data.provisional || { hasProvisional: false };
+    var withProv = data.totalsWithProvisional || { revenue_gross: totals.revenue_gross, qty: totals.qty };
     var marge = Number(totals.revenue_gross) > 0 ? (totals.gross_profit / totals.revenue_gross) * 100 : 0;
-    function kpi(label, value, unit) {
+    function kpi(label, value, unit, hint) {
       return '<div class="v3-cockpit-kpi">' +
         '<span class="v3-cockpit-kpi__label">' + label + '</span>' +
         '<span class="v3-cockpit-kpi__value">' + value + (unit ? '<span class="v3-cockpit-kpi__unit"> ' + unit + '</span>' : '') + '</span>' +
+        (hint ? '<span class="v3-guv-kpi__prov">' + hint + '</span>' : '') +
       '</div>';
     }
+    var umsatzVal = prov.hasProvisional ? withProv.revenue_gross : totals.revenue_gross;
+    var stueckVal = prov.hasProvisional ? withProv.qty : totals.qty;
+    var umsatzHint = prov.hasProvisional ? 'inkl. heute (vorläufig): +' + fmtEuro(prov.revenueGross) + ' €' : '';
+    var stueckHint = prov.hasProvisional ? 'inkl. heute (vorläufig): +' + fmtInt(prov.qty) : '';
     return '<div class="v3-cockpit-kpis v3-guv-kpis">' +
-      kpi('Umsatz (brutto)', fmtEuro(totals.revenue_gross), 'EUR') +
-      kpi('GuV (brutto)', fmtEuro(totals.gross_profit), 'EUR') +
-      kpi('Marge', fmtPct(marge), '') +
-      kpi('Stück', fmtInt(totals.qty), '') +
+      kpi('Umsatz (brutto)', fmtEuro(umsatzVal), 'EUR', umsatzHint) +
+      kpi('GuV (brutto)', fmtEuro(totals.gross_profit), 'EUR', '') +
+      kpi('Marge', fmtPct(marge), '', '') +
+      kpi('Stück', fmtInt(stueckVal), '', stueckHint) +
     '</div>';
   }
 
@@ -1674,13 +1685,12 @@
 
   function renderGuvBody(data, q) {
     var series    = (data && data.series)    || [];
-    var totals    = (data && data.totals)    || {};
     var byProduct = (data && data.byProduct) || [];
     if (series.length === 0) {
-      return guvRangeCaption(data) + guvKpiStrip(totals) +
+      return guvRangeCaption(data) + guvKpiStrip(data) +
         renderState('empty', { message: 'Für den gewählten Zeitraum liegen keine Umsätze vor.' });
     }
-    return guvRangeCaption(data) + guvKpiStrip(totals) + guvChartsPanel(series) + guvTable(byProduct, q);
+    return guvRangeCaption(data) + guvKpiStrip(data) + guvChartsPanel(series) + guvTable(byProduct, q);
   }
 
   /* ---- Live-Umsatz (quasi-live) ---------------------------------------- */

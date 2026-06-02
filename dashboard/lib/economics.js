@@ -239,6 +239,22 @@ function buildSeriesFromBuckets(rows, granularity = 'month') {
     .sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : 0));
 }
 
+// #40: Vorläufige Position für den noch nicht von WF8 aggregierten Zeitraum
+// (heute / seit dem letzten guv_daily-Lauf), aus sales_transactions. Nur Umsatz
+// + Menge — bewusst KEIN Gewinn/Marge (EK ist live nicht verfügbar), damit die
+// Marge nicht still verfälscht wird. `hasProvisional` steuert die Anzeige.
+function buildProvisional(row) {
+  const revenueGross = round2(toNum(row && row.revenue_gross));
+  const qty = Math.round(toNum(row && row.qty));
+  return {
+    hasProvisional: revenueGross > 0 || qty > 0,
+    revenueGross,
+    qty,
+    fromDate: row && row.from_date ? String(row.from_date) : null,
+    toDate: row && row.to_date ? String(row.to_date) : null,
+  };
+}
+
 function buildEconomicsData(pgRows, query = {}) {
   const sortBy = query.sort || 'revenue_net';
   const sortOrder = query.order === 'asc' ? 'asc' : 'desc';
@@ -285,11 +301,21 @@ function buildEconomicsData(pgRows, query = {}) {
     series = buildSeries(byProduct);
   }
 
+  const provisional = buildProvisional(pgRows.provisional);
+  // Headline-Umsatz/Menge inkl. laufendem Tag (konsistent zur Live-Kachel #38);
+  // die Marge-Basis (totals.gross_profit/db_net) bleibt rein guv_daily.
+  const totalsWithProvisional = {
+    revenue_gross: round2(totals.revenue_gross + provisional.revenueGross),
+    qty: totals.qty + provisional.qty,
+  };
+
   return {
     byProduct,
     bySlot,
     inventoryValue,
     totals,
+    totalsWithProvisional,
+    provisional,
     series,
     granularity,
     period,
@@ -388,9 +414,84 @@ async function queryEconomicsPg(pgUrl, query = {}) {
   }
 }
 
+// #40: Vorläufiger laufender Tag — die noch nicht von WF8 aggregierten Verkäufe.
+// Liefert {revenue_gross, qty, from_date, to_date} für sales_transactions, die
+// NACH dem letzten guv_daily-Tag (im betrachteten Zeitraum/Scope) liegen, damit
+// es keine Doppelzählung mit dem Aggregat gibt. Nur relevant, wenn der Zeitraum
+// den laufenden Monat einschließt; sonst null (Vergangenheit ist vollständig).
+async function queryEconomicsProvisionalPg(pgUrl, query = {}) {
+  const { to } = resolvePeriod(query);
+  if (to !== currentBerlinMonth()) return null;
+
+  const { Client } = require('pg');
+  const machines = parseMachineFilter(query.machines != null ? query.machines : query.machine);
+  const dateFrom = `${resolvePeriod(query).from}-01`;
+  const machineArr = machines.length ? machines : null;
+
+  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
+  await client.connect();
+  try {
+    // Letzter bereits aggregierter Tag im Zeitraum/Scope (Berlin). Fehlt er,
+    // gilt der Tag vor Monatsbeginn -> der ganze Monat ist „vorläufig".
+    // covRes-Parameter: $1=dateFrom, optional $2=machines.
+    const covParams = machineArr ? [dateFrom, machineArr] : [dateFrom];
+    const covRes = await client.query(
+      `SELECT MAX(g.posting_date)::date AS latest
+         FROM automatenlager.guv_daily g
+        WHERE g.source <> 'historic_backfill'
+          AND g.posting_date >= $1::date
+          ${machineArr ? 'AND g.machine_id::text = ANY($2::text[])' : ''}`,
+      covParams,
+    );
+    const latest = covRes.rows[0] && covRes.rows[0].latest; // Date | null
+
+    // provRes-Parameter strikt in Referenz-Reihenfolge aufbauen, damit kein
+    // Parameter ungenutzt bleibt (sonst: "could not determine data type").
+    const provParams = [];
+    let lowerBound;
+    if (latest) {
+      provParams.push(dayKeyBerlin(latest));
+      lowerBound = `(s.settlement_at AT TIME ZONE 'Europe/Berlin')::date > $${provParams.length}::date`;
+    } else {
+      provParams.push(dateFrom);
+      lowerBound = `(s.settlement_at AT TIME ZONE 'Europe/Berlin')::date >= $${provParams.length}::date`;
+    }
+    let salesMachine = '';
+    if (machineArr) {
+      provParams.push(machineArr);
+      salesMachine = `AND s.machine_id::text = ANY($${provParams.length}::text[])`;
+    }
+
+    const provRes = await client.query(
+      `SELECT COALESCE(SUM(s.gross_amount), 0)        AS revenue_gross,
+              COALESCE(SUM(s.quantity), 0)::int       AS qty,
+              MIN((s.settlement_at AT TIME ZONE 'Europe/Berlin')::date) AS from_date,
+              MAX((s.settlement_at AT TIME ZONE 'Europe/Berlin')::date) AS to_date
+         FROM automatenlager.sales_transactions s
+        WHERE s.source <> 'historic_backfill'
+          AND ${lowerBound}
+          AND (s.settlement_at AT TIME ZONE 'Europe/Berlin')::date
+              <= (now() AT TIME ZONE 'Europe/Berlin')::date
+          ${salesMachine}`,
+      provParams,
+    );
+    const r = provRes.rows[0] || {};
+    return {
+      revenue_gross: r.revenue_gross,
+      qty: r.qty,
+      from_date: r.from_date ? dayKeyBerlin(r.from_date) : null,
+      to_date: r.to_date ? dayKeyBerlin(r.to_date) : null,
+    };
+  } finally {
+    await client.end();
+  }
+}
+
 module.exports = {
   buildEconomicsData,
+  buildProvisional,
   queryEconomicsPg,
+  queryEconomicsProvisionalPg,
   resolvePeriod,
   formatProductName,
   parseMachineFilter,
