@@ -103,18 +103,14 @@ a { color: inherit; }
   color: var(--ink);
 }
 .v3-brand__mark {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 38px;
   height: 38px;
   border-radius: 11px;
-  background: var(--brand);
-  color: var(--brand-ink);
-  font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 20px;
-  letter-spacing: -0.02em;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18), 0 6px 16px -8px var(--brand);
+  overflow: hidden;
+  object-fit: contain;
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px rgba(23,24,28,0.12);
 }
 .v3-brand__text { display: flex; flex-direction: column; line-height: 1.1; }
 .v3-brand__name { font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
