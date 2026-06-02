@@ -2376,6 +2376,8 @@ a.v3-chip:focus-visible {
   grid-template-columns: 1fr;
 }
 @media (min-width: 560px) { .v3-auto-form { grid-template-columns: 1fr 1fr; } }
+/* hidden-Attribut muss display:grid schlagen, sonst sind die Formulare immer offen */
+.v3-auto-form[hidden] { display: none; }
 .v3-auto-field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--ink-soft); }
 .v3-auto-field span { font-weight: 600; }
 .v3-auto-field input, .v3-auto-field select {
@@ -2425,6 +2427,7 @@ a.v3-chip:focus-visible {
 .v3-auto-stat__label { font-size: 11px; font-weight: 600; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.03em; }
 
 .v3-auto-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.v3-auto-grid[hidden] { display: none; }
 @media (min-width: 560px) { .v3-auto-grid { grid-template-columns: 1fr 1fr; } }
 @media (min-width: 900px) { .v3-auto-grid { grid-template-columns: 1fr 1fr 1fr; } }
 
