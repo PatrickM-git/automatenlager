@@ -1109,11 +1109,13 @@
       var mhdDisplay = b.mhd_date
         ? b.mhd_date.split('-').reverse().join('.')
         : '—';
+      var batchCount = b.batch_count || 1;
       var writeOffBtn = (_lagerCanEdit && b.batch_key)
         ? '<button type="button" class="v3-lager-row__writeoff" data-writeoff-btn ' +
             'data-batch-key="' + esc(b.batch_key) + '" ' +
             'data-product-name="' + esc(b.product_name) + '" ' +
             'data-remaining="' + b.remaining_qty + '" ' +
+            'data-batch-count="' + batchCount + '" ' +
             'title="Aussortieren">×</button>'
         : '';
       return '<tr class="v3-lager-row' + sevCls + '">' +
@@ -1194,6 +1196,7 @@
         batch_key:    btn.getAttribute('data-batch-key') || '',
         product_name: btn.getAttribute('data-product-name') || '',
         remaining:    Number(btn.getAttribute('data-remaining')) || 0,
+        batch_count:  Number(btn.getAttribute('data-batch-count')) || 1,
       });
     });
   }
@@ -1202,10 +1205,15 @@
     var reasonOpts = WRITE_OFF_REASONS.map(function (r) {
       return '<option value="' + esc(r) + '">' + esc(r) + '</option>';
     }).join('');
+    var multiNote = (info.batch_count > 1)
+      ? '<p class="v3-slots-dialog__note" style="color:var(--warn);margin-top:6px">' +
+          'Hinweis: ' + info.batch_count + ' Chargen zusammengefasst — es wird nur die älteste ausgebucht. Danach Seite neu laden um die nächste auszubuchen.</p>'
+      : '';
     var body = '' +
       '<p class="v3-slots-dialog__eyebrow">Aussortieren</p>' +
       '<p class="v3-slots-dialog__note"><b>' + esc(info.product_name) + '</b> — ' +
         esc(String(info.remaining)) + ' Stk. werden ausgebucht und verschwinden aus dem Bestand.</p>' +
+      multiNote +
       '<div class="v3-writeoff__fields">' +
         '<label class="v3-writeoff__label" for="v3-writeoff-reason">Grund</label>' +
         '<select id="v3-writeoff-reason" class="v3-writeoff__select" data-writeoff-reason>' + reasonOpts + '</select>' +

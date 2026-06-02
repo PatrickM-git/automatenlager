@@ -239,19 +239,25 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
       ),
     ]);
 
+    // Chargen nach Produkt + MHD-Datum gruppieren: gleiche Ware mit gleichem
+    // Ablaufdatum erscheint als eine Zeile mit summierter Menge. Damit werden
+    // Doppeleinträge aus mehreren Rechnungen (unterschiedliche batch_key,
+    // gleicher product_id + mhd_date) zu einer übersichtlichen Zeile zusammen-
+    // gefasst. MIN(batch_key) dient als Anker für den Aussortieren-Button.
     const allBatchesResult = await client.query(
-      `SELECT sb.batch_id,
-              sb.batch_key,
-              p.product_id,
-              p.name        AS product_name,
+      `SELECT p.product_id,
+              p.name                               AS product_name,
               sb.mhd_date,
-              sb.remaining_qty,
-              sb.status,
+              SUM(sb.remaining_qty)::int           AS remaining_qty,
+              COUNT(*)::int                        AS batch_count,
+              MIN(sb.batch_key)                    AS batch_key,
               (sb.mhd_date::date - CURRENT_DATE)::int AS days_until_mhd
          FROM automatenlager.stock_batches sb
          JOIN automatenlager.products p ON p.product_id = sb.product_id
         WHERE sb.status IN (${availableBatchStatusSqlList()})
           AND sb.remaining_qty > 0
+        GROUP BY p.product_id, p.name, sb.mhd_date,
+                 (sb.mhd_date::date - CURRENT_DATE)::int
         ORDER BY sb.mhd_date ASC NULLS LAST, p.name`,
     );
 

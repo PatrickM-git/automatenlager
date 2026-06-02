@@ -36,7 +36,7 @@ test('AC-WO5: Dialog postet an den Write-off-Endpoint mit Guard', () => {
 test('AC-WO6: Dialog wird auf document.body portiert (mountSlotDialog)', () => {
   // openWriteOffDialog nutzt mountSlotDialog -> Portal (transform-Vorfahr-Falle)
   const block = v3js.slice(v3js.indexOf('function openWriteOffDialog'));
-  assert.ok(/mountSlotDialog\(/.test(block.slice(0, 1600)));
+  assert.ok(/mountSlotDialog\(/.test(block.slice(0, 2200)));
 });
 
 test('AC-WO7: CSS für den Aussortieren-Knopf vorhanden', () => {
