@@ -114,8 +114,13 @@ test('v3 entry path and deep links serve the v3 shell without touching v2 or leg
     assert.equal(page.body, entry.body, `${deepLink} should return the identical SPA shell as /v3`);
   }
 
-  // Legacy and v2 stay byte-for-byte the established behaviour
-  const legacy = await request(port, '/');
+  // Root leitet seit 2026-06-02 auf v3 um (v3 = produktiver Standard).
+  const root = await request(port, '/');
+  assert.equal(root.status, 302, '/ should redirect to v3');
+  assert.equal(root.headers.location, '/v3', '/ redirect target is /v3');
+
+  // Legacy bleibt unter /v1 erreichbar, v2 unter /v2 — beide unverändert.
+  const legacy = await request(port, '/v1');
   assert.equal(legacy.status, 200);
   assert.match(legacy.body, /Automatenlager Leitstand/);
   assert.doesNotMatch(legacy.body, /Dashboard v3/);

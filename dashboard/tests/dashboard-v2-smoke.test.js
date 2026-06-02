@@ -72,7 +72,7 @@ const SMOKE_RAW = {
   openWarningsCount: 2,
   mhdRiskCount: 1,
   lowStockCount: 3,
-  economicsToday: { revenueNet: 45.0, dbNet: 20.0, quantity: 12 },
+  economicsToday: { revenueGross: 53.5, revenueNet: 45.0, quantity: 12 },
   workflowRuns: [
     { workflow_key: 'WF-Monitor', status: 'success', started_at: '2026-05-27T09:54:00.000Z', finished_at: '2026-05-27T09:55:00.000Z' },
     { workflow_key: 'WF-Val', status: 'success', started_at: '2026-05-27T04:14:00.000Z', finished_at: '2026-05-27T04:15:00.000Z' },
@@ -84,10 +84,9 @@ test('AC-COVERAGE: v2 overview covers all legacy business data categories', () =
   const overview = buildOverviewData(SMOKE_RAW);
   const monitoring = buildMonitoringData(SMOKE_RAW);
 
-  // Umsatz (Netto-Umsatz)
-  assert.equal(overview.metrics.revenueNetToday, 45.0, 'overview must expose revenue (Umsatz)');
-  // GuV / Deckungsbeitrag
-  assert.equal(overview.metrics.dbNetToday, 20.0, 'overview must expose contribution margin (GuV/DB)');
+  // Umsatz (brutto, live aus sales_transactions) + netto
+  assert.equal(overview.metrics.revenueGrossToday, 53.5, 'overview must expose gross revenue (Umsatz heute)');
+  assert.equal(overview.metrics.revenueNetToday, 45.0, 'overview must expose net revenue');
   // Verkäufe (Stückzahl)
   assert.equal(overview.metrics.quantityToday, 12, 'overview must expose sales count (Verkäufe)');
   // Bestand MHD-Risiken

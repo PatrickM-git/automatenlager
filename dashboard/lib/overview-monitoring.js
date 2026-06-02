@@ -118,8 +118,8 @@ function buildOverviewData(raw = {}) {
     openWarningsCount: toNum(raw.openWarningsCount),
     mhdRiskCount: toNum(raw.mhdRiskCount),
     lowStockCount: toNum(raw.lowStockCount),
+    revenueGrossToday: Math.round(toNum(raw.economicsToday?.revenueGross) * 100) / 100,
     revenueNetToday: Math.round(toNum(raw.economicsToday?.revenueNet) * 100) / 100,
-    dbNetToday: Math.round(toNum(raw.economicsToday?.dbNet) * 100) / 100,
     quantityToday: Math.round(toNum(raw.economicsToday?.quantity)),
   };
 
@@ -155,12 +155,12 @@ function buildOverviewData(raw = {}) {
     `${metrics.lowStockCount} Slot(s) leer.`,
     metrics.lowStockCount,
   );
-  if (metrics.revenueNetToday > 0) {
+  if (metrics.revenueGrossToday > 0) {
     priorities.push({
       id: 'economics',
       severity: 'info',
       title: 'Wirtschaft heute',
-      message: `${metrics.revenueNetToday.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR Umsatz netto, ${metrics.dbNetToday.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR DB.`,
+      message: `${metrics.revenueGrossToday.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR Umsatz, ${metrics.quantityToday} Stück verkauft.`,
       count: metrics.quantityToday,
     });
   }
@@ -232,13 +232,17 @@ async function queryOverviewMonitoringPg(pgUrl) {
             AND sa.current_machine_qty = 0
           ORDER BY sa.machine_id, sa.product_slot_key`,
       ),
+      // Umsatz HEUTE live aus sales_transactions (von WF3 befüllt), NICHT aus
+      // guv_daily — letzteres wird erst nachts (WF8, 02:00) aggregiert und ist
+      // tagsüber 0. Brutto, konsistent zur GuV-Live-Kachel (economics-live.js).
       client.query(
-        `SELECT COALESCE(SUM(revenue_net), 0)::numeric AS revenue_net,
-                COALESCE(SUM(gross_profit), 0)::numeric AS db_net,
-                COALESCE(SUM(quantity_sold), 0)::int AS quantity
-           FROM automatenlager.guv_daily
-          WHERE posting_date = (timezone('Europe/Berlin', now()))::date
-            AND source != 'historic_backfill'`,
+        `SELECT COALESCE(SUM(gross_amount), 0)::numeric AS revenue_gross,
+                COALESCE(SUM(net_amount), 0)::numeric   AS revenue_net,
+                COALESCE(SUM(quantity), 0)::int         AS quantity
+           FROM automatenlager.sales_transactions
+          WHERE (settlement_at AT TIME ZONE 'Europe/Berlin')::date
+                = (now() AT TIME ZONE 'Europe/Berlin')::date
+            AND source <> 'historic_backfill'`,
       ),
       client.query(
         `SELECT workflow_key, started_at, finished_at, status
@@ -291,8 +295,8 @@ async function queryOverviewMonitoringPg(pgUrl) {
       lowStockItems,
       hasBackupOk: toNum(backupOkResult.rows?.[0]?.count) > 0,
       economicsToday: {
+        revenueGross: toNum(economicsResult.rows?.[0]?.revenue_gross),
         revenueNet: toNum(economicsResult.rows?.[0]?.revenue_net),
-        dbNet: toNum(economicsResult.rows?.[0]?.db_net),
         quantity: toNum(economicsResult.rows?.[0]?.quantity),
       },
       workflowRuns: workflowRunsResult.rows || [],

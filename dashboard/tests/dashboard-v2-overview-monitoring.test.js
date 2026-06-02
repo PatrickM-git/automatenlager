@@ -76,8 +76,8 @@ const RAW_DATA = {
   mhdRiskCount: 2,
   lowStockCount: 3,
   economicsToday: {
+    revenueGross: 224.7,
     revenueNet: 188.4,
-    dbNet: 71.2,
     quantity: 54,
   },
   workflowRuns: [
@@ -98,8 +98,8 @@ test('AC1: overview builds today priorities with MHD, stock and warning counters
   assert.equal(overview.metrics.openWarningsCount, 6);
   assert.equal(overview.metrics.mhdRiskCount, 2);
   assert.equal(overview.metrics.lowStockCount, 3);
+  assert.equal(overview.metrics.revenueGrossToday, 224.7);
   assert.equal(overview.metrics.revenueNetToday, 188.4);
-  assert.equal(overview.metrics.dbNetToday, 71.2);
   assert.ok(Array.isArray(overview.priorities));
   assert.ok(overview.priorities.length >= 3);
 });

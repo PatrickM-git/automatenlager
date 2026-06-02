@@ -3230,13 +3230,21 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Root → v3 (Standard seit 2026-06-02). v3 ist die produktive Oberfläche;
+    // das Legacy-v1 bleibt unter /v1 erreichbar, v2 unter /v2.
+    if (parsed.pathname === '/') {
+      res.writeHead(302, { Location: '/v3' });
+      res.end();
+      return;
+    }
+
     // Dashboard v3: Einstiegspfad + Deep-Links auf die v3-Einstiegsdatei mappen
     // (SPA-Fallback, analog zur v2-Sonderroute). Statische v3-Assets mit
     // Datei-Endung (z. B. /v3.js, /v3.css) werden normal ausgeliefert.
     const isV3DeepLink = parsed.pathname === '/v3'
       || (parsed.pathname.indexOf('/v3/') === 0 && !path.extname(parsed.pathname));
 
-    const requestPath = parsed.pathname === '/'
+    const requestPath = parsed.pathname === '/v1'
       ? '/index.html'
       : parsed.pathname === '/v2'
         ? '/v2.html'

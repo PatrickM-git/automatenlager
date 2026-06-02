@@ -89,9 +89,13 @@ test('Dashboard v2 is reachable under /v2 without replacing the legacy dashboard
     dashboard.kill();
   });
 
-  const legacy = await request(port, '/');
+  const rootRedirect = await request(port, '/');
+  const legacy = await request(port, '/v1');
   const v2 = await request(port, '/v2');
 
+  // Root leitet auf v3 um; Legacy bleibt unter /v1 erreichbar.
+  assert.equal(rootRedirect.status, 302);
+  assert.equal(rootRedirect.headers.location, '/v3');
   assert.equal(legacy.status, 200);
   assert.match(legacy.body, /Automatenlager Leitstand/);
   assert.doesNotMatch(legacy.body, /Dashboard v2/);

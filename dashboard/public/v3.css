@@ -170,9 +170,11 @@ a { color: inherit; }
 
 /* Bottom-Variante (mobil, horizontal scrollbar, große Trefferflächen) */
 .v3-nav--bottom {
-  position: sticky;
+  position: fixed;
+  left: 0;
+  right: 0;
   bottom: 0;
-  z-index: 20;
+  z-index: 40;
   display: flex;
   gap: 2px;
   padding: 6px 8px;
@@ -206,7 +208,8 @@ a { color: inherit; }
 
 /* ---- Inhaltsbereich ----------------------------------------------------- */
 
-.v3-main { padding: 18px 16px 26px; outline: none; }
+/* unten Platz für die fixierte Handy-Bottom-Nav (Desktop überschreibt das). */
+.v3-main { padding: 18px 16px calc(88px + env(safe-area-inset-bottom)); outline: none; }
 .v3-view { max-width: 1040px; margin: 0 auto; animation: v3-fade 0.32s var(--ease) both; }
 
 .v3-page__head { margin: 4px 2px 18px; }
