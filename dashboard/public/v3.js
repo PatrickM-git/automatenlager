@@ -545,6 +545,47 @@
     '</article>';
   }
 
+  // Admin-only: Formulare zum Anlegen von Standort + Automat (Memory: v3-konsistent).
+  function automatenAdminForms(view) {
+    if (!view.isAdmin) { return ''; }
+    var locOpts = (view.locationOptions || []).map(function (o) {
+      return '<option value="' + esc(o.key) + '">' + esc(o.name) + '</option>';
+    }).join('');
+    function field(label, name, ph, req, type) {
+      return '<label class="v3-auto-field"><span>' + label + (req ? ' *' : '') + '</span>' +
+        '<input type="' + (type || 'text') + '" name="' + name + '"' + (req ? ' required' : '') +
+        ' placeholder="' + esc(ph || '') + '"></label>';
+    }
+    var standortForm =
+      '<form class="v3-auto-form" data-auto-formel="standort" hidden>' +
+        field('Name', 'name', 'z. B. DPFA Chemnitz', true) +
+        field('Art', 'location_type', 'z. B. bildung, büro, gewerbe') +
+        field('Notiz', 'notes', 'optional') +
+        '<div class="v3-auto-form__actions"><button type="submit" class="v3-btn v3-btn--brand">Standort anlegen</button>' +
+          '<span class="v3-auto-form__msg" data-auto-msg="standort"></span></div>' +
+      '</form>';
+    var automatForm =
+      '<form class="v3-auto-form" data-auto-formel="automat" hidden>' +
+        field('Automaten-/Nayax-Nr', 'machine_key', 'z. B. 457107529', true) +
+        field('Bezeichnung', 'name', 'z. B. Snackautomat Foyer', true) +
+        '<label class="v3-auto-field"><span>Standort *</span><select name="location_key" required>' +
+          (locOpts ? '<option value="">— wählen —</option>' + locOpts
+                   : '<option value="">Bitte zuerst einen Standort anlegen</option>') +
+        '</select></label>' +
+        field('Etage/Bereich', 'area', 'z. B. 2.OG') +
+        field('Typ', 'type', 'z. B. Kombi, Snack') +
+        field('Spitzname', 'nickname', 'optional') +
+        '<div class="v3-auto-form__actions"><button type="submit" class="v3-btn v3-btn--brand">Automat anlegen</button>' +
+          '<span class="v3-auto-form__msg" data-auto-msg="automat"></span></div>' +
+      '</form>';
+    return '<div class="v3-auto-admin">' +
+      '<div class="v3-auto-admin__bar">' +
+        '<button type="button" class="v3-btn v3-auto-admin__toggle" data-auto-form="standort">+ Neuer Standort</button>' +
+        '<button type="button" class="v3-btn v3-auto-admin__toggle" data-auto-form="automat">+ Neuer Automat</button>' +
+      '</div>' + standortForm + automatForm +
+    '</div>';
+  }
+
   function renderAutomatenPage(view) {
     var summary =
       '<div class="v3-auto-summary">' +
@@ -561,7 +602,7 @@
           '<span class="v3-mon-section__count">' + view.locationsTotal + '</span></div>' +
         '<div class="v3-auto-loc-grid">' + view.locations.map(renderAutoLocationCard).join('') + '</div>' +
       '</section>';
-    return summary + machines + locations;
+    return summary + automatenAdminForms(view) + machines + locations;
   }
 
   function automatenJump(machineId) {
@@ -574,6 +615,54 @@
     for (var i = 0; i < btns.length; i++) {
       btns[i].addEventListener('click', function () { automatenJump(this.getAttribute('data-auto-jump')); });
     }
+    // Admin: Formular-Toggles (genau eines offen) + Anlegen.
+    var toggles = viewEl.querySelectorAll('[data-auto-form]');
+    for (var t = 0; t < toggles.length; t++) {
+      toggles[t].addEventListener('click', function () {
+        var which = this.getAttribute('data-auto-form');
+        var forms = viewEl.querySelectorAll('[data-auto-formel]');
+        for (var f = 0; f < forms.length; f++) {
+          var fel = forms[f];
+          if (fel.getAttribute('data-auto-formel') === which) { fel.hidden = !fel.hidden; }
+          else { fel.hidden = true; }
+        }
+      });
+    }
+    var formEls = viewEl.querySelectorAll('[data-auto-formel]');
+    for (var g = 0; g < formEls.length; g++) {
+      formEls[g].addEventListener('submit', submitAutomatenForm);
+    }
+  }
+
+  function submitAutomatenForm(e) {
+    e.preventDefault();
+    var form = e.currentTarget;
+    var which = form.getAttribute('data-auto-formel');
+    var msg = viewEl.querySelector('[data-auto-msg="' + which + '"]');
+    var submitBtn = form.querySelector('button[type="submit"]');
+    var data = {};
+    var fd = new FormData(form);
+    fd.forEach(function (v, k) { var s = String(v).trim(); if (s) { data[k] = s; } });
+    if (which === 'standort') { data.status = 'aktiv'; }
+    var url = which === 'standort' ? '/api/v2/locations' : '/api/v2/machines';
+    if (submitBtn) { submitBtn.disabled = true; }
+    if (msg) { msg.textContent = 'Speichern …'; msg.className = 'v3-auto-form__msg'; }
+    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (res.ok && res.j && res.j.ok) {
+          if (msg) { msg.textContent = 'Angelegt ✓'; msg.className = 'v3-auto-form__msg is-ok'; }
+          window.setTimeout(function () { dispatch(); }, 500);
+        } else {
+          var m = (res.j && res.j.error && res.j.error.message) || 'Anlegen fehlgeschlagen.';
+          if (msg) { msg.textContent = m; msg.className = 'v3-auto-form__msg is-err'; }
+          if (submitBtn) { submitBtn.disabled = false; }
+        }
+      })
+      .catch(function () {
+        if (msg) { msg.textContent = 'Netzwerkfehler.'; msg.className = 'v3-auto-form__msg is-err'; }
+        if (submitBtn) { submitBtn.disabled = false; }
+      });
   }
 
   function slotsApplyFocus() {
@@ -871,8 +960,17 @@
       ]).then(function (results) {
         var machines  = (results[0] && results[0].data) || [];
         var locations = (results[1] && results[1].data) || [];
-        if (machines.length === 0 && locations.length === 0) { return { status: 'empty' }; }
-        return { status: 'ok', automaten: automatenClientView(machines, locations) };
+        var isAdmin   = !!(results[0] && results[0].is_admin);
+        var view = automatenClientView(machines, locations);
+        view.isAdmin = isAdmin;
+        // Standort-Optionen für das "Neuer Automat"-Dropdown (key + Name).
+        view.locationOptions = locations.map(function (l) {
+          return { key: l.location_key || l.location_id, name: l.name };
+        }).filter(function (o) { return o.key; });
+        // Gästen ohne Profile/Standorte trotzdem die leere Seite (mit Hinweis) zeigen;
+        // Admins immer (sie sollen anlegen können).
+        if (!isAdmin && machines.length === 0 && locations.length === 0) { return { status: 'empty' }; }
+        return { status: 'ok', automaten: view };
       }).catch(function () { return { status: 'error' }; });
     }
     if (route.path === '/onboarding') {
