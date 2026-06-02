@@ -1102,6 +1102,37 @@ a.v3-chip:focus-visible {
   background: var(--v3-accent); color: #fff; border-color: transparent;
 }
 
+/* ---- Ausklappbare "Offene Warnungen"-Karte ------------------------------- */
+.v3-cockpit-action--details { flex-direction: column; align-items: stretch; padding: 0; cursor: pointer; }
+.v3-cockpit-action__sum {
+  display: flex; align-items: center; gap: 14px;
+  padding: 15px 16px 15px 22px; min-height: 72px; list-style: none;
+}
+.v3-cockpit-action__sum::-webkit-details-marker { display: none; }
+.v3-cockpit-action--details .v3-cockpit-action__body { flex: 1; }
+.v3-cockpit-action__chev {
+  flex-shrink: 0; color: var(--v3-muted); font-size: 13px;
+  transition: transform 160ms ease;
+}
+.v3-cockpit-action--details[open] .v3-cockpit-action__chev { transform: rotate(180deg); }
+.v3-warnlist {
+  list-style: none; margin: 0; padding: 0 16px 14px 22px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.v3-warnrow {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 9px 12px; border-radius: 10px; background: var(--v3-bg);
+  border: 1px solid var(--v3-line);
+}
+.v3-warnrow__badge {
+  flex-shrink: 0; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.03em; padding: 2px 8px; border-radius: 999px;
+}
+.v3-warnrow--crit .v3-warnrow__badge { background: rgba(185,28,28,.12); color: var(--v3-crit); }
+.v3-warnrow--warn .v3-warnrow__badge { background: rgba(180,83,9,.12);  color: var(--v3-warn); }
+.v3-warnrow--info .v3-warnrow__badge { background: var(--v3-surface);    color: var(--v3-muted); }
+.v3-warnrow__msg { font-size: 13.5px; color: var(--v3-ink, var(--ink)); line-height: 1.45; }
+
 /* ---- Empty state --------------------------------------------------------- */
 .v3-cockpit-empty {
   text-align: center;

@@ -112,10 +112,29 @@
     '</div>';
   }
 
+  /* Warnungs-Severity → Badge-Text */
+  function warnBadge(sev) {
+    return sev === 'critical' ? 'Kritisch' : sev === 'warning' ? 'Warnung' : 'Info';
+  }
+  /* Liste der offenen Warnungen (ausklappbar in der Cockpit-Karte). */
+  function cockpitWarningsList(warnings) {
+    if (!warnings || !warnings.length) { return ''; }
+    var items = warnings.map(function (w) {
+      var sev = String(w.severity || 'info').toLowerCase();
+      var cls = sev === 'critical' ? 'v3-warnrow--crit' : sev === 'warning' ? 'v3-warnrow--warn' : 'v3-warnrow--info';
+      return '<li class="v3-warnrow ' + cls + '">' +
+        '<span class="v3-warnrow__badge">' + esc(warnBadge(sev)) + '</span>' +
+        '<span class="v3-warnrow__msg">' + esc(w.message || w.warning_type || '') + '</span>' +
+      '</li>';
+    }).join('');
+    return '<ul class="v3-warnlist">' + items + '</ul>';
+  }
+
   function renderCockpitPage(data) {
     var kpis         = data.kpis         || [];
     var ampelState   = data.ampelState   || 'green';
     var topPriorities = data.topPriorities || [];
+    var warnings      = data.warnings     || [];
 
     /* KPI strip */
     var kpiHtml = kpis.map(function (kpi) {
@@ -164,6 +183,23 @@
           var mod   = p.severity === 'critical' ? 'v3-cockpit-action--critical' :
                       p.severity === 'warning'  ? 'v3-cockpit-action--warning'  : 'v3-cockpit-action--info';
           var badge = p.severity === 'critical' ? 'Kritisch' : p.severity === 'warning' ? 'Warnung' : 'Info';
+          /* "Offene Warnungen": statt Link auf eine Seite, die sie nicht listet,
+             direkt ausklappbar mit der konkreten Warnungs-Liste. */
+          if (p.id === 'warnings-open' && warnings.length) {
+            return '<li><details class="v3-cockpit-action v3-cockpit-action--details ' + mod + '">' +
+              '<summary class="v3-cockpit-action__sum">' +
+                '<div class="v3-cockpit-action__body">' +
+                  '<div class="v3-cockpit-action__top">' +
+                    '<span class="v3-cockpit-action__badge">' + esc(badge) + '</span>' +
+                    '<span class="v3-cockpit-action__title">' + esc(p.title) + '</span>' +
+                  '</div>' +
+                  '<div class="v3-cockpit-action__msg">' + esc(p.message) + '</div>' +
+                '</div>' +
+                '<div class="v3-cockpit-action__chev">&#9662;</div>' +
+              '</summary>' +
+              cockpitWarningsList(warnings) +
+            '</details></li>';
+          }
           var dest  = COCKPIT_LINKS[p.id] || '/';
           var href  = dest === '/' ? BASE : BASE + dest;
           return '<li><a class="v3-cockpit-action ' + mod + '" href="' + href + '" data-route-link="' + dest + '">' +
@@ -762,7 +798,7 @@
           if (ampels[i].state === 'yellow') { ampelState = 'yellow'; }
         }
         var topPriorities = (ov.priorities || []).slice(0, 3);
-        return { status: 'ok', cockpit: { kpis: kpis, ampelState: ampelState, topPriorities: topPriorities } };
+        return { status: 'ok', cockpit: { kpis: kpis, ampelState: ampelState, topPriorities: topPriorities, warnings: (ov.warnings || []) } };
       }).catch(function () {
         return { status: 'error' };
       });
