@@ -2,39 +2,40 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-05-31 (Session 25 — Slow-Mover-Klassifikation in den Datenpfad eingeklinkt, Issue v3-H/#8)
+## Stand: 2026-06-02 (Handy-Responsive-Fix + einklappbare Etagen im Sortiment)
 
 ### Aktueller Stand
 
-- **Drehzahl-/Slow-Mover-Klassifikation ist jetzt serverseitig in den Datenpfad eingeklinkt** und im v3-Frontend sichtbar (Badges + Filter). Issue v3-H/#8 ist damit funktional fertig.
-- **476/476 Dashboard-Tests grün** (`cd dashboard; npm test`).
-- **Live verifiziert gegen die echte Produktions-DB** (SSH-Tunnel Port 15432): API liefert `turnover_class` für alle 40 realen Slots, Drift-Guard lief live durch und ist grün.
-- Produktiver Host bleibt der **HP Mini** (Dashboard + n8n laufen dort). Diese Session war reine Dashboard-Code-Arbeit (kein n8n).
+- **v3-Dashboard ist auf dem Handy jetzt wirklich responsiv.** GuV, Bestand und Sortiment passen bei 375px ohne horizontalen Overflow; kein erzwungenes Rauszoomen mehr, die fixe Bottom-Navigation („Iconleiste") bleibt durchgehend stehen.
+- **Sortiment-Etagen sind ein-/ausklappbar** (Kopfzeile mit `x / y belegt` + Pfeil). Default am Handy (<880px) **eingeklappt**, am Desktop aufgeklappt; eine ausdrückliche Nutzer-Wahl wird pro Automat+Etage in `localStorage` gemerkt und schlägt den Default.
+- **Commit `3608225` (gepusht) ist auf der HP Mini live ausgerollt und live verifiziert.**
+- **659/659 Dashboard-Tests grün** (`cd dashboard; npm test`).
 
 ### Was diese Session gemacht wurde
 
-Vorarbeit war bereits committet (`fbd9cf6` Klassifikationsmodul + `/einstellungen` + Glossar, `7ce0aa4` Einstellungen-Icon). Diese Session hat die **Verdrahtung** ergänzt:
+Reine Frontend-Arbeit an `dashboard/public/v3.css` + `dashboard/public/v3.js` (Vanilla-JS, v3-Tokens wiederverwendet). Verifiziert im QA-Preview (`dashboard-v3-qa`, Port 8788) bei 375px/1200px.
 
-1. **Server-Datenpfad — `lib/assortment-slots.js` ist die kanonische, populationsweite Klassifikationsquelle:**
-   - Neue `last_sale`-CTE: `MAX(settlement_at)` je `machine_id+mdb_code` aus `automatenlager.sales_transactions` (`source != 'historic_backfill'`, identisch zur `v_slot_turnover`-Semantik) → neue Spalte `days_since_last_sale` (Tage seit letztem echten Verkauf, NULL = nie verkauft).
-   - `parseSlotRow` reicht `daysSinceLastSale` durch — **null bleibt null** (nicht 0, sonst kippt die Ladenhüter-Regel).
-   - `buildAssortmentSlotsData` wendet `classifyTurnover` (aus `lib/slow-mover.js`) auf die Slot-Liste an → jeder Slot trägt `turnover_class` ∈ {renner, normal, langsam_dreher, ladenhueter} im API-Result. Quartile werden über die gezeigte (ggf. gefilterte) Slot-Population gebildet.
-   - `lib/lager.js` (`buildLagerData`): `turnover_class`-Passthrough additiv neben `slow_mover_class`.
+**Wurzelursache aller drei Handy-Symptome (Nav verschwindet, Inhalt abgeschnitten, Rauszoomen):** horizontaler Overflow. `.v3-main` ist ein Grid-Item von `.v3-shell` und hatte den Default `min-width:auto` → es schrumpfte nicht unter die min-content-Breite seines Inhalts (breite nowrap-Tabellen bei GuV/Bestand, Slot-Etagen-Grid bei Sortiment). Das Layout wurde dadurch breiter als der Viewport (gemessen 565–619px statt 375px), das Handy zoomte raus, und die `position:fixed`-Bottom-Nav rutschte weg.
 
-2. **Frontend (`public/v3.js` + `public/v3.css`, Vanilla-JS, v3-Tokens wiederverwendet):**
-   - Gemeinsamer `turnoverBadge()`-Helfer; **Lager-Karten** zeigen jetzt das Klassen-Badge `v3-badge--turnover-<key>` statt des generischen „Slow-Mover". „normal" bleibt bewusst ohne Badge (Grundzustand), ist aber filterbar.
-   - **Slot-Zellen** tragen `data-slot-turnover` + ein kompaktes Klassen-Badge (`.v3-slot__turnover`).
-   - **Drehzahl-Filter (User Story 37)** auf beiden Seiten: Lager (Chip-Gruppe in der Filterleiste, wertet `filters.turnover_class` aus), Slots (Chips setzen `data-turnover-filter` auf den beim Automatenwechsel bestehenbleibenden `[data-slots-stagewrap]`; CSS dimmt Nicht-Treffer auf Opacity 0.26).
-   - **`/lager` joint die Klasse client-seitig** per `(machine_id, mdb_code)` aus `/api/v2/assortment-slots` (zusätzlicher Fetch, `.catch` → graceful ohne Badge). Bewusste Entscheidung: Quartile müssen über **alle aktiven Slots** gebildet werden, nicht über die gefilterte MHD-Teilmenge → eine einzige Klassifikationsquelle, garantiert konsistent zwischen `/slots` und `/lager`, keine doppelte Quartil-Logik.
+1. **Zentraler Fix — `.v3-main { min-width: 0 }`:** Layout schrumpft auf Viewport-Breite; breite Tabellen scrollen stattdessen in ihrem eigenen `overflow-x:auto`-Wrapper (`.v3-guv-tablewrap`, `.v3-lager-table-wrap`). Empirisch verifiziert: alle drei Seiten danach bei 375px ohne Overflow, Bottom-Nav fix am unteren Rand.
+2. **Sortiment-Layout shrinkbar:** `.v3-slots-layout` mobil `minmax(0,1fr)` statt `1fr`; `.v3-slots-stage` `min-width:0`; `.v3-slots-stage__top` `flex-wrap:wrap` (die Buttons „Automat voll auffüllen" / „Aus Nayax abgleichen" brechen um statt zu überlaufen).
+3. **Einklappbare Etagen:** `.v3-slots-floor` von 2-Spalten-Grid (`64px 1fr`) auf einklappbaren Block umgebaut — tippbare Kopfzeile `.v3-slots-floor__toggle` (Label + `.v3-slots-floor__summary` Belegung + drehender `.v3-slots-floor__chev`), `[data-floor-collapsed="true"]` blendet die Slot-Reihe aus. JS: `loadCollapsedFloors`/`saveCollapsedFloors` (localStorage-Key `v3.slots.collapsedFloors`, Werte explizit `true`/`false`, Abwesenheit = Viewport-Default via `floorDefaultCollapsed()` = `matchMedia('(max-width: 879px)')`), Toggle-Handler auf `root` delegiert (übersteht Stage-Neuaufbau beim Automatenwechsel; auch für Gäste, reine Ansicht-Steuerung).
 
-3. **Tests:** `AC-T1..T5` (Klassifikation/`daysSinceLastSale` im API-Result), `AC-L7c/d` (Lager-Passthrough), neue Datei `dashboard-v3-turnover-badges.test.js` (`AC-TB1..TB8`: Badge-/Filter-Verdrahtung in v3.js + v3.css).
+### Deploy auf die HP Mini (so läuft das Dashboard dort)
 
-### Live-Verifikation (echte DB, read-only)
+Das Dashboard läuft auf der Mini als **Docker-Container `homelab-dashboard`** (Compose-Projekt `homelab`, `C:\homelab\docker-compose.yml`). Code kommt per **Bind-Mount** `C:\homelab\projekte\automatenlager` → `/repo` (eigener git-Klon, getrennt von der Dev-Arbeitskopie); Container-Cmd `node server.js`, WorkingDir `/repo/dashboard`. Statische Assets werden direkt aus dem Mount serviert. Exponiert via Tailscale Serve: `https://hp-mini-server.tail573a13.ts.net:8787` (tailnet only, `Cache-Control: no-store`).
 
-- API `/api/v2/assortment-slots`: 40 Slots klassifiziert (renner 15 · langsam_dreher 15 · normal 8 · ladenhüter 2); nie verkauft → ladenhüter, 25 Verk./2 Tage → renner, 2 Verk./24 Tage → langsam_dreher.
-- Slots-Seite: farbige Klassen-Badges in den Zellen; Filter „Ladenhüter" dimmt Nicht-Treffer, „Alle" setzt zurück.
-- Lager-Seite: Join trifft beide MHD-Karten (beide `normal` → ohne Badge); Filter `renner`→0 (+Leerzustand), `normal`→2, `Alle`→2.
-- **Drift-Guard lief live (nicht übersprungen) und ist grün** — neue `sales_transactions`-Spaltenrefs (`machine_id/mdb_code/settlement_at/source`) gegen reales `automatenlager`-Schema verifiziert.
+**Deploy = pullen + Container neu starten** (kein Image-Rebuild bei reinen Code-Änderungen):
+1. SSH `patri@100.68.148.46` (Key `~/.ssh/miniserver_key`). Die Mini ist **Windows** (SSH-Default cmd verschluckt Quotes) mit **WSL `Ubuntu-24.04`** → zuverlässig nur über `powershell -NoProfile -Command "wsl.exe -d Ubuntu-24.04 bash -lc '...'"`; komplexe bash-Skripte base64-kodiert durchreichen.
+2. `cd /mnt/c/homelab/projekte/automatenlager && git pull --ff-only origin main`
+3. `docker restart homelab-dashboard`
+4. Verifizieren: `docker exec homelab-dashboard sh -lc 'wget -q -O - http://localhost:8787/v3.css | grep -c "<marker>"'`.
+
+Diese Session: `8f95356 → 3608225` gepullt, Container neugestartet, neue `v3.css`/`v3.js`-Marker über HTTP bestätigt (`HTTP 200`).
+
+### Vorheriger Stand (nachgetragen, war im alten HANDOVER nicht erfasst)
+
+- **#38 Live-Umsatz (Commit `c3f775c`, live 2026-06-02):** v3-Live-Kachel (Tagesumsatz heute + letzte Verkäufe, 30s-Auto-Refresh) + `GET /api/v2/economics/live`, liest fertige `sales_transactions` (von WF3 befüllt). Kein Späher-WF/keine Migration; stattdessen WF3-Schedule auf alle 5 Min. Lehre: aktiven WF zum Neuladen des Triggers deactivate+activate.
 
 ### n8n-Instanz-Regel (unverändert kritisch)
 
@@ -44,13 +45,14 @@ Vorarbeit war bereits committet (`fbd9cf6` Klassifikationsmodul + `/einstellunge
 
 ### Offene / nächste Schritte
 
-1. **Issue v3-H/#8 schließen** (Ready-Kommentar + Close), Klassifikation ist verdrahtet, getestet und live verifiziert.
-2. **Optionaler Live-Augenschein durch Patrick** in der QA-Preview (`dashboard-v3-qa`, Port 8788, `/v3/slots` + `/v3/lager`) — Badges/Filter mit Echtdaten.
-3. Offen aus Session 24: echter End-to-End-Live-Test des WF1-Rechnungs-Uploads beim nächsten realen Rechnungseingang.
+1. **Optionaler Live-Augenschein durch Patrick am Handy** unter `https://hp-mini-server.tail573a13.ts.net:8787` (Sortiment/GuV/Bestand) — Responsive + einklappbare Etagen mit Echtdaten.
+2. Größere offene Themen unverändert: **#3 Auth-Sicherheitskonzept** (11 Issues über beide Repos, Milestone „Auth & Sicherheit v1"; nächster Schritt `start-issue` auf homelab #57), **#9 v2-Abschaltung**.
+3. Offen aus früherer Session: echter End-to-End-Live-Test des WF1-Rechnungs-Uploads beim nächsten realen Rechnungseingang.
 
 ### Wichtige IDs / Pfade
 
 - Entwicklungs-Arbeitskopie: `C:\Users\patri\Documents\mein-erstes-Projekt` (dashboard/) · Dashboard-PG via SSH-Tunnel Port 15432 (`DASHBOARD_V2_PG_URL` in `dashboard/.env.local`)
-- Klassifikation: `dashboard/lib/slow-mover.js` (`classifyTurnover`, Deep Module, rein/testbar) · Definitionen: `GET /api/v2/settings/definitions` + `docs/UBIQUITOUS_LANGUAGE.md`
-- Drehzahl-Recency-Quelle: `automatenlager.sales_transactions` (`settlement_at`), Drehzahl: `automatenlager.v_slot_turnover` · Drift-Guard: `dashboard/lib/db-schema.js`
-- WF1 Prod-ID (unverändert): `wnGAwHhgfXq2ATM8` (30 Nodes)
+- Mini-Dashboard-Klon: `C:\homelab\projekte\automatenlager` (Bind-Mount → Container `homelab-dashboard`)
+- QA-Preview lokal: `dashboard-v3-qa`, Port 8788 (`.claude/launch.json`)
+- v3-Frontend: `dashboard/public/v3.{html,css,js}` · Klassifikation: `dashboard/lib/slow-mover.js` · Drift-Guard: `dashboard/lib/db-schema.js`
+- WF1 Prod-ID (unverändert): `wnGAwHhgfXq2ATM8`
