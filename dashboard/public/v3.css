@@ -2611,3 +2611,52 @@ a.v3-chip:focus-visible {
 }
 .v3-lager-row__writeoff:hover { color: var(--crit); background: rgba(185,28,28,.08); }
 .v3-badge--ok { background: rgba(21,128,61,.08); color: var(--ok); border-color: rgba(21,128,61,.2); }
+
+/* ---- Live-Umsatz-Kachel (quasi-live, GuV-Seite) ------------------------ */
+.v3-live { padding: 18px 20px; }
+.v3-live__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px;
+}
+.v3-live__title {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-display); font-weight: 600; font-size: 16px; color: var(--ink);
+}
+.v3-live__dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--ok); box-shadow: 0 0 0 0 rgba(21,128,61,.45);
+  animation: v3-live-pulse 2s ease-out infinite;
+}
+@keyframes v3-live-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(21,128,61,.45); }
+  70%  { box-shadow: 0 0 0 7px rgba(21,128,61,0); }
+  100% { box-shadow: 0 0 0 0 rgba(21,128,61,0); }
+}
+@media (prefers-reduced-motion: reduce) { .v3-live__dot { animation: none; } }
+.v3-live__meta { font-size: 12.5px; color: var(--ink-faint); white-space: nowrap; }
+
+.v3-live__kpis { margin: 0 0 4px; }
+.v3-live__kpis .v3-cockpit-kpi { padding: 14px 16px 15px; min-width: 0; }
+.v3-live__kpis .v3-cockpit-kpi__value { font-size: 22px; font-variant-numeric: tabular-nums; }
+.v3-live__kpis .v3-cockpit-kpi__unit { font-size: 12px; }
+.v3-live__kpis .v3-cockpit-kpi__label { margin-bottom: 6px; }
+
+.v3-live__listhead {
+  margin: 14px 0 6px; font-size: 11.5px; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--ink-faint);
+}
+.v3-live__list { list-style: none; margin: 0; padding: 0; }
+.v3-live__row {
+  display: grid; grid-template-columns: auto 1fr auto auto;
+  align-items: baseline; gap: 10px;
+  padding: 7px 0; border-bottom: 1px solid var(--line);
+}
+.v3-live__row:last-child { border-bottom: none; }
+.v3-live__time { font-size: 12.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.v3-live__prod { font-size: 14px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3-live__qty { font-size: 12.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.v3-live__amt { font-size: 14px; font-weight: 600; color: var(--ok); font-variant-numeric: tabular-nums; }
+.v3-live__empty, .v3-live__loading, .v3-live__error {
+  margin: 6px 0 2px; font-size: 13px; color: var(--ink-faint);
+}
+.v3-live__error { color: var(--warn); }

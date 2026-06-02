@@ -21,6 +21,7 @@ const { buildOnboardingStartPayload, validateOnboardingStart, buildOnboardingSta
 const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buildSlotAssignAuditEntry } = require('./lib/slot-assign-inline.js');
 const { buildProductCatalog } = require('./lib/product-catalog.js');
 const { queryEconomicsScopePg } = require('./lib/automaten-view.js');
+const { queryEconomicsLivePg } = require('./lib/economics-live.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
 const { SLOW_MOVER } = require('./lib/slow-mover.js');
@@ -2653,6 +2654,25 @@ const server = http.createServer(async (req, res) => {
       try {
         const scope = await queryEconomicsScopePg(pgUrl);
         sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), data: scope });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    // ── Live-Umsatz (quasi-live): Tagesumsatz heute + letzte Verkäufe ─────────
+    // Liest nur sales_transactions (von WF3 befüllt). Auto-Refresh-Quelle der
+    // v3-Live-Kachel; Filter machines=ID1,ID2 und limit wie bei /economics.
+
+    if (parsed.pathname === '/api/v2/economics/live' && req.method === 'GET') {
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      try {
+        const live = await queryEconomicsLivePg(pgUrl, parsed.query || {});
+        sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), data: live });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
       }

@@ -1293,6 +1293,9 @@
   })();
   var _guvData = null;
   var _guvScope = null; /* { locations: [...], machines: [...] } – einmal geladen */
+  var _liveTimer = null; /* Auto-Refresh-Handle der Live-Kachel (in renderRoute aufgeräumt) */
+  var _liveReqToken = 0; /* verwirft veraltete Live-Antworten bei schnellem Filterwechsel */
+  var LIVE_REFRESH_MS = 30000;
 
   /* Zeitraum-Parameter (ohne den Maschinen-Filter) – von Daten- und Export-URL geteilt */
   function guvPeriodParams(q) {
@@ -1635,9 +1638,143 @@
     return guvRangeCaption(data) + guvKpiStrip(totals) + guvChartsPanel(series) + guvTable(byProduct, q);
   }
 
+  /* ---- Live-Umsatz (quasi-live) ---------------------------------------- */
+  /* Eigene Kachel oben auf der GuV-Seite. Liest /api/v2/economics/live
+     (sales_transactions, von WF3 befüllt) und aktualisiert sich alle 30 s
+     selbst. Bewusst getrennt von der GuV-Periodenauswertung darunter. */
+
+  function liveTimeHHMM(iso) {
+    if (!iso) { return '—'; }
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) { return '—'; }
+    return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function liveAgoText(iso) {
+    if (!iso) { return 'noch kein Verkauf heute'; }
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) { return ''; }
+    var sec = Math.max(0, Math.round((Date.now() - d.getTime()) / 1000));
+    if (sec < 60) { return 'letzter Verkauf gerade eben'; }
+    var min = Math.round(sec / 60);
+    if (min < 60) { return 'letzter Verkauf vor ' + min + ' Min'; }
+    var h = Math.round(min / 60);
+    if (h < 24) { return 'letzter Verkauf vor ' + h + ' Std'; }
+    return 'letzter Verkauf ' + liveTimeHHMM(iso) + ' Uhr';
+  }
+
+  function liveKpis(today) {
+    today = today || {};
+    function kpi(label, value, unit) {
+      return '<div class="v3-cockpit-kpi">' +
+        '<span class="v3-cockpit-kpi__label">' + label + '</span>' +
+        '<span class="v3-cockpit-kpi__value">' + value + (unit ? '<span class="v3-cockpit-kpi__unit"> ' + unit + '</span>' : '') + '</span>' +
+      '</div>';
+    }
+    return '<div class="v3-cockpit-kpis v3-live__kpis">' +
+      kpi('Umsatz heute', fmtEuro(today.umsatzBrutto), 'EUR') +
+      kpi('Verkäufe', fmtInt(today.verkaeufe), '') +
+      kpi('Stück', fmtInt(today.stueck), '') +
+    '</div>';
+  }
+
+  function liveList(recent) {
+    recent = recent || [];
+    if (!recent.length) {
+      return '<p class="v3-live__empty">Heute noch keine Verkäufe.</p>';
+    }
+    var rows = recent.map(function (r) {
+      return '<li class="v3-live__row">' +
+        '<span class="v3-live__time">' + esc(liveTimeHHMM(r.settlementAt)) + '</span>' +
+        '<span class="v3-live__prod">' + esc(r.product || '–') + '</span>' +
+        '<span class="v3-live__qty">×' + fmtInt(r.quantity) + '</span>' +
+        '<span class="v3-live__amt">' + fmtEuro(r.grossAmount) + ' €</span>' +
+      '</li>';
+    }).join('');
+    return '<ul class="v3-live__list">' + rows + '</ul>';
+  }
+
+  /* Innerer Inhalt der Kachel je nach Zustand (loading/error/ok). */
+  function liveTileInner(state) {
+    if (state.loading) {
+      return '<div class="v3-live__body" data-live-body>' +
+        '<p class="v3-live__loading">Live-Daten werden geladen …</p></div>';
+    }
+    if (state.error) {
+      return '<div class="v3-live__body" data-live-body>' +
+        '<p class="v3-live__error">Live-Daten nicht verfügbar.</p></div>';
+    }
+    var d = state.data || {};
+    return '<div class="v3-live__body" data-live-body>' +
+      liveKpis(d.today) +
+      '<p class="v3-live__listhead">Letzte Verkäufe</p>' +
+      liveList(d.recent) +
+    '</div>';
+  }
+
+  function liveMetaText(state) {
+    if (state.loading) { return 'lädt …'; }
+    if (state.error) { return ''; }
+    return esc(liveAgoText(state.data && state.data.lastSaleAt));
+  }
+
+  function liveTileHtml(state) {
+    state = state || { loading: true };
+    return '<section class="v3-card v3-live" data-live-tile aria-label="Live-Umsatz">' +
+      '<header class="v3-live__head">' +
+        '<span class="v3-live__title"><span class="v3-live__dot" aria-hidden="true"></span>Live-Umsatz</span>' +
+        '<span class="v3-live__meta" data-live-meta>' + liveMetaText(state) + '</span>' +
+      '</header>' +
+      liveTileInner(state) +
+    '</section>';
+  }
+
+  function loadLiveData() {
+    var qs = '';
+    if (_guvQuery.machines && _guvQuery.machines.length) {
+      qs = '?machines=' + encodeURIComponent(_guvQuery.machines.join(','));
+    }
+    return fetchJson('/api/v2/economics/live' + qs)
+      .then(function (res) { return (res && res.data) ? res.data : null; });
+  }
+
+  /* Nur den Kachel-Inhalt neu zeichnen, ohne die Seite anzufassen. */
+  function paintLiveTile(state) {
+    var tile = viewEl.querySelector('[data-live-tile]');
+    if (!tile) { return; }
+    var body = tile.querySelector('[data-live-body]');
+    var meta = tile.querySelector('[data-live-meta]');
+    if (body) { body.outerHTML = liveTileInner(state); }
+    if (meta) { meta.textContent = liveMetaText(state); }
+  }
+
+  function refreshLiveTile() {
+    if (!viewEl.querySelector('[data-live-tile]')) { stopLiveRefresh(); return; }
+    var token = ++_liveReqToken;
+    loadLiveData().then(function (data) {
+      if (token !== _liveReqToken) { return; }
+      if (!viewEl.querySelector('[data-live-tile]')) { return; }
+      paintLiveTile({ data: data || { today: {}, recent: [] } });
+    }).catch(function () {
+      if (token !== _liveReqToken) { return; }
+      paintLiveTile({ error: true });
+    });
+  }
+
+  function startLiveRefresh() {
+    stopLiveRefresh();
+    refreshLiveTile();
+    _liveTimer = setInterval(refreshLiveTile, LIVE_REFRESH_MS);
+  }
+
+  function stopLiveRefresh() {
+    if (_liveTimer) { clearInterval(_liveTimer); _liveTimer = null; }
+  }
+
   function renderGuvPage(data) {
     _guvData = data || null;
     return '<div class="v3-guv">' +
+      liveTileHtml({ loading: true }) +
       guvPeriodPicker(_guvQuery) +
       '<div class="v3-guv-body" data-guv-body aria-live="polite">' + renderGuvBody(_guvData, _guvQuery) + '</div>' +
     '</div>';
@@ -1738,6 +1875,7 @@
         body.setAttribute('aria-busy', 'false');
         body.innerHTML = renderGuvBody(data, _guvQuery);
         bindBody();
+        refreshLiveTile(); // Live-Kachel dem evtl. geänderten Automaten-Filter nachziehen
       }).catch(function () {
         if (!body) { return; }
         body.classList.remove('is-loading');
@@ -1912,6 +2050,7 @@
 
     loadGuvScope().then(renderFilter);
     bindBody();
+    startLiveRefresh(); // Live-Kachel laden + 30-s-Auto-Refresh (Cleanup in renderRoute)
   }
 
   /* ---- Sortiment & Slots: Etagen-Slot-Editor (/slots) ------------------ */
@@ -3048,6 +3187,9 @@
   /* ---- Rendering einer Route ------------------------------------------- */
   function renderRoute(route) {
     var token = ++loadToken;
+
+    // Auto-Refresh der Live-Kachel stoppen (greift nur auf der GuV-Seite).
+    stopLiveRefresh();
 
     // Etwaige offene Slot-Editor-Overlays (auf body portiert) aufräumen.
     var staleDialog = document.getElementById('v3-slots-dialog-host');
