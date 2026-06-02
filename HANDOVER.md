@@ -2,57 +2,53 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-06-02 (Handy-Responsive-Fix + einklappbare Etagen im Sortiment)
+## Stand: 2026-06-02 (SQL-Migration #39/#41/#40/#60 + Bestands-Rekonstruktion + Automaten-Verwaltung)
 
-### Aktueller Stand
-
-- **v3-Dashboard ist auf dem Handy jetzt wirklich responsiv.** GuV, Bestand und Sortiment passen bei 375px ohne horizontalen Overflow; kein erzwungenes Rauszoomen mehr, die fixe Bottom-Navigation („Iconleiste") bleibt durchgehend stehen.
-- **Sortiment-Etagen sind ein-/ausklappbar** (Kopfzeile mit `x / y belegt` + Pfeil). Default am Handy (<880px) **eingeklappt**, am Desktop aufgeklappt; eine ausdrückliche Nutzer-Wahl wird pro Automat+Etage in `localStorage` gemerkt und schlägt den Default.
-- **Commit `3608225` (gepusht) ist auf der HP Mini live ausgerollt und live verifiziert.**
-- **659/659 Dashboard-Tests grün** (`cd dashboard; npm test`).
+Große Session, alles **live auf der HP Mini** und über PRs/Issues dokumentiert. Frühere 2026-06-02-Stränge (Live-Umsatz #38, Handy-Responsive + einklappbare Etagen) siehe `HANDOVER_ARCHIVE/HANDOVER_2026-06-02_responsive.md`.
 
 ### Was diese Session gemacht wurde
 
-Reine Frontend-Arbeit an `dashboard/public/v3.css` + `dashboard/public/v3.js` (Vanilla-JS, v3-Tokens wiederverwendet). Verifiziert im QA-Preview (`dashboard-v3-qa`, Port 8788) bei 375px/1200px.
+**1. SQL-only-Migration (PRs automatenlager #42/#43, homelab #61; Issues #39/#40/#41/#60 geschlossen)**
+- **#39 WF3 + #41 WF5 lesen jetzt aus Postgres** statt Google Sheets (behebt UNKNOWN_PRODUCT-Drift bzw. veraltete „MHD abgelaufen"-Meldungen). Live-Swap auf Mini-WF3 `wbOhFKXQqBpJWB1w` / WF5 `3ceKeNWmdj455Tcr`: je **ein** Postgres-Node, dessen **SQL das Sheet-Schema direkt per Aliasing** liefert (kein JS-Map-Node). Verträge: `dashboard/lib/wf3-product-reads.js` + `wf5-stock-reads.js`. Per `n8n execute` validiert. **LEHRE:** WF3-Node beim In-place-Swap NICHT umbenennen (FIFO-Code liest ihn per `$('Google Sheets - Produkte lesen')`).
+- **#40 GuV laufender Tag (Option A):** `buildEconomicsData` → `provisional` + `totalsWithProvisional`; `queryEconomicsProvisionalPg` summiert nicht-aggregierte `sales_transactions` (gap-aware ab letztem guv_daily-Tag). v3-KPI zeigt „inkl. heute (vorläufig)", Marge bleibt endgültig.
+- **#60 (homelab) remaining_qty-Abbuchpfad — Migration `0011_stock_movement_apply_trigger.sql` LIVE:** AFTER-INSERT-Trigger `apply_stock_movement()` wendet `quantity_delta_total` auf `stock_batches.remaining_qty` an (status='leer' bei 0; 'ausgesondert' geschützt). WF3 sendet die Bewegungen bereits zuverlässig; es fehlte nur die Anwendung.
 
-**Wurzelursache aller drei Handy-Symptome (Nav verschwindet, Inhalt abgeschnitten, Rauszoomen):** horizontaler Overflow. `.v3-main` ist ein Grid-Item von `.v3-shell` und hatte den Default `min-width:auto` → es schrumpfte nicht unter die min-content-Breite seines Inhalts (breite nowrap-Tabellen bei GuV/Bestand, Slot-Etagen-Grid bei Sortiment). Das Layout wurde dadurch breiter als der Viewport (gemessen 565–619px statt 375px), das Handy zoomte raus, und die `position:fixed`-Bottom-Nav rutschte weg.
+**2. Bestands-Rekonstruktion (user-bestätigt, ohne physische Zählung)**
+- Aus dem WF3-FIFO-gepflegten Google-Sheet `remaining_qty` rekonstruiert. 29 Chargen korrigiert: **−98 Stück Phantom**, **Haribo Goldbären 7→28** (war zu niedrig), **Red Bull Spring →1** (physisch bestätigt). Write-offs (Nick Nacks/Twix salted/Duplo) geschützt. Backup: `C:/tmp/backup_stock_reconcile_20260602.json`. Verfügbarer Gesamtbestand 915→**817**. Trigger hält es ab jetzt automatisch aktuell.
 
-1. **Zentraler Fix — `.v3-main { min-width: 0 }`:** Layout schrumpft auf Viewport-Breite; breite Tabellen scrollen stattdessen in ihrem eigenen `overflow-x:auto`-Wrapper (`.v3-guv-tablewrap`, `.v3-lager-table-wrap`). Empirisch verifiziert: alle drei Seiten danach bei 375px ohne Overflow, Bottom-Nav fix am unteren Rand.
-2. **Sortiment-Layout shrinkbar:** `.v3-slots-layout` mobil `minmax(0,1fr)` statt `1fr`; `.v3-slots-stage` `min-width:0`; `.v3-slots-stage__top` `flex-wrap:wrap` (die Buttons „Automat voll auffüllen" / „Aus Nayax abgleichen" brechen um statt zu überlaufen).
-3. **Einklappbare Etagen:** `.v3-slots-floor` von 2-Spalten-Grid (`64px 1fr`) auf einklappbaren Block umgebaut — tippbare Kopfzeile `.v3-slots-floor__toggle` (Label + `.v3-slots-floor__summary` Belegung + drehender `.v3-slots-floor__chev`), `[data-floor-collapsed="true"]` blendet die Slot-Reihe aus. JS: `loadCollapsedFloors`/`saveCollapsedFloors` (localStorage-Key `v3.slots.collapsedFloors`, Werte explizit `true`/`false`, Abwesenheit = Viewport-Default via `floorDefaultCollapsed()` = `matchMedia('(max-width: 879px)')`), Toggle-Handler auf `root` delegiert (übersteht Stage-Neuaufbau beim Automatenwechsel; auch für Gäste, reine Ansicht-Steuerung).
+**3. Automaten-Verwaltung v3 (PRs #44/#45/#46/#47 automatenlager, #63 homelab)**
+- **Anlegen:** „+ Neuer Standort" (`POST /api/v2/locations`) + „+ Neuer Automat" (`POST /api/v2/machines`, `lib/machine-create.js`: schreibt machines + machine_profiles idempotent; Standort-Pflicht-Dropdown). Formulare **standardmäßig eingeklappt** (`[hidden]`-CSS-Fix), Platz sparend.
+- **Standort löschen** (`DELETE /api/v2/locations`): nur bei 0 Automaten (FK-Guard), sonst Hinweis.
+- **Automat aussondern** (`POST /api/v2/machines/active`): Soft-Delete `machines.active=false` (Historie bleibt — 332 sales-FK), eingeklappte „Ausgesonderte"-Sektion mit Reaktivieren.
+- **Nayax-Geräte-Combobox** (DB-Spiegel, Vercel+Supabase-ready): Migration `0023_nayax_devices`, `lib/nayax-devices.js`, `GET /api/v2/nayax-devices`, natives `<datalist>` (leer→Freitext). Sync = **WF-Nayax-Devices-Sync** (Mini-ID `EaVcB3REMttuKZPa`, aktiv, tägl. 04:20): `GET https://lynx.nayax.com/operational/v1/machines` → Postgres-Upsert. LEHRE: Nayax `/machines` liefert ein Array → n8n splittet in Items → Code-Node `$input.all()`.
+- **Bugfix:** „Ohne Standort" trotz Verknüpfung war ein Anzeige-Bug (location.machine_ids bigint vs. machine_profiles.machine_id = machine_key) → `array_agg(m.machine_key)`.
+
+**Tests:** 680/680 (`cd dashboard; npm test`). Repo↔Mini synchron (WF-JSONs exportiert).
 
 ### Deploy auf die HP Mini (so läuft das Dashboard dort)
 
-Das Dashboard läuft auf der Mini als **Docker-Container `homelab-dashboard`** (Compose-Projekt `homelab`, `C:\homelab\docker-compose.yml`). Code kommt per **Bind-Mount** `C:\homelab\projekte\automatenlager` → `/repo` (eigener git-Klon, getrennt von der Dev-Arbeitskopie); Container-Cmd `node server.js`, WorkingDir `/repo/dashboard`. Statische Assets werden direkt aus dem Mount serviert. Exponiert via Tailscale Serve: `https://hp-mini-server.tail573a13.ts.net:8787` (tailnet only, `Cache-Control: no-store`).
-
-**Deploy = pullen + Container neu starten** (kein Image-Rebuild bei reinen Code-Änderungen):
-1. SSH `patri@100.68.148.46` (Key `~/.ssh/miniserver_key`). Die Mini ist **Windows** (SSH-Default cmd verschluckt Quotes) mit **WSL `Ubuntu-24.04`** → zuverlässig nur über `powershell -NoProfile -Command "wsl.exe -d Ubuntu-24.04 bash -lc '...'"`; komplexe bash-Skripte base64-kodiert durchreichen.
-2. `cd /mnt/c/homelab/projekte/automatenlager && git pull --ff-only origin main`
-3. `docker restart homelab-dashboard`
-4. Verifizieren: `docker exec homelab-dashboard sh -lc 'wget -q -O - http://localhost:8787/v3.css | grep -c "<marker>"'`.
-
-Diese Session: `8f95356 → 3608225` gepullt, Container neugestartet, neue `v3.css`/`v3.js`-Marker über HTTP bestätigt (`HTTP 200`).
-
-### Vorheriger Stand (nachgetragen, war im alten HANDOVER nicht erfasst)
-
-- **#38 Live-Umsatz (Commit `c3f775c`, live 2026-06-02):** v3-Live-Kachel (Tagesumsatz heute + letzte Verkäufe, 30s-Auto-Refresh) + `GET /api/v2/economics/live`, liest fertige `sales_transactions` (von WF3 befüllt). Kein Späher-WF/keine Migration; stattdessen WF3-Schedule auf alle 5 Min. Lehre: aktiven WF zum Neuladen des Triggers deactivate+activate.
+Docker-Container `homelab-dashboard` (Compose `C:\homelab\docker-compose.yml`), Code per **Bind-Mount** `C:\homelab\projekte\automatenlager` → `/repo`, Cmd `node server.js`, WorkingDir `/repo/dashboard`. **Deploy = pullen + Restart** (kein Rebuild bei Code-Änderungen):
+1. SSH `patri@100.68.148.46` (Key `~/.ssh/miniserver_key`). Mini ist **Windows + WSL Ubuntu-24.04** → Skripte per scp nach `C:/Windows/Temp/` + `wsl -d Ubuntu-24.04 bash <script>`.
+2. `cd /mnt/c/homelab/projekte/automatenlager && git pull --ff-only && docker restart homelab-dashboard`.
+- Diese Session live: HEAD `723652e`. n8n-Deploys per `PUT /api/v1/workflows/{id}` (Basis = Execution-`workflowData`, settings-Whitelist), validiert mit `docker exec ... n8n execute --id`.
 
 ### n8n-Instanz-Regel (unverändert kritisch)
 
-- **n8n-Arbeit ausschließlich auf der HP Mini, nie lokal.** Mini-REST-API: `https://hp-mini-server.tail573a13.ts.net/api/v1/`, Header `X-N8N-API-KEY`.
-- **Gültiger Mini-Key = `N8N_API_KEY` in `C:\Users\patri\Documents\homelab\.env.local`** (Mini → HTTP 200).
-- **NICHT** für den Mini: `C:\Users\patri\.n8n-api-key` und `ELITEBOOK_N8N_API_KEY` (= lokal, Mini → 401). Vor jeder Aktion Instanz/ID gegenprüfen.
+- **Nur auf der HP Mini, nie lokal.** REST: `https://hp-mini-server.tail573a13.ts.net/api/v1/`, Header `X-N8N-API-KEY`.
+- **Gültiger Mini-Key (bis ~2026-06-19) = `N8N_API_KEY` in `C:\Users\patri\Documents\homelab\.env.local`** (funktioniert über die Tailscale-FQDN). **NICHT** `C:\Users\patri\.n8n-api-key` (abgelaufen, 401). Der n8n-MCP zeigt auf die **lokale** Instanz — nicht zum Deployen.
 
 ### Offene / nächste Schritte
 
-1. **Optionaler Live-Augenschein durch Patrick am Handy** unter `https://hp-mini-server.tail573a13.ts.net:8787` (Sortiment/GuV/Bestand) — Responsive + einklappbare Etagen mit Echtdaten.
-2. Größere offene Themen unverändert: **#3 Auth-Sicherheitskonzept** (11 Issues über beide Repos, Milestone „Auth & Sicherheit v1"; nächster Schritt `start-issue` auf homelab #57), **#9 v2-Abschaltung**.
-3. Offen aus früherer Session: echter End-to-End-Live-Test des WF1-Rechnungs-Uploads beim nächsten realen Rechnungseingang.
+1. **Bestands-Rekonstruktion stichprobenartig gegenchecken**, wenn Patrick am Lager ist (Trigger hält ab jetzt automatisch).
+2. **homelab #62** (offen): WF-Drift-Check um „WF3 hat PGW-stock_movement-Node" erweitern (Robustheit, kein Blocker).
+3. Große offene Themen: **Auth-Sicherheitskonzept** (11 Issues über beide Repos, nächster Schritt `start-issue` auf homelab #57), **#9 v2-Abschaltung**.
+4. **Nayax-Combobox** zeigt aktuell Freitext (nur 1 Nayax-Gerät, schon angelegt) — füllt sich automatisch, sobald weitere Automaten dazukommen.
+5. Perspektive: Umzug auf **Vercel + Supabase** — Read-Pfade sind reine DB-Abfragen (portabel), nur Sync-Jobs (n8n) müssten nach Supabase-Cron wandern.
 
 ### Wichtige IDs / Pfade
 
-- Entwicklungs-Arbeitskopie: `C:\Users\patri\Documents\mein-erstes-Projekt` (dashboard/) · Dashboard-PG via SSH-Tunnel Port 15432 (`DASHBOARD_V2_PG_URL` in `dashboard/.env.local`)
-- Mini-Dashboard-Klon: `C:\homelab\projekte\automatenlager` (Bind-Mount → Container `homelab-dashboard`)
+- Dev-Arbeitskopie: `C:\Users\patri\Documents\mein-erstes-Projekt` · Dashboard-PG via SSH-Tunnel Port 15432 (`DASHBOARD_V2_PG_URL` in `dashboard/.env.local`)
+- Mini-Dashboard-Klon: `C:\homelab\projekte\automatenlager` (Bind-Mount → `homelab-dashboard`)
 - QA-Preview lokal: `dashboard-v3-qa`, Port 8788 (`.claude/launch.json`)
-- v3-Frontend: `dashboard/public/v3.{html,css,js}` · Klassifikation: `dashboard/lib/slow-mover.js` · Drift-Guard: `dashboard/lib/db-schema.js`
-- WF1 Prod-ID (unverändert): `wnGAwHhgfXq2ATM8`
+- WF-IDs Mini: WF3 `wbOhFKXQqBpJWB1w` · WF5 `3ceKeNWmdj455Tcr` · WF-Nayax-Devices-Sync `EaVcB3REMttuKZPa` · WF-PGW `Sajezv8tJll0CLIv`
+- Migrationen (homelab): `infra/postgres/migrations/` — neu: `0011` (Trigger), `0023` (nayax_devices)
