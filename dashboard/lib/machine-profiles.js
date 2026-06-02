@@ -38,9 +38,11 @@ async function queryMachineProfilesPg(pgUrl) {
   await client.connect();
   try {
     const res = await client.query(
-      `SELECT machine_profile_id, machine_id, area, type, position, nickname
-       FROM automatenlager.machine_profiles
-       ORDER BY area NULLS LAST, type NULLS LAST, machine_id`
+      `SELECT mp.machine_profile_id, mp.machine_id, mp.area, mp.type, mp.position, mp.nickname,
+              COALESCE(m.active, TRUE) AS active
+       FROM automatenlager.machine_profiles mp
+       LEFT JOIN automatenlager.machines m ON m.machine_key = mp.machine_id
+       ORDER BY mp.area NULLS LAST, mp.type NULLS LAST, mp.machine_id`
     );
     return res.rows.map((row) => ({ ...row, label: buildMachineLabel(row) }));
   } finally {

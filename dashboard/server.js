@@ -13,10 +13,10 @@ const { validateWriteOff, canWriteOff, buildWriteOffAuditEntry, WRITE_OFF_STATUS
 const { buildSlotChangePreview, validateSlotChange, buildSlotChangePayload, buildSlotChangeAuditEntry } = require('./lib/slot-change.js');
 const { buildProductOnboardingData, queryProductOnboardingPg } = require('./lib/product-onboarding.js');
 const { buildReportCsv, buildReportFilename } = require('./lib/reports.js');
-const { buildLocationProfile, buildLocationComparison, queryLocationsPg, upsertLocationPg } = require('./lib/location-profiles.js');
+const { buildLocationProfile, buildLocationComparison, queryLocationsPg, upsertLocationPg, deleteLocationPg } = require('./lib/location-profiles.js');
 const { buildCorrectionCases, queryCorrectionCasesPg } = require('./lib/correction-cases.js');
 const { buildMachineProfile, getMachineOptions, queryMachineProfilesPg, upsertMachineProfilePg } = require('./lib/machine-profiles.js');
-const { buildMachineCreatePayload, createMachinePg } = require('./lib/machine-create.js');
+const { buildMachineCreatePayload, createMachinePg, setMachineActivePg } = require('./lib/machine-create.js');
 const { buildProductSuggestion, validateCorrectionAction, buildCorrectionActionPayload, buildCorrectionActionAuditEntry } = require('./lib/correction-action.js');
 const { buildOnboardingStartPayload, validateOnboardingStart, buildOnboardingStartAuditEntry } = require('./lib/onboarding-start.js');
 const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buildSlotAssignAuditEntry } = require('./lib/slot-assign-inline.js');
@@ -2810,6 +2810,54 @@ const server = http.createServer(async (req, res) => {
           ok: false,
           error: { code: isValidation ? 'VALIDATION_ERROR' : 'PG_ERROR', message: err.message },
         });
+      }
+      return;
+    }
+
+    // #2: Automat aussondern / reaktivieren (soft-delete machines.active).
+    if (parsed.pathname === '/api/v2/machines/active' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        sendJson(res, 403, { ok: false, error: { code: 'FORBIDDEN', message: 'Nur Admins können Automaten aussondern.' } });
+        return;
+      }
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      await new Promise((resolve) => req.on('end', resolve));
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) { sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } }); return; }
+      try {
+        const raw = JSON.parse(body || '{}');
+        const saved = await setMachineActivePg(pgUrl, raw.machine_key, raw.active === true || raw.active === 'true');
+        sendJson(res, 200, { ok: true, data: saved });
+      } catch (err) {
+        const code = err.code === 'NOT_FOUND' ? 404 : (/machine_key/i.test(err.message) ? 400 : 503);
+        sendJson(res, code, { ok: false, error: { code: err.code || 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    // #1: Standort löschen (nur wenn kein Automat mehr dran hängt).
+    if (parsed.pathname === '/api/v2/locations' && req.method === 'DELETE') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        sendJson(res, 403, { ok: false, error: { code: 'FORBIDDEN', message: 'Nur Admins können Standorte löschen.' } });
+        return;
+      }
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      await new Promise((resolve) => req.on('end', resolve));
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) { sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } }); return; }
+      try {
+        const raw = JSON.parse(body || '{}');
+        const result = await deleteLocationPg(pgUrl, raw.location_key);
+        sendJson(res, 200, { ok: true, data: result });
+      } catch (err) {
+        const code = err.code === 'LOCATION_NOT_EMPTY' ? 409
+          : err.code === 'NOT_FOUND' ? 404
+          : (/erforderlich/i.test(err.message) ? 400 : 503);
+        sendJson(res, code, { ok: false, error: { code: err.code || 'PG_ERROR', message: err.message } });
       }
       return;
     }
