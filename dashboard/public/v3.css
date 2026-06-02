@@ -1562,6 +1562,15 @@ a.v3-chip:focus-visible {
 }
 .v3-guv-kpis .v3-cockpit-kpi__unit { font-size: 12px; }
 .v3-guv-kpis .v3-cockpit-kpi__label { margin-bottom: 8px; }
+/* #40: dezenter Hinweis auf den vorläufigen laufenden Tag (Umsatz/Stück) */
+.v3-guv-kpi__prov {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--ink-faint);
+  letter-spacing: 0.01em;
+}
 @media (max-width: 620px) {
   .v3-guv-kpis { grid-template-columns: repeat(2, 1fr); overflow-x: hidden; }
 }

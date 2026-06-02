@@ -3,7 +3,7 @@ const http = require('http');
 const path = require('path');
 const url = require('url');
 const zlib = require('zlib');
-const { buildEconomicsData, queryEconomicsPg, formatProductName } = require('./lib/economics.js');
+const { buildEconomicsData, queryEconomicsPg, queryEconomicsProvisionalPg, formatProductName } = require('./lib/economics.js');
 const { buildInventoryMhdData, queryInventoryMhdPg, toIsoDate } = require('./lib/inventory-mhd.js');
 const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/assortment-slots.js');
 const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = require('./lib/overview-monitoring.js');
@@ -611,6 +611,13 @@ async function buildDashboardV2Area(area, query = {}) {
   if (area === 'economics') {
     try {
       const pgRows = await queryEconomicsPg(pgUrl, query);
+      // #40: laufender Tag (noch nicht von WF8 aggregiert) als vorläufige
+      // Position ergänzen — Fehler hier dürfen die GuV nie kippen.
+      try {
+        pgRows.provisional = await queryEconomicsProvisionalPg(pgUrl, query);
+      } catch (_) {
+        pgRows.provisional = null;
+      }
       const data = buildEconomicsData(pgRows, query);
       const now = new Date();
       return {
