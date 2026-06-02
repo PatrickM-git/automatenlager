@@ -2641,11 +2641,21 @@ a.v3-chip:focus-visible {
 .v3-live__kpis .v3-cockpit-kpi__unit { font-size: 12px; }
 .v3-live__kpis .v3-cockpit-kpi__label { margin-bottom: 6px; }
 
-.v3-live__listhead {
-  margin: 14px 0 6px; font-size: 11.5px; text-transform: uppercase;
+.v3-live__details { margin-top: 12px; border-top: 1px solid var(--line); }
+.v3-live__summary {
+  cursor: pointer; list-style: none; user-select: none;
+  display: flex; align-items: center; gap: 7px;
+  padding: 12px 0 8px; font-size: 11.5px; text-transform: uppercase;
   letter-spacing: .05em; color: var(--ink-faint);
 }
-.v3-live__list { list-style: none; margin: 0; padding: 0; }
+.v3-live__summary::-webkit-details-marker { display: none; }
+.v3-live__summary::before {
+  content: '▸'; font-size: 10px; color: var(--ink-faint);
+  transition: transform .15s ease;
+}
+.v3-live__details[open] .v3-live__summary::before { transform: rotate(90deg); }
+.v3-live__summary:hover { color: var(--ink); }
+.v3-live__list { list-style: none; margin: 0 0 4px; padding: 0; }
 .v3-live__row {
   display: grid; grid-template-columns: auto 1fr auto auto;
   align-items: baseline; gap: 10px;

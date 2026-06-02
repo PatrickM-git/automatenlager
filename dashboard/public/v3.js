@@ -1303,6 +1303,7 @@
   var _guvScope = null; /* { locations: [...], machines: [...] } – einmal geladen */
   var _liveTimer = null; /* Auto-Refresh-Handle der Live-Kachel (in renderRoute aufgeräumt) */
   var _liveReqToken = 0; /* verwirft veraltete Live-Antworten bei schnellem Filterwechsel */
+  var _liveListOpen = false; /* Auf/Zu-Zustand der "Letzte Verkäufe"-Box, übersteht Auto-Refresh */
   var LIVE_REFRESH_MS = 30000;
 
   /* Zeitraum-Parameter (ohne den Maschinen-Filter) – von Daten- und Export-URL geteilt */
@@ -1686,20 +1687,25 @@
     '</div>';
   }
 
+  /* "Letzte Verkäufe" als ausklappbare Box (natives <details>), standardmäßig
+     eingeklappt. _liveListOpen bewahrt den Zustand über den Auto-Refresh hinweg. */
   function liveList(recent) {
     recent = recent || [];
-    if (!recent.length) {
-      return '<p class="v3-live__empty">Heute noch keine Verkäufe.</p>';
-    }
-    var rows = recent.map(function (r) {
-      return '<li class="v3-live__row">' +
-        '<span class="v3-live__time">' + esc(liveTimeHHMM(r.settlementAt)) + '</span>' +
-        '<span class="v3-live__prod">' + esc(r.product || '–') + '</span>' +
-        '<span class="v3-live__qty">×' + fmtInt(r.quantity) + '</span>' +
-        '<span class="v3-live__amt">' + fmtEuro(r.grossAmount) + ' €</span>' +
-      '</li>';
-    }).join('');
-    return '<ul class="v3-live__list">' + rows + '</ul>';
+    var count = recent.length;
+    var inner = count
+      ? '<ul class="v3-live__list">' + recent.map(function (r) {
+          return '<li class="v3-live__row">' +
+            '<span class="v3-live__time">' + esc(liveTimeHHMM(r.settlementAt)) + '</span>' +
+            '<span class="v3-live__prod">' + esc(r.product || '–') + '</span>' +
+            '<span class="v3-live__qty">×' + fmtInt(r.quantity) + '</span>' +
+            '<span class="v3-live__amt">' + fmtEuro(r.grossAmount) + ' €</span>' +
+          '</li>';
+        }).join('') + '</ul>'
+      : '<p class="v3-live__empty">Noch keine Verkäufe.</p>';
+    return '<details class="v3-live__details" data-live-details' + (_liveListOpen ? ' open' : '') + '>' +
+      '<summary class="v3-live__summary">Letzte Verkäufe' + (count ? ' (' + count + ')' : '') + '</summary>' +
+      inner +
+    '</details>';
   }
 
   /* Innerer Inhalt der Kachel je nach Zustand (loading/error/ok). */
@@ -1715,9 +1721,15 @@
     var d = state.data || {};
     return '<div class="v3-live__body" data-live-body>' +
       liveKpis(d.today) +
-      '<p class="v3-live__listhead">Letzte Verkäufe</p>' +
       liveList(d.recent) +
     '</div>';
+  }
+
+  /* Toggle-Zustand der Verkaufsliste merken, damit ein Auto-Refresh die Box
+     nicht wieder zuklappt. Neu gebunden nach jedem Render (Element ist frisch). */
+  function wireLiveDetails() {
+    var d = viewEl.querySelector('[data-live-details]');
+    if (d) { d.addEventListener('toggle', function () { _liveListOpen = d.open; }); }
   }
 
   function liveMetaText(state) {
@@ -1752,7 +1764,7 @@
     if (!tile) { return; }
     var body = tile.querySelector('[data-live-body]');
     var meta = tile.querySelector('[data-live-meta]');
-    if (body) { body.outerHTML = liveTileInner(state); }
+    if (body) { body.outerHTML = liveTileInner(state); wireLiveDetails(); }
     if (meta) { meta.textContent = liveMetaText(state); }
   }
 
