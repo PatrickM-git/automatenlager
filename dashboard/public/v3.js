@@ -32,7 +32,7 @@
   var ROUTES = [
     { path: '/',              key: 'heute',         nav: 'Heute',        eyebrow: 'Cockpit',          title: 'Heute',                lead: 'Der Gesamtzustand auf einen Blick – die wichtigsten Kennzahlen und die dringendsten Handlungsbedarfe.' },
     { path: '/guv',           key: 'guv',           nav: 'GuV',          eyebrow: 'Wirtschaftlichkeit', title: 'GuV & KPI',          lead: 'Umsatz, Deckungsbeitrag und Marge über frei wählbare Zeiträume – Monat, Quartal, Jahr oder eigener Zeitraum.' },
-    { path: '/lager',         key: 'lager',         nav: 'Bestand',      eyebrow: 'Lager',            title: 'Bestand & MHD',        lead: 'Bestände und Mindesthaltbarkeit übersichtlich als Karten – kritische Chargen schnell erkennen.' },
+    { path: '/lager',         key: 'lager',         nav: 'Bestand',      eyebrow: 'Lager',            title: 'Bestand & MHD',        lead: 'Alle aktiven Lagerchargen mit Mindesthaltbarkeit und Menge – sortierbar nach MHD und Bestand.' },
     { path: '/slots',         key: 'slots',         nav: 'Sortiment',    eyebrow: 'Bestückung',       title: 'Sortiment & Slots',    lead: 'Sortiment je Automat und der grafische Etagen-Slot-Editor zum Platzieren der Produkte.' },
     { path: '/monitoring',    key: 'monitoring',    nav: 'Monitoring',   eyebrow: 'Betrieb',          title: 'Monitoring',           lead: 'Betriebs- und Zustandsüberwachung – Auffälligkeiten über alle Automaten hinweg früh bemerken.' },
     { path: '/onboarding',    key: 'onboarding',    nav: 'Onboarding',   eyebrow: 'Neuprodukte',      title: 'Produkt-Onboarding',   lead: 'Neue Produkte geführt aufnehmen und direkt einem Slot zuordnen.' },
