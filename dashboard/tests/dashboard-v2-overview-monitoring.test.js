@@ -370,6 +370,53 @@ test('AC-DD3: mhd-risk priority escalates to critical when a batch is already ex
   assert.equal(mhdSoon.severity, 'warning', 'without expired batch mhd-risk stays warning');
 });
 
+// ── Heute-Reiter: Sammel-Severity „Offene Warnungen" muss zur Detailliste passen ──
+
+test('AC-SEV1: warnings-open priority severity equals the highest severity among the shown warnings (critical)', () => {
+  // RAW_DATA enthält eine CONTAINER_DOWN-Warnung (critical) → Sammel-Label kritisch.
+  const overview = buildOverviewData(RAW_DATA);
+  const warningsOpen = overview.priorities.find((p) => p.id === 'warnings-open');
+
+  assert.ok(warningsOpen, 'warnings-open priority must exist when openWarningsCount > 0');
+  assert.equal(warningsOpen.severity, 'critical', 'a critical warning must make the summary critical');
+});
+
+test('AC-SEV2: warnings-open priority downgrades to warning when no critical warning is open (matches drill-down)', () => {
+  // Genau der Live-Fall: nur info-/warning-Warnungen offen. Das zugeklappte
+  // Sammel-Label darf dann NICHT „kritisch" zeigen, sondern muss die höchste
+  // tatsächlich vorhandene Severity (warning) spiegeln — sonst Mismatch zur
+  // aufgeklappten Detailliste.
+  const overview = buildOverviewData({
+    ...RAW_DATA,
+    openWarningsCount: 3,
+    warnings: [
+      { warning_type: 'LOW_BATCH', severity: 'warning', resolved: false, created_at: '2026-06-02T05:45:00.000Z', warning_key: 'LOW_BATCH|Red Bull Spring|2026-06-02', message: 'Red Bull Spring: Nur noch 5 Stück im Lager (Schwellwert 5).' },
+      { warning_type: 'LOW_STOCK', severity: 'info', resolved: false, created_at: '2026-06-02T05:45:00.000Z', warning_key: 'LOW_STOCK|Red Bull|2026-06-02', message: 'Red Bull: Slot laut Sheet leer.' },
+    ],
+  });
+  const warningsOpen = overview.priorities.find((p) => p.id === 'warnings-open');
+
+  assert.ok(warningsOpen, 'warnings-open priority must exist');
+  assert.equal(warningsOpen.severity, 'warning', 'without a critical warning the summary must not claim "kritisch"');
+});
+
+test('AC-SEV3: warnings-open severity ignores resolved warnings and BACKUP_OK success rows', () => {
+  // Eine kritische, aber bereits aufgelöste / Erfolgs-Warnung darf das
+  // Sammel-Label nicht auf kritisch heben.
+  const overview = buildOverviewData({
+    ...RAW_DATA,
+    openWarningsCount: 1,
+    warnings: [
+      { warning_type: 'CONTAINER_DOWN', severity: 'critical', resolved: true, created_at: '2026-06-02T05:00:00.000Z', warning_key: 'CONTAINER_DOWN|n8n|2026-06-02', message: 'behoben' },
+      { warning_type: 'BACKUP_OK', severity: 'critical', resolved: false, created_at: '2026-06-02T03:00:00.000Z', warning_key: 'BACKUP_OK|backup|2026-06-02', message: 'Backup ok' },
+      { warning_type: 'LOW_BATCH', severity: 'warning', resolved: false, created_at: '2026-06-02T05:45:00.000Z', warning_key: 'LOW_BATCH|x|2026-06-02', message: 'x' },
+    ],
+  });
+  const warningsOpen = overview.priorities.find((p) => p.id === 'warnings-open');
+
+  assert.equal(warningsOpen.severity, 'warning', 'resolved/BACKUP_OK rows must not drive the summary severity');
+});
+
 test('AC-BO1: backups ampel is green when raw.hasBackupOk is true, yellow when false', () => {
   const ok = buildMonitoringData({ ...RAW_DATA, warnings: [], hasBackupOk: true });
   assert.equal(ok.ampels.find((a) => a.key === 'backups').state, 'green');

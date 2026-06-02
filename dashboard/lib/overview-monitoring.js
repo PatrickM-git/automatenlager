@@ -140,6 +140,27 @@ function addPriority(list, id, severity, title, message, count = 0) {
   list.push({ id, severity, title, message, count });
 }
 
+const SEVERITY_RANK = { critical: 3, warning: 2, info: 1 };
+
+// Höchste Severity über die TATSÄCHLICH offenen Warnungen, die im Drilldown
+// gezeigt werden. So bleibt das zugeklappte Sammel-Label „Offene Warnungen"
+// deckungsgleich mit der aufgeklappten Detailliste (kein „kritisch" oben,
+// während unten nur „Warnung"/„Info" steht). resolved-/BACKUP_OK-Zeilen
+// zählen nicht — analog zur Warnungs-Liste in queryOverviewMonitoringPg.
+function highestOpenWarningSeverity(warnings = []) {
+  let best = null;
+  for (const w of warnings) {
+    if (w.resolved === true) continue;
+    if (clean(w.warning_type).toUpperCase() === 'BACKUP_OK') continue;
+    const sev = clean(w.severity).toLowerCase();
+    const rank = SEVERITY_RANK[sev] || 0;
+    if (rank > (SEVERITY_RANK[best] || 0)) best = sev;
+  }
+  // Fallback, falls der Zähler > 0 ist, die (auf 7 Tage/40 Zeilen begrenzte)
+  // Liste aber leer bleibt: konservativ „warning", nie fälschlich „critical".
+  return best || 'warning';
+}
+
 function buildOverviewData(raw = {}) {
   const metrics = {
     openWarningsCount: toNum(raw.openWarningsCount),
@@ -154,7 +175,7 @@ function buildOverviewData(raw = {}) {
   addPriority(
     priorities,
     'warnings-open',
-    'critical',
+    highestOpenWarningSeverity(raw.warnings),
     'Offene Warnungen',
     `${metrics.openWarningsCount} offene Warnung(en) erfordern Pruefung.`,
     metrics.openWarningsCount,
