@@ -1994,6 +1994,16 @@ const server = http.createServer(async (req, res) => {
             WHERE sb.batch_id = $1`,
           [batch.batch_id, WRITE_OFF_STATUS],
         );
+        // Offene Warnungen für dieses Produkt auflösen (MHD_NEAR, LOW_STOCK, LOW_BATCH).
+        // Verhindert, dass nach dem Ausbuchen veraltete Warnungen im Cockpit hängen bleiben.
+        await client.query(
+          `UPDATE automatenlager.warnings
+              SET resolved = TRUE, resolved_at = now(), resolved_by = 'write-off'
+            WHERE product_id = $1
+              AND resolved = FALSE
+              AND warning_type IN ('MHD_NEAR', 'LOW_STOCK', 'LOW_BATCH')`,
+          [batch.product_id],
+        );
         await client.query('COMMIT');
         outcome = { ok: true, product_id: Number(batch.product_id) || null, written_off_qty: writtenOff, message: `${writtenOff} Stk. ausgebucht (${check.reason}).` };
       } catch (err) {

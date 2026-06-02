@@ -88,7 +88,7 @@
 
   /* ---- Cockpit-Seite (Heute / /) ----------------------------------------- */
   var COCKPIT_LINKS = {
-    'warnings-open': '/monitoring',
+    'warnings-open': '/lager',
     'mhd-risk':      '/lager',
     'low-stock':     '/lager',
     'economics':     '/guv',
