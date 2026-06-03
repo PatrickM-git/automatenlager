@@ -1514,13 +1514,57 @@
   function bucketLabel(key, long) {
     return String(key || '').length > 7 ? dayLabel(key, long) : monthLabel(key);
   }
+  /* Heutiges Datum als 'YYYY-MM-DD' (für den taggenauen eigenen Zeitraum) */
+  function todayYmd() {
+    var d = new Date(), m = d.getMonth() + 1, day = d.getDate();
+    return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  }
+
+  /* ---- ISO-Kalenderwochen (Spiegel von lib/economics.js) ----------------- */
+  function isoWeekMonday(year, week) {
+    var jan4 = new Date(Date.UTC(year, 0, 4));
+    var dow = (jan4.getUTCDay() + 6) % 7;            // Mo=0 … So=6
+    var mon = new Date(jan4);
+    mon.setUTCDate(jan4.getUTCDate() - dow + (week - 1) * 7);
+    return mon;
+  }
+  function isoWeeksInYear(year) {
+    var jan1 = new Date(Date.UTC(year, 0, 1)).getUTCDay();
+    var leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    return (jan1 === 4 || (leap && jan1 === 3)) ? 53 : 52;
+  }
+  function currentIsoWeek() {
+    var t = new Date();
+    var d = new Date(Date.UTC(t.getFullYear(), t.getMonth(), t.getDate()));
+    var dayNum = (d.getUTCDay() + 6) % 7;
+    d.setUTCDate(d.getUTCDate() - dayNum + 3);        // nächster Donnerstag = ISO-Wochenjahr
+    var firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+    var ft = (firstThu.getUTCDay() + 6) % 7;
+    firstThu.setUTCDate(firstThu.getUTCDate() - ft + 3);
+    var week = 1 + Math.round((d.getTime() - firstThu.getTime()) / (7 * 86400000));
+    return { year: d.getUTCFullYear(), week: week };
+  }
+  /* Tagesspanne der KW für die Dropdown-Beschriftung. Kompakt, wenn beide Tage
+     im selben Monat liegen ("01.–07.06."), sonst mit beiden Monaten. */
+  function weekRangeLabel(year, week) {
+    var mon = isoWeekMonday(year, week);
+    var sun = new Date(mon); sun.setUTCDate(mon.getUTCDate() + 6);
+    function dd(x) { return ('0' + x.getUTCDate()).slice(-2); }
+    function mm(x) { return ('0' + (x.getUTCMonth() + 1)).slice(-2); }
+    if (mon.getUTCMonth() === sun.getUTCMonth()) {
+      return dd(mon) + '.–' + dd(sun) + '.' + mm(sun) + '.';
+    }
+    return dd(mon) + '.' + mm(mon) + '.–' + dd(sun) + '.' + mm(sun) + '.';
+  }
 
   /* Period-State: was die /guv-Seite gerade abfragt */
   var _guvQuery = (function () {
-    var now = new Date();
+    var now = new Date(), iso = currentIsoWeek();
     return {
       mode: 'month', month: currentYM(), year: now.getFullYear(),
-      quarter: Math.floor(now.getMonth() / 3) + 1, from: currentYM(), to: currentYM(),
+      quarter: Math.floor(now.getMonth() / 3) + 1,
+      week: iso.week, weekYear: iso.year,
+      from: todayYmd(), to: todayYmd(), /* eigener Zeitraum: taggenau */
       sort: 'revenue_gross', order: 'desc', limit: 10, filter: '', machines: [],
     };
   })();
@@ -1534,7 +1578,8 @@
   /* Zeitraum-Parameter (ohne den Maschinen-Filter) – von Daten- und Export-URL geteilt */
   function guvPeriodParams(q) {
     var p = ['mode=' + encodeURIComponent(q.mode)];
-    if (q.mode === 'quarter')      { p.push('year=' + encodeURIComponent(q.year), 'quarter=' + encodeURIComponent(q.quarter)); }
+    if (q.mode === 'week')         { p.push('year=' + encodeURIComponent(q.weekYear), 'week=' + encodeURIComponent(q.week)); }
+    else if (q.mode === 'quarter') { p.push('year=' + encodeURIComponent(q.year), 'quarter=' + encodeURIComponent(q.quarter)); }
     else if (q.mode === 'year')    { p.push('year=' + encodeURIComponent(q.year)); }
     else if (q.mode === 'custom')  { p.push('from=' + encodeURIComponent(q.from), 'to=' + encodeURIComponent(q.to)); }
     else                           { p.push('from=' + encodeURIComponent(q.month), 'to=' + encodeURIComponent(q.month)); }
@@ -1672,23 +1717,39 @@
     var now = new Date(), years = [];
     for (var y = now.getFullYear(); y >= now.getFullYear() - 4; y--) { years.push(y); }
     var yearOpts = years.map(function (yy) { return '<option value="' + yy + '"' + (Number(q.year) === yy ? ' selected' : '') + '>' + yy + '</option>'; }).join('');
+    var weekYearOpts = years.map(function (yy) { return '<option value="' + yy + '"' + (Number(q.weekYear) === yy ? ' selected' : '') + '>' + yy + '</option>'; }).join('');
     var qOpts = [1, 2, 3, 4].map(function (n) { return '<option value="' + n + '"' + (Number(q.quarter) === n ? ' selected' : '') + '>Q' + n + '</option>'; }).join('');
     function field(name, visible, inner) {
       return '<label class="v3-guv-field' + (visible ? '' : ' is-hidden') + '" data-field="' + name + '">' + inner + '</label>';
     }
     return '<div class="v3-guv-period v3-card" role="group" aria-label="Zeitraum wählen">' +
       '<div class="v3-guv-period__seg" role="tablist">' +
-        btn('month', 'Monat') + btn('quarter', 'Quartal') + btn('year', 'Jahr') + btn('custom', 'Eigener') +
+        btn('week', 'Woche') + btn('month', 'Monat') + btn('quarter', 'Quartal') + btn('year', 'Jahr') + btn('custom', 'Eigener') +
       '</div>' +
       '<div class="v3-guv-period__fields">' +
         field('month',   q.mode === 'month',   '<span>Monat</span><input type="month" data-guv-month value="' + esc(q.month) + '">') +
+        field('week',    q.mode === 'week',    '<span>KW</span><span class="v3-guv-weekpick">' +
+          '<select class="v3-guv-weekyear" data-guv-week-year aria-label="Jahr der Kalenderwoche">' + weekYearOpts + '</select>' +
+          '<select class="v3-guv-weeksel" data-guv-week aria-label="Kalenderwoche">' + guvWeekOptions(q.weekYear, q.week) + '</select>' +
+        '</span>') +
         field('quarter', q.mode === 'quarter', '<span>Quartal</span><select data-guv-quarter>' + qOpts + '</select>') +
         field('year',    q.mode === 'quarter' || q.mode === 'year', '<span>Jahr</span><select data-guv-year>' + yearOpts + '</select>') +
-        field('from',    q.mode === 'custom',  '<span>Von</span><input type="month" data-guv-from value="' + esc(q.from) + '">') +
-        field('to',      q.mode === 'custom',  '<span>Bis</span><input type="month" data-guv-to value="' + esc(q.to) + '">') +
+        field('from',    q.mode === 'custom',  '<span>Von</span><input type="date" data-guv-from value="' + esc(q.from) + '">') +
+        field('to',      q.mode === 'custom',  '<span>Bis</span><input type="date" data-guv-to value="' + esc(q.to) + '">') +
       '</div>' +
       '<div class="v3-guv-period__filter" data-guv-filter-wrap>' + guvFilterControl(q) + '</div>' +
     '</div>';
+  }
+
+  /* <option>-Liste aller KW eines Jahres; die gewählte (Default: aktuelle) Woche
+     ist selektiert, sodass das native Dropdown beim Öffnen direkt dorthin scrollt. */
+  function guvWeekOptions(year, selectedWeek) {
+    var yr = Number(year), n = isoWeeksInYear(yr), out = '';
+    for (var w = 1; w <= n; w++) {
+      out += '<option value="' + w + '"' + (Number(selectedWeek) === w ? ' selected' : '') + '>' +
+        'KW ' + (w < 10 ? '0' : '') + w + ' · ' + weekRangeLabel(yr, w) + '</option>';
+    }
+    return out;
   }
 
   /* Standort-/Automaten-Mehrfachauswahl (Chips + Dropdown mit Checkboxen).
@@ -1758,8 +1819,24 @@
     data = data || {};
     var totals = data.totals || {};
     var prov = data.provisional || { hasProvisional: false };
-    var withProv = data.totalsWithProvisional || { revenue_gross: totals.revenue_gross, qty: totals.qty };
-    var marge = Number(totals.revenue_gross) > 0 ? (totals.gross_profit / totals.revenue_gross) * 100 : 0;
+    var withProv = data.totalsWithProvisional || totals;
+    var hasProv = !!prov.hasProvisional;
+    // GuV/Marge nur dann „inkl. heute", wenn der Live-EK (FIFO) zugeordnet werden
+    // konnte; sonst bliebe die Marge eine stille Falschangabe.
+    var withCost = hasProv && prov.hasCost;
+
+    var umsatzVal = hasProv ? withProv.revenue_gross : totals.revenue_gross;
+    var stueckVal = hasProv ? withProv.qty : totals.qty;
+    var guvVal    = withCost ? withProv.gross_profit : totals.gross_profit;
+    var margeRev  = withCost ? withProv.revenue_gross : totals.revenue_gross;
+    var marge     = Number(margeRev) > 0 ? (guvVal / margeRev) * 100 : 0;
+
+    // EK live zuordenbar -> echte „inkl. heute"-Zahl (nicht mehr „vorläufig").
+    var tag = withCost ? 'inkl. heute' : 'inkl. heute (vorläufig)';
+    var umsatzHint = hasProv ? tag + ': +' + fmtEuro(prov.revenueGross) + ' €' : '';
+    var stueckHint = hasProv ? tag + ': +' + fmtInt(prov.qty) : '';
+    var guvHint    = withCost ? 'inkl. heute: +' + fmtEuro(prov.grossProfit) + ' €' : '';
+
     function kpi(label, value, unit, hint) {
       return '<div class="v3-cockpit-kpi">' +
         '<span class="v3-cockpit-kpi__label">' + label + '</span>' +
@@ -1767,25 +1844,136 @@
         (hint ? '<span class="v3-guv-kpi__prov">' + hint + '</span>' : '') +
       '</div>';
     }
-    var umsatzVal = prov.hasProvisional ? withProv.revenue_gross : totals.revenue_gross;
-    var stueckVal = prov.hasProvisional ? withProv.qty : totals.qty;
-    var umsatzHint = prov.hasProvisional ? 'inkl. heute (vorläufig): +' + fmtEuro(prov.revenueGross) + ' €' : '';
-    var stueckHint = prov.hasProvisional ? 'inkl. heute (vorläufig): +' + fmtInt(prov.qty) : '';
     return '<div class="v3-cockpit-kpis v3-guv-kpis">' +
       kpi('Umsatz (brutto)', fmtEuro(umsatzVal), 'EUR', umsatzHint) +
-      kpi('GuV (brutto)', fmtEuro(totals.gross_profit), 'EUR', '') +
+      kpi('GuV (brutto)', fmtEuro(guvVal), 'EUR', guvHint) +
       kpi('Marge', fmtPct(marge), '', '') +
       kpi('Stück', fmtInt(stueckVal), '', stueckHint) +
     '</div>';
   }
 
-  /* Drei Diagramme über die Zeit. Auf dem Desktop ein 3-Spalten-Raster, auf
-     dem Handy ein horizontales Snap-Karussell mit Punkt-Indikatoren. */
-  function guvChartsPanel(series) {
+  /* Alle Tagesschlüssel ('YYYY-MM-DD') des Zeitraums – die X-Achse ist damit
+     vorgegeben (z. B. alle Tage des Monats), nicht nur die Tage mit Verkäufen. */
+  function guvPeriodDays(period) {
+    if (!period || !period.from || !period.to) { return []; }
+    var from = String(period.from), to = String(period.to);
+    if (from.length === 7) { // 'YYYY-MM' (Einzelmonat) -> alle Tage des Monats
+      var pp = from.split('-'), y = +pp[0], mo = +pp[1];
+      var n = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+      var out = [];
+      for (var d = 1; d <= n; d++) { out.push(from + '-' + (d < 10 ? '0' : '') + d); }
+      return out;
+    }
+    var arr = [], cur = new Date(from + 'T00:00:00Z'), end = new Date(to + 'T00:00:00Z');
+    while (cur <= end && arr.length < 400) {
+      arr.push(cur.toISOString().slice(0, 10));
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    return arr;
+  }
+
+  /* Runde Obergrenze für die Y-Achse, damit die Gitterlinien glatte Werte tragen
+     (z. B. 31 -> 40, Schritte 0/10/20/30/40). */
+  function guvNiceMax(v) {
+    if (!(v > 0)) { return 1; }
+    var rawStep = v / 4;
+    var p = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    var n = rawStep / p;
+    var step = (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
+    return step * 4;
+  }
+
+  /* Balkendiagramm über den vorgegebenen Tages-Zeitraum. Sinnvoll für Tages-
+     granularität (Monat/Woche/eigener Zeitraum) – auch ein einzelner Tag ist als
+     Balken klar lesbar (statt sinnlosem Ein-Punkt-Linienchart). Y-Achse mit
+     runden Gitterlinien, jeder Balken mit Hover-Tooltip (Datum + exakter Wert). */
+  function renderBarChartSvg(series, valueKey, opts, days) {
+    opts = opts || {};
+    var byDay = {};
+    (series || []).forEach(function (d) { byDay[d.month] = Number(d[valueKey]) || 0; });
+    var keys = (days && days.length) ? days : (series || []).map(function (d) { return d.month; });
+    if (keys.length === 0) { return '<p class="v3-guv-chart__empty">Keine Daten im Zeitraum</p>'; }
+
+    var W = 340, H = 152, padL = 42, padR = 12, padT = 12, padB = 24;
+    var innerW = W - padL - padR, innerH = H - padT - padB, base = H - padB;
+    var isPct = /pct/.test(valueKey);
+    var fmt = opts.fmt || fmtEuro;
+    var color = opts.color || 'var(--brand)';
+
+    var dataMax = keys.reduce(function (m, k) { return Math.max(m, byDay[k] || 0); }, 0);
+    var maxY = isPct ? Math.max(100, guvNiceMax(dataMax)) : guvNiceMax(dataMax);
+    var ticks = isPct
+      ? [0, 20, 40, 60, 80, 100].filter(function (t) { return t <= maxY; })
+      : [0, 0.25, 0.5, 0.75, 1].map(function (f) { return Math.round(maxY * f); });
+    if (ticks[ticks.length - 1] < maxY) { ticks.push(maxY); }
+    var yOf = function (v) { return base - (maxY > 0 ? (v / maxY) * innerH : 0); };
+    var axisFmt = function (v) { return isPct ? (v + ' %') : Math.round(v).toLocaleString('de-DE'); };
+
+    var grid = ticks.map(function (v) {
+      var y = Math.round(yOf(v) * 100) / 100;
+      return '<line class="v3-guv-grid" x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '"/>' +
+        '<text class="v3-guv-axisy" x="' + (padL - 6) + '" y="' + (y + 3) + '" text-anchor="end">' + esc(axisFmt(v)) + '</text>';
+    }).join('');
+
+    var slot = innerW / keys.length;
+    var barW = Math.min(46, Math.max(3, slot * 0.62));
+    var n = keys.length;
+    var step = n <= 10 ? 1 : Math.ceil(n / 8);
+
+    var bars = keys.map(function (k, i) {
+      var v = byDay[k] || 0;
+      var cx = padL + slot * (i + 0.5);
+      var x = cx - barW / 2;
+      var h = Math.max(0, base - yOf(v));
+      var y = base - h;
+      var txt = bucketLabel(k, true) + ' · ' + fmt(v);
+      var tw = Math.max(48, txt.length * 6.4 + 16);
+      var tx = Math.min(W - tw / 2 - 2, Math.max(tw / 2 + 2, cx));
+      var ty = Math.max(24, y);
+      return '<g class="v3-guv-pt v3-guv-barg">' +
+        '<rect class="v3-guv-pt__hit" x="' + (cx - slot / 2) + '" y="' + padT + '" width="' + slot + '" height="' + (base - padT) + '"/>' +
+        '<rect class="v3-guv-bar" x="' + x + '" y="' + y + '" width="' + barW + '" height="' + h + '" rx="' + Math.min(3, barW / 2) + '" style="fill:' + color + '"/>' +
+        '<g class="v3-guv-pt__tip" transform="translate(' + tx + ',' + ty + ')">' +
+          '<rect x="' + (-tw / 2) + '" y="-30" width="' + tw + '" height="20" rx="6"/>' +
+          '<text x="0" y="-16" text-anchor="middle">' + esc(txt) + '</text>' +
+        '</g>' +
+        '<title>' + esc(txt) + '</title>' +
+      '</g>';
+    }).join('');
+
+    // Jeden step-ten Tag beschriften; das letzte Label nur, wenn es nicht direkt
+    // an einem schon beschrifteten klebt (sonst Überlappung „29./30.").
+    var lastShown = n - 1;
+    while (lastShown > 0 && lastShown % step !== 0) { lastShown--; }
+    var axis = keys.map(function (k, i) {
+      var show = (i % step === 0) || (i === n - 1 && (n - 1 - lastShown) >= step);
+      if (!show) { return ''; }
+      return '<text class="v3-guv-axis" x="' + (padL + slot * (i + 0.5)) + '" y="' + (H - 6) + '" text-anchor="middle">' + esc(bucketLabel(k)) + '</text>';
+    }).join('');
+
+    return '<svg class="v3-guv-chartsvg" viewBox="0 0 ' + W + ' ' + H + '" role="img" ' +
+        'aria-label="' + esc(opts.label || valueKey) + '" style="width:100%;height:auto;display:block;overflow:visible">' +
+        grid + '<line class="v3-guv-baseline" x1="' + padL + '" y1="' + base + '" x2="' + (W - padR) + '" y2="' + base + '"/>' +
+        bars + axis +
+      '</svg>';
+  }
+
+  /* Drei Diagramme über die Zeit. Tagesgranularität -> Balken über den ganzen
+     Zeitraum (X-Achse = Tage, vorgegeben); Mehrmonatsansicht -> Linien-/Flächen-
+     Trend. Auf dem Desktop 3-Spalten-Raster, auf dem Handy Snap-Karussell. */
+  function guvChartsPanel(data) {
+    var series = (data && data.series) || [];
+    var isDay = (data && data.granularity) === 'day';
+    var days = isDay ? guvPeriodDays(data && data.period) : null;
+    function chart(valueKey, color, fmt, id, label) {
+      return isDay
+        ? renderBarChartSvg(series, valueKey, { label: label, color: color, fmt: fmt, id: id }, days)
+        : renderLineChartSvg(series, valueKey, { label: label, color: color, fmt: fmt, id: id });
+    }
     function card(label, valueKey, color, fmt, id) {
       return '<section class="v3-guv-chart v3-card" aria-label="' + label + '">' +
         '<p class="v3-guv-chart__title">' + label + '</p>' +
-        renderLineChartSvg(series, valueKey, { label: label, color: color, fmt: fmt, id: id }) +
+        chart(valueKey, color, fmt, id, label) +
       '</section>';
     }
     var cards = [
@@ -1813,6 +2001,15 @@
     if (q.limit === 'all') { return rows; }
     return rows.slice(0, Number(q.limit) || 10);
   }
+  /* Marge-Zelle: bei fehlendem EK (Kosten ~0 trotz Umsatz) ehrlich „–" statt
+     einer unplausiblen 100-%-Marge. */
+  function guvMargeCell(r) {
+    var cost = (Number(r.revenue_gross) || 0) - (Number(r.gross_profit) || 0);
+    if (Number(r.revenue_gross) > 0 && cost <= 0.005) {
+      return '<td class="v3-guv-table__num v3-guv-table__na" title="Einkaufspreis fehlt – Marge nicht berechenbar">–</td>';
+    }
+    return '<td class="v3-guv-table__num">' + fmtPct(r.margin_gross_pct) + '</td>';
+  }
   function guvRowsHtml(rows) {
     if (!rows.length) { return '<tr><td colspan="5" class="v3-guv-table__empty">Keine Treffer</td></tr>'; }
     return rows.map(function (r) {
@@ -1820,7 +2017,7 @@
         '<td class="v3-guv-table__name">' + esc(r.product_name) + '</td>' +
         '<td class="v3-guv-table__num">' + fmtEuro(r.revenue_gross) + '</td>' +
         '<td class="v3-guv-table__num">' + fmtEuro(r.gross_profit) + '</td>' +
-        '<td class="v3-guv-table__num">' + fmtPct(r.margin_gross_pct) + '</td>' +
+        guvMargeCell(r) +
         '<td class="v3-guv-table__num">' + fmtInt(r.qty) + '</td>' +
       '</tr>';
     }).join('');
@@ -1864,11 +2061,23 @@
     '</section>';
   }
 
+  /* Tages-Label inkl. Jahr für taggenaue Zeiträume: '3. Jun 26' */
+  function dayLabelYear(ymd) {
+    var pp = String(ymd || '').split('-');
+    if (pp.length < 3) { return monthLabel(ymd); }
+    return parseInt(pp[2], 10) + '. ' + (GUV_MON[parseInt(pp[1], 10) - 1] || '') + ' ' + pp[0].slice(2);
+  }
+  /* Lesbares Label einer Periode (monats- oder taggenau, erkannt an der Länge) */
+  function periodLabel(p) {
+    if (!p || !p.from || !p.to) { return ''; }
+    var isDay = String(p.from).length > 7;
+    var fmt = isDay ? dayLabelYear : monthLabel;
+    return p.from === p.to ? fmt(p.from) : fmt(p.from) + ' – ' + fmt(p.to);
+  }
   /* Sichtbares Label des tatsächlich geladenen Zeitraums (Feedback nach Wechsel) */
   function guvRangeCaption(data) {
-    var p = (data && data.period) || {};
-    if (!p.from || !p.to) { return ''; }
-    var label = p.from === p.to ? monthLabel(p.from) : monthLabel(p.from) + ' – ' + monthLabel(p.to);
+    var label = periodLabel(data && data.period);
+    if (!label) { return ''; }
     return '<p class="v3-guv-range">Zeitraum: <strong>' + esc(label) + '</strong></p>';
   }
 
@@ -1879,7 +2088,7 @@
       return guvRangeCaption(data) + guvKpiStrip(data) +
         renderState('empty', { message: 'Für den gewählten Zeitraum liegen keine Umsätze vor.' });
     }
-    return guvRangeCaption(data) + guvKpiStrip(data) + guvChartsPanel(series) + guvTable(byProduct, q);
+    return guvRangeCaption(data) + guvKpiStrip(data) + guvChartsPanel(data) + guvTable(byProduct, q);
   }
 
   /* ---- Live-Umsatz (quasi-live) ---------------------------------------- */
@@ -2049,10 +2258,15 @@
     var data = _guvData || {};
     var rows = guvTopProducts(data.byProduct || []).sort(function (a, b) { return b.revenue_gross - a.revenue_gross; });
     var totals = data.totals || {};
-    var period = data.period || {};
-    var range = (!period.from || !period.to) ? '–'
-      : (period.from === period.to ? monthLabel(period.from) : monthLabel(period.from) + ' – ' + monthLabel(period.to));
-    var marge = Number(totals.revenue_gross) > 0 ? (totals.gross_profit / totals.revenue_gross) * 100 : 0;
+    var prov = data.provisional || { hasProvisional: false };
+    var withProv = data.totalsWithProvisional || totals;
+    var withCost = prov.hasProvisional && prov.hasCost;
+    // Summenzeile/KPIs spiegeln die Bildschirm-Anzeige „inkl. heute" wider.
+    var sumRev = prov.hasProvisional ? withProv.revenue_gross : totals.revenue_gross;
+    var sumQty = prov.hasProvisional ? withProv.qty : totals.qty;
+    var sumGuv = withCost ? withProv.gross_profit : totals.gross_profit;
+    var range = periodLabel(data.period) || '–';
+    var marge = Number(sumRev) > 0 ? (sumGuv / sumRev) * 100 : 0;
     var today = new Date().toLocaleDateString('de-DE');
 
     var rowsHtml = rows.map(function (r) {
@@ -2063,10 +2277,10 @@
         '<td class="n">' + fmtInt(r.qty) + '</td></tr>';
     }).join('') || '<tr><td colspan="5" class="empty">Keine Daten im Zeitraum</td></tr>';
     var sumRow = '<tr class="sum"><td>Summe</td>' +
-      '<td class="n">' + fmtEuro(totals.revenue_gross) + '</td>' +
-      '<td class="n">' + fmtEuro(totals.gross_profit) + '</td>' +
+      '<td class="n">' + fmtEuro(sumRev) + '</td>' +
+      '<td class="n">' + fmtEuro(sumGuv) + '</td>' +
       '<td class="n">' + fmtPct(marge) + '</td>' +
-      '<td class="n">' + fmtInt(totals.qty) + '</td></tr>';
+      '<td class="n">' + fmtInt(sumQty) + '</td></tr>';
 
     var win = window.open('', '_blank');
     if (!win) { return; }
@@ -2088,10 +2302,10 @@
       '<h1>GuV-Bericht</h1>' +
       '<p class="meta">Zeitraum: <b>' + esc(range) + '</b><br>Automat: <b>' + esc(guvFilterSummaryText()) + '</b><br>Erstellt am ' + esc(today) + '</p>' +
       '<div class="kpis">' +
-        '<div class="kpi">Umsatz (brutto)<b>' + fmtEuro(totals.revenue_gross) + ' €</b></div>' +
-        '<div class="kpi">GuV (brutto)<b>' + fmtEuro(totals.gross_profit) + ' €</b></div>' +
+        '<div class="kpi">Umsatz (brutto)<b>' + fmtEuro(sumRev) + ' €</b></div>' +
+        '<div class="kpi">GuV (brutto)<b>' + fmtEuro(sumGuv) + ' €</b></div>' +
         '<div class="kpi">Marge<b>' + fmtPct(marge) + '</b></div>' +
-        '<div class="kpi">Stück<b>' + fmtInt(totals.qty) + '</b></div>' +
+        '<div class="kpi">Stück<b>' + fmtInt(sumQty) + '</b></div>' +
       '</div>' +
       '<table><thead><tr><th>Produkt</th><th class="n">Umsatz brutto</th><th class="n">GuV brutto</th><th class="n">Marge</th><th class="n">Stück</th></tr></thead>' +
       '<tbody>' + rowsHtml + sumRow + '</tbody></table>' +
@@ -2109,6 +2323,7 @@
     function fieldVisibility() {
       var show = {
         month:   _guvQuery.mode === 'month',
+        week:    _guvQuery.mode === 'week',
         quarter: _guvQuery.mode === 'quarter',
         year:    _guvQuery.mode === 'quarter' || _guvQuery.mode === 'year',
         from:    _guvQuery.mode === 'custom',
@@ -2300,8 +2515,18 @@
     onChange('[data-guv-month]',   function (e) { _guvQuery.month   = e.target.value; reload(); });
     onChange('[data-guv-quarter]', function (e) { _guvQuery.quarter = e.target.value; reload(); });
     onChange('[data-guv-year]',    function (e) { _guvQuery.year    = e.target.value; reload(); });
+    onChange('[data-guv-week]',    function (e) { _guvQuery.week    = parseInt(e.target.value, 10); reload(); });
     onChange('[data-guv-from]',    function (e) { _guvQuery.from    = e.target.value; reload(); });
     onChange('[data-guv-to]',      function (e) { _guvQuery.to      = e.target.value; reload(); });
+    // Jahr der KW: Wochenliste neu aufbauen (Wochenzahl auf 52/53 begrenzen).
+    onChange('[data-guv-week-year]', function (e) {
+      _guvQuery.weekYear = parseInt(e.target.value, 10);
+      var maxW = isoWeeksInYear(_guvQuery.weekYear);
+      if (_guvQuery.week > maxW) { _guvQuery.week = maxW; }
+      var sel = root.querySelector('[data-guv-week]');
+      if (sel) { sel.innerHTML = guvWeekOptions(_guvQuery.weekYear, _guvQuery.week); }
+      reload();
+    });
 
     loadGuvScope().then(renderFilter);
     bindBody();

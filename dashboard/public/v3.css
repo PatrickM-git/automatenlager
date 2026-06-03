@@ -1616,8 +1616,9 @@ a.v3-chip:focus-visible {
   color: var(--brand-ink);
   box-shadow: 0 4px 12px -6px var(--brand);
 }
-.v3-guv-period__fields { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; }
-.v3-guv-field { display: inline-flex; flex-direction: column; gap: 4px; }
+.v3-guv-period__fields { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+/* Label inline neben dem Control -> Control liegt auf einer Linie mit den Tabs. */
+.v3-guv-field { display: inline-flex; flex-direction: row; align-items: center; gap: 9px; }
 .v3-guv-field.is-hidden { display: none; }
 .v3-guv-field > span {
   font-size: 11px;
@@ -1625,7 +1626,12 @@ a.v3-chip:focus-visible {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--ink-faint);
+  white-space: nowrap;
 }
+/* KW-Auswahl: Jahr + scrollbares Wochen-Dropdown nebeneinander */
+.v3-guv-weekpick { display: inline-flex; align-items: center; gap: 6px; }
+.v3-guv-weeksel { min-width: 156px; }
+.v3-guv-weekyear { min-width: 74px; }
 .v3-guv-field input,
 .v3-guv-field select,
 .v3-filter-select {
@@ -1691,6 +1697,10 @@ a.v3-chip:focus-visible {
 .v3-guv-axis { font-family: var(--font-body); font-size: 9.5px; fill: var(--ink-faint); }
 .v3-guv-axisy { font-family: var(--font-body); font-size: 9px; fill: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .v3-guv-grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 3; }
+/* Balkendiagramm (Tagesansicht) */
+.v3-guv-baseline { stroke: var(--line-strong); stroke-width: 1; }
+.v3-guv-bar { transition: opacity 0.15s var(--ease); }
+.v3-guv-barg:hover .v3-guv-bar { opacity: 0.8; }
 .v3-guv-chartsvg { margin-top: 2px; }
 
 /* ---- Diagramm-Karussell (Handy) --------------------------------------- */
@@ -1752,6 +1762,7 @@ a.v3-chip:focus-visible {
   border-bottom: 1.5px solid var(--line-strong);
 }
 .v3-guv-table__num { text-align: right; font-variant-numeric: tabular-nums; }
+.v3-guv-table__na { color: var(--ink-faint); cursor: help; }
 /* Zahlen-Kopfzellen ebenfalls rechtsbündig (sonst Versatz zu den Datenzellen) –
    überschreibt die linksbündige Default-Regel für thead th per höherer Spezifität */
 .v3-guv-table thead th.v3-guv-table__num { text-align: right; }
@@ -1783,14 +1794,35 @@ a.v3-chip:focus-visible {
 .v3-guv-sort__arr { font-size: 9px; }
 
 /* ---- Standort-/Automaten-Filter --------------------------------------- */
+/* Automaten-Filter steht konsistent in einer eigenen Zeile unter Tabs+Feldern
+   (dezente Trennlinie oben) – in allen Modi (Monat/Woche/Eigener …) gleich,
+   damit nichts je nach Feldbreite unruhig umbricht. Die obere Zeile (Tabs +
+   aktives Feld) bleibt sauber auf einer Linie ausgerichtet. */
 .v3-guv-period__filter {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  width: 100%;
   padding-top: 12px;
-  margin-top: 2px;
   border-top: 1px solid var(--line);
+}
+/* Handy: Tabs füllen die Karte gleichmäßig, Felder spannen über die volle
+   Breite (Label links, Control bündig bis zum rechten Rand) – kein rechtslastiges
+   Überstehen mehr. */
+@media (max-width: 759px) {
+  .v3-guv-period { gap: 12px; padding: 12px 14px; }
+  .v3-guv-period__seg { width: 100%; }
+  .v3-guv-period__btn { flex: 1 1 0; padding: 8px 2px; font-size: 13px; text-align: center; }
+  .v3-guv-period__fields { width: 100%; }
+  .v3-guv-field { width: 100%; }
+  .v3-guv-field > span { min-width: 62px; }
+  .v3-guv-field > input,
+  .v3-guv-field > select,
+  .v3-guv-weekpick { flex: 1 1 auto; }
+  .v3-guv-weeksel { flex: 1 1 auto; min-width: 0; }
+  .v3-guv-filter,
+  .v3-guv-filter__summary { flex: 1 1 auto; }
 }
 .v3-guv-filter__label {
   font-size: 12px;
