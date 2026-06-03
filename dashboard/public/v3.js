@@ -1979,33 +1979,162 @@
       '</svg>';
   }
 
-  /* Drei Diagramme über die Zeit. Tagesgranularität -> Balken über den ganzen
-     Zeitraum (X-Achse = Tage, vorgegeben); Mehrmonatsansicht -> Linien-/Flächen-
-     Trend. Auf dem Desktop 3-Spalten-Raster, auf dem Handy Snap-Karussell. */
+  /* Abgerundete Balken-Oberkante (nur oben gerundet) als SVG-Pfad. */
+  function roundedTopBar(x, y, w, h, r) {
+    if (h <= 0) { return 'M' + x + ' ' + y + ' h' + w + ' h' + (-w) + ' Z'; }
+    r = Math.min(r, h, w / 2);
+    return 'M' + x + ' ' + (y + h) +
+      ' L' + x + ' ' + (y + r) +
+      ' Q' + x + ' ' + y + ' ' + (x + r) + ' ' + y +
+      ' L' + (x + w - r) + ' ' + y +
+      ' Q' + (x + w) + ' ' + y + ' ' + (x + w) + ' ' + (y + r) +
+      ' L' + (x + w) + ' ' + (y + h) + ' Z';
+  }
+
+  /* Spiegelt lib/guv-chart.js buildStackedBars: je Periode Umsatz = Wareneinsatz
+     (unten) + Gewinn (oben), Gewinn auf [0,total] gedeckelt. */
+  function guvStackedBars(series) {
+    return (series || []).map(function (d) {
+      var total = Number(d.revenue_gross) || 0;
+      var raw = Number(d.gross_profit) || 0;
+      var profit = Math.max(0, Math.min(raw, total));
+      return { month: d.month, total: total, profit: profit, cost: Math.max(0, total - profit), margin: Number(d.margin_gross_pct) || 0 };
+    });
+  }
+
+  /* Kombi-Chart (Monats-/Jahresvergleich): gestapelte Balken (Wareneinsatz +
+     Gewinn) auf der linken €-Achse + Marge-Overlay-Linie auf der rechten %-Achse.
+     Tooltips liegen in einer ZULETZT gezeichneten Overlay-Ebene (immer oben). */
+  function renderComboChartSvg(series, opts) {
+    opts = opts || {};
+    var rows = guvStackedBars(series);
+    if (!rows.length) { return '<p class="v3-guv-chart__empty">Keine Daten im Zeitraum</p>'; }
+    var W = 340, H = 160, padL = 42, padR = 34, padT = 14, padB = 24;
+    var innerW = W - padL - padR, innerH = H - padT - padB, base = H - padB;
+    var r2 = function (n) { return Math.round(n * 100) / 100; };
+    var maxY = guvNiceMax(rows.reduce(function (m, r) { return Math.max(m, r.total); }, 0));
+    var maxM = Math.max(guvNiceMax(rows.reduce(function (m, r) { return Math.max(m, r.margin); }, 0)), 1);
+    var yOf = function (v) { return base - (maxY > 0 ? (v / maxY) * innerH : 0); };
+    var yM = function (v) { return base - (maxM > 0 ? (v / maxM) * innerH : 0); };
+
+    var grid = [0, 0.25, 0.5, 0.75, 1].map(function (f) {
+      var v = Math.round(maxY * f), y = r2(yOf(v));
+      return '<line class="v3-guv-grid" x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '"/>' +
+        '<text class="v3-guv-axisy" x="' + (padL - 6) + '" y="' + (y + 3) + '" text-anchor="end">' + esc(v.toLocaleString('de-DE')) + '</text>';
+    }).join('');
+    var raxis = [0, 0.5, 1].map(function (f) {
+      var v = Math.round(maxM * f), y = r2(yM(v));
+      return '<text class="v3-guv-axisy v3-guv-axisy--right" x="' + (W - padR + 6) + '" y="' + (y + 3) + '" text-anchor="start">' + v + ' %</text>';
+    }).join('');
+
+    var slot = innerW / rows.length;
+    var barW = Math.min(40, Math.max(3, slot * 0.6));
+    var rTop = Math.min(4, barW / 2);
+    var bars = rows.map(function (r, i) {
+      var cx = padL + slot * (i + 0.5), x = r2(cx - barW / 2);
+      var yCost = r2(yOf(r.cost)), hCost = r2(Math.max(0, base - yCost));
+      var yTop = r2(yOf(r.total)), hProfit = r2(Math.max(0, yCost - yTop));
+      return '<rect class="v3-guv-bar v3-guv-bar--cost" x="' + x + '" y="' + yCost + '" width="' + r2(barW) + '" height="' + hCost + '"/>' +
+        '<path class="v3-guv-bar v3-guv-bar--profit" d="' + roundedTopBar(x, yTop, r2(barW), hProfit, rTop) + '"/>';
+    }).join('');
+
+    // Marge nur für Buckets mit Umsatz (>0) – keine 0-%-Linie über leere Perioden.
+    var pts = [];
+    rows.forEach(function (r, i) { if (r.total > 0) { pts.push({ x: r2(padL + slot * (i + 0.5)), y: r2(yM(r.margin)) }); } });
+    var mline = pts.length ? '<path class="v3-guv-line v3-guv-line--margin" d="M' + pts.map(function (p) { return p.x + ' ' + p.y; }).join(' L') + '" fill="none"/>' : '';
+    var markers = pts.map(function (p) { return '<circle class="v3-guv-pt__dot v3-guv-dot--margin" cx="' + p.x + '" cy="' + p.y + '" r="2.6"/>'; }).join('');
+
+    var n = rows.length, step = n <= 12 ? 1 : Math.ceil(n / 8);
+    // Letztes Label nur zeigen, wenn es nicht direkt am vorigen klebt (sonst „29.30.").
+    var lastShown = n - 1;
+    while (lastShown > 0 && lastShown % step !== 0) { lastShown--; }
+    var axis = rows.map(function (r, i) {
+      var show = (i % step === 0) || (i === n - 1 && (n - 1 - lastShown) >= step);
+      if (!show) { return ''; }
+      return '<text class="v3-guv-axis" x="' + r2(padL + slot * (i + 0.5)) + '" y="' + (H - 6) + '" text-anchor="middle">' + esc(bucketLabel(r.month)) + '</text>';
+    }).join('');
+
+    // Interaktions-Overlay (zuletzt gezeichnet -> immer über Balken/Linie):
+    // je Balken getrennte Treffer für Wareneinsatz, Gewinn und Marge. Hover
+    // (Desktop), Fokus (Tastatur) oder Tipp (Touch, .is-tapped) heben das Segment
+    // hervor und zeigen GENAU einen Wert.
+    function tipNode(cx, anchorY, text) {
+      var tw = Math.max(54, text.length * 6.0 + 16);
+      var tx = Math.min(W - tw / 2 - 2, Math.max(tw / 2 + 2, cx)), ty = Math.max(24, anchorY);
+      return '<g class="v3-guv-pt__tip" transform="translate(' + r2(tx) + ',' + r2(ty) + ')">' +
+        '<rect x="' + r2(-tw / 2) + '" y="-30" width="' + r2(tw) + '" height="20" rx="6"/>' +
+        '<text x="0" y="-16" text-anchor="middle">' + esc(text) + '</text>' +
+      '</g>';
+    }
+    function segNode(text, hit, hl, cx, anchorY, extraClass) {
+      return '<g class="v3-guv-seg' + (extraClass ? ' ' + extraClass : '') + '" data-guv-seg tabindex="0" role="button" aria-label="' + esc(text) + '">' +
+        hit + hl + tipNode(cx, anchorY, text) + '<title>' + esc(text) + '</title>' +
+      '</g>';
+    }
+    var tips = rows.map(function (r, i) {
+      var cx = padL + slot * (i + 0.5), x = r2(cx - barW / 2), bw = r2(barW);
+      var yCost = r2(yOf(r.cost)), hCost = r2(Math.max(0, base - yCost));
+      var yTop = r2(yOf(r.total)), hProfit = r2(Math.max(0, yCost - yTop));
+      var per = bucketLabel(r.month, true);
+      var out = '';
+      if (hCost > 0.5) {
+        out += segNode(per + ' · Wareneinsatz ' + fmtEuro(r.cost) + ' €',
+          '<rect class="v3-guv-seg__hit" x="' + r2(cx - slot / 2) + '" y="' + yCost + '" width="' + r2(slot) + '" height="' + hCost + '"/>',
+          '<rect class="v3-guv-seg__hl" x="' + x + '" y="' + yCost + '" width="' + bw + '" height="' + hCost + '"/>',
+          cx, yCost);
+      }
+      if (hProfit > 0.5) {
+        out += segNode(per + ' · Gewinn ' + fmtEuro(r.profit) + ' €',
+          '<rect class="v3-guv-seg__hit" x="' + r2(cx - slot / 2) + '" y="' + yTop + '" width="' + r2(slot) + '" height="' + hProfit + '"/>',
+          '<path class="v3-guv-seg__hl" d="' + roundedTopBar(x, yTop, bw, hProfit, rTop) + '"/>',
+          cx, yTop);
+      }
+      if (r.total > 0) {
+        var my = r2(yM(r.margin));
+        out += segNode(per + ' · Marge ' + fmtPct(r.margin),
+          '<circle class="v3-guv-seg__hit" cx="' + r2(cx) + '" cy="' + my + '" r="11"/>',
+          '<circle class="v3-guv-seg__hl v3-guv-seg__hl--margin" cx="' + r2(cx) + '" cy="' + my + '" r="5"/>',
+          cx, my, 'v3-guv-seg--margin');
+      }
+      return out;
+    }).join('');
+
+    return '<svg class="v3-guv-chartsvg" viewBox="0 0 ' + W + ' ' + H + '" role="img" ' +
+        'aria-label="' + esc(opts.label || 'Umsatz, Wareneinsatz und Marge') + '" style="width:100%;height:auto;display:block;overflow:visible">' +
+        grid + raxis +
+        '<line class="v3-guv-baseline" x1="' + padL + '" y1="' + base + '" x2="' + (W - padR) + '" y2="' + base + '"/>' +
+        bars + mline + markers + axis + tips +
+      '</svg>';
+  }
+
+  /* Ein kombiniertes Diagramm über ALLE Zeiträume (einheitlicher Stil): gestapelte
+     Balken (Wareneinsatz + Gewinn) + Marge-Overlay-Linie. Nur die X-Achse
+     unterscheidet Tag/Woche vs. Monat/Quartal/Jahr. */
   function guvChartsPanel(data) {
     var series = (data && data.series) || [];
-    var isDay = (data && data.granularity) === 'day';
-    var days = isDay ? guvPeriodDays(data && data.period) : null;
-    function chart(valueKey, color, fmt, id, label) {
-      return isDay
-        ? renderBarChartSvg(series, valueKey, { label: label, color: color, fmt: fmt, id: id }, days)
-        : renderLineChartSvg(series, valueKey, { label: label, color: color, fmt: fmt, id: id });
-    }
-    function card(label, valueKey, color, fmt, id) {
-      return '<section class="v3-guv-chart v3-card" aria-label="' + label + '">' +
-        '<p class="v3-guv-chart__title">' + label + '</p>' +
-        chart(valueKey, color, fmt, id, label) +
-      '</section>';
-    }
+    // Nur vorhandene Buckets zeigen (keine Null-Tage auffüllen) – einheitlich für
+    // alle Granularitäten. Verhindert die irritierende 0-%-Marge-Linie über
+    // verkaufsfreie Tage; gezeigt wird nur, was tatsächlich da ist.
+    var svg = renderComboChartSvg(series, { label: 'Umsatz, Wareneinsatz und Marge je Periode' });
+    var legend = '<div class="v3-guv-legend">' +
+      '<span class="v3-guv-leg v3-guv-leg--cost">Wareneinsatz</span>' +
+      '<span class="v3-guv-leg v3-guv-leg--profit">Gewinn</span>' +
+      '<span class="v3-guv-leg v3-guv-leg--margin">Marge</span>' +
+    '</div>';
+    var hint = '<p class="v3-guv-chart__hint">Segment antippen oder mit der Maus berühren – zeigt den Einzelwert.</p>';
     var cards = [
-      card('Umsatz (brutto)', 'revenue_gross', 'var(--brand)', fmtEuro, 'rev'),
-      card('GuV / Deckungsbeitrag', 'gross_profit', 'var(--ok)', fmtEuro, 'gp'),
-      card('Marge', 'margin_gross_pct', 'var(--warn)', fmtPct, 'mg'),
+      '<section class="v3-guv-chart v3-card" aria-label="Umsatz, Wareneinsatz und Marge">' +
+        '<p class="v3-guv-chart__title">Umsatz, Wareneinsatz &amp; Marge</p>' + legend + svg + hint +
+      '</section>',
     ];
-    var dots = cards.map(function (_, i) {
-      return '<button type="button" class="v3-guv-cardot' + (i === 0 ? ' is-active' : '') +
-        '" data-guv-cardot="' + i + '" aria-label="Diagramm ' + (i + 1) + ' anzeigen"></button>';
-    }).join('');
+    // Punkt-Indikatoren nur bei mehreren Charts (data-guv-cardot bleibt für die
+    // Karussell-Logik im Quelltext erhalten).
+    var dots = cards.length > 1
+      ? cards.map(function (_, i) {
+          return '<button type="button" class="v3-guv-cardot' + (i === 0 ? ' is-active' : '') +
+            '" data-guv-cardot="' + i + '" aria-label="Diagramm ' + (i + 1) + ' anzeigen"></button>';
+        }).join('')
+      : '';
     return '<div class="v3-guv-chartsblock">' +
       '<div class="v3-guv-charts" data-guv-charts>' + cards.join('') + '</div>' +
       '<div class="v3-guv-cardots" data-guv-cardots>' + dots + '</div>' +
@@ -2401,7 +2530,22 @@
       if (limit) { limit.addEventListener('change', function (e) { _guvQuery.limit = e.target.value; redrawTable(); }); }
       bindSortButtons();
       bindCarousel();
+      bindChartTips();
       bindExport();
+    }
+
+    /* Touch/Click: ein Chart-Segment antippen pinnt seinen Tooltip (.is-tapped);
+       erneutes Tippen bzw. Tippen woanders blendet ihn aus. Auf dem Desktop
+       reicht zusätzlich CSS :hover. */
+    function bindChartTips() {
+      var charts = root.querySelector('[data-guv-charts]');
+      if (!charts) { return; }
+      charts.addEventListener('click', function (e) {
+        var seg = e.target.closest ? e.target.closest('[data-guv-seg]') : null;
+        var on = seg && seg.classList.contains('is-tapped');
+        charts.querySelectorAll('.v3-guv-seg.is-tapped').forEach(function (s) { s.classList.remove('is-tapped'); });
+        if (seg && !on) { seg.classList.add('is-tapped'); }
+      });
     }
 
     /* Handy-Karussell: aktiven Punkt beim Wischen markieren, Klick scrollt hin */

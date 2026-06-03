@@ -96,4 +96,18 @@ function buildLineSeries(series, valueKey, opts = {}) {
   return { points, min, max, path, area };
 }
 
-module.exports = { aggregateTopProducts, buildLineSeries };
+// #57 Kombi-Chart: teilt je Periode den Brutto-Umsatz
+// in Wareneinsatz (unten) + Gewinn (oben), sodass beide gestapelt exakt den
+// Umsatz ergeben. Gewinn wird auf [0, total] gedeckelt (Verlust -> 0, der ganze
+// Balken ist dann Kosten; Gewinn > Umsatz -> auf Umsatz begrenzt).
+function buildStackedBars(series, { totalKey = 'revenue_gross', profitKey = 'gross_profit' } = {}) {
+  return (series || []).map((d) => {
+    const total = toNum(d[totalKey]);
+    const rawProfit = toNum(d[profitKey]);
+    const profit = Math.max(0, Math.min(rawProfit, total));
+    const cost = Math.max(0, total - profit);
+    return { month: d.month, total: round2(total), profit: round2(profit), cost: round2(cost) };
+  });
+}
+
+module.exports = { aggregateTopProducts, buildLineSeries, buildStackedBars };
