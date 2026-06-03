@@ -231,31 +231,6 @@ test('AC-HTTP: /api/v2/inventory-mhd returns PG_ERROR when connection fails', as
   assert.equal(body.error.code, 'PG_ERROR');
 });
 
-test('AC-UI: inventory panel exposes location and machine filters without action trigger buttons', () => {
-  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
-
-  assert.match(html, /id="inventoryLocationFilter"/, 'missing location filter');
-  assert.match(html, /id="inventoryMachineFilter"/, 'missing machine filter');
-  assert.match(html, /id="inventoryMhdList"/, 'missing MHD list container');
-  assert.match(html, /id="inventoryLowStockList"/, 'missing low-stock list container');
-  assert.doesNotMatch(html, /api\/v2\/actions\/inventory/, 'inventory panel must not expose mutating action triggers');
-});
-
-test('AC-UI: v2.js fetches /api/v2/inventory-mhd with location and machine query params', () => {
-  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
-
-  assert.match(js, /\/api\/v2\/inventory-mhd/, 'v2.js must fetch inventory-mhd endpoint');
-  assert.match(js, /location=/, 'v2.js must include location param');
-  assert.match(js, /machine=/, 'v2.js must include machine param');
-});
-
-test('AC-UI: mobile inventory uses compact list styling instead of horizontal tables', () => {
-  const css = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.css'), 'utf8');
-
-  assert.match(css, /\.v2-inventory-list/, 'missing compact inventory list style');
-  assert.match(css, /@media\s*\(max-width:\s*820px\)[\s\S]*\.v2-inventory-row/, 'missing mobile inventory row rules');
-});
-
 test('AC-empty-slots: lowStock list contains only slots with current_machine_qty = 0', () => {
   const rows = [
     {

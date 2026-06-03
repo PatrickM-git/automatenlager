@@ -1,5 +1,11 @@
 # Dashboard v2 Cutover-Runbook
 
+> **⚠️ Historisch — v2-Frontend abgeschaltet (Issue #9, 2026-06-03).**
+> v3 ist der produktive Standard. Die Route `/v2` liefert kein eigenes Frontend mehr,
+> sondern leitet dauerhaft (302) auf `/v3` um; `v2.html/js/css` wurden entfernt.
+> Die gemeinsame Backend-API `/api/v2/…` bleibt unverändert und wird von v3 genutzt.
+> Dieses Runbook bleibt als Beleg des damaligen Legacy→v2-Cutovers erhalten.
+
 Dieses Runbook beschreibt den produktiven Cutover vom Legacy-Dashboard auf Dashboard v2.
 Legacy bleibt kurzfristig als Fallback erreichbar, bis die Betriebsstabilität bestätigt ist.
 

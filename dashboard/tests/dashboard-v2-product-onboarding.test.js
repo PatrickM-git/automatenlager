@@ -482,20 +482,3 @@ test('server.js referenziert WF2 (invoice-approval) mit korrektem Workflow-Namen
   assert.ok(serverSrc.includes("id: 'invoice-approval'"), 'WF2 action id invoice-approval muss vorhanden sein');
   assert.ok(serverSrc.includes('WF2 - Smart Product Selection - Rechnungsvorschlaege freigeben'), 'WF2 workflow name pattern muss vorhanden sein');
 });
-
-test('v2.html enthält Onboarding-Drawer mit korrekten Elementen', () => {
-  const fs = require('node:fs');
-  const html = fs.readFileSync(require('path').join(__dirname, '../public/v2.html'), 'utf8');
-  assert.ok(html.includes('id="v2ObBackdrop"'), 'Onboarding Backdrop muss vorhanden sein');
-  assert.ok(html.includes('id="v2ObMarkStartedBtn"'), 'Mark-Started-Button muss vorhanden sein');
-  assert.ok(html.includes('id="v2ObWf2Link"'), 'WF2-Link muss vorhanden sein');
-  assert.ok(html.includes('v2-ob-pipeline'), 'Pipeline-Rail muss vorhanden sein');
-});
-
-test('v2.js enthält ob-start Event-Delegation und openOnboardingDrawer', () => {
-  const fs = require('node:fs');
-  const jsSrc = fs.readFileSync(require('path').join(__dirname, '../public/v2.js'), 'utf8');
-  assert.ok(jsSrc.includes('data-action="ob-start"'), 'ob-start data-action muss in buildCaseItem vorhanden sein');
-  assert.ok(jsSrc.includes("action === 'ob-start'") || jsSrc.includes('[data-action="ob-start"]'), 'ob-start Event-Handler muss vorhanden sein');
-  assert.ok(jsSrc.includes('openOnboardingDrawer'), 'openOnboardingDrawer muss aufgerufen werden');
-});

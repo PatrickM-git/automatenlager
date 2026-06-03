@@ -162,35 +162,6 @@ test('AC-HTTP: /api/v2/overview and /api/v2/monitoring return explicit PG errors
   assert.equal(monitoring.json().error.code, 'PG_ERROR');
 });
 
-test('AC-UI: v2 overview has dedicated containers for priorities and monitoring ampels', () => {
-  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
-
-  assert.match(html, /id="overviewPriorities"/, 'missing overview priorities container');
-  assert.match(html, /id="overviewAmpels"/, 'missing overview ampels container');
-  assert.match(html, /id="monitoringAmpelList"/, 'missing monitoring ampel list container');
-  assert.match(html, /Monitoring-Details/, 'missing explicit monitoring detail affordance');
-  assert.doesNotMatch(html, /Admin-Trigger/, 'default overview must not render admin trigger copy');
-});
-
-test('AC-UI: v2.js fetches overview and monitoring endpoints and handles stale\/error\/empty states', () => {
-  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
-
-  assert.match(js, /\/api\/v2\/overview/, 'v2.js must load overview endpoint');
-  assert.match(js, /\/api\/v2\/monitoring/, 'v2.js must load monitoring endpoint');
-  assert.match(js, /isStale/, 'v2.js must handle stale markers');
-  assert.match(js, /Keine offenen Prioritaeten|Keine Prioritaeten/, 'v2.js must render empty-state copy');
-  assert.match(js, /FEHLER|error/i, 'v2.js must render explicit error state');
-});
-
-test('AC-UI: v2.css enforces first-screen focus and compact ampel layout on desktop\/mobile', () => {
-  const css = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.css'), 'utf8');
-
-  assert.match(css, /\.v2-first-screen/, 'missing first-screen layout class');
-  assert.match(css, /\.v2-first-screen[\s\S]{0,200}align-content\s*:\s*start/, 'first-screen should use align-content: start layout');
-  assert.match(css, /\.v2-ampel-grid/, 'missing compact ampel grid styles');
-  assert.match(css, /@media\s*\(max-width:\s*820px\)[\s\S]*\.v2-ampel-grid/, 'missing mobile ampel layout rules');
-});
-
 // ── Issue #42: Warnungs-Drill-down ───────────────────────────────────
 
 test('AC-WD1: buildWarningDrilldown extracts entity from warning_key and returns null correction_link for informational types', () => {
@@ -265,30 +236,6 @@ test('AC-WD4: server.js passes warnings from monitoring into /api/v2/overview re
   const serverSrc = fs.readFileSync(path.join(process.cwd(), 'server.js'), 'utf8');
 
   assert.match(serverSrc, /monitoring\.warnings/, 'server must include monitoring.warnings in overview response');
-});
-
-test('AC-WD5: v2.html has #warningsDrilldownList container', () => {
-  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
-
-  assert.match(html, /id="warningsDrilldownList"/, 'missing #warningsDrilldownList container');
-});
-
-test('AC-WD6: v2.js renders warning drill-down list and handles correction link', () => {
-  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
-
-  assert.match(js, /renderWarningsDrilldown/, 'v2.js must define renderWarningsDrilldown function');
-  assert.match(js, /warningsDrilldownList/, 'v2.js must reference #warningsDrilldownList container');
-  assert.match(js, /correction_link/, 'v2.js must render correction_link when present');
-  assert.match(js, /Keine offenen Warnungen/, 'v2.js must render empty state');
-});
-
-test('AC-WD7: v2.css defines warning drill-down styles', () => {
-  const css = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.css'), 'utf8');
-
-  assert.match(css, /\.v2-warn-list/, 'missing .v2-warn-list');
-  assert.match(css, /\.v2-warn-item--critical/, 'missing critical severity style');
-  assert.match(css, /\.v2-warn-trigger/, 'missing .v2-warn-trigger');
-  assert.match(css, /\.v2-warn-correction-link/, 'missing .v2-warn-correction-link');
 });
 
 // ── #2: Cockpit-KPIs — „nur leere" Slots + BACKUP_OK aus Warnungs-Zähler ──

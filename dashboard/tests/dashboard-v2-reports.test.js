@@ -316,28 +316,3 @@ test('AC5-HTTP: GET /api/v2/locations response envelope hat ok-Feld', async (t) 
 
 const fs = require('node:fs');
 const path = require('node:path');
-
-test('AC1-UI: v2.css enthält @media print Regel', () => {
-  const css = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.css'), 'utf8');
-  assert.match(css, /@media print/, 'v2.css muss @media print enthalten');
-});
-
-test('AC1-UI: v2.html hat Download-Button für CSV-Export', () => {
-  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
-  assert.match(html, /id="csvExportBtn"/, 'v2.html muss CSV-Export-Button haben');
-});
-
-test('AC1-UI: v2.js ruft /api/v2/reports/export auf', () => {
-  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
-  assert.match(js, /\/api\/v2\/reports\/export/, 'v2.js muss Export-Endpunkt ansprechen');
-});
-
-test('AC1-UI: v2.html hat Standortvergleich-Panel', () => {
-  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
-  assert.match(html, /id="locationsPanel"/, 'v2.html muss Locations-Panel haben');
-});
-
-test('AC1-UI: v2.js holt Daten von /api/v2/locations', () => {
-  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
-  assert.match(js, /\/api\/v2\/locations/, 'v2.js muss Locations-Endpunkt abrufen');
-});

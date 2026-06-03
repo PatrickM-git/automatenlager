@@ -187,33 +187,6 @@ test('AC-HTTP: /api/v2/assortment-slots returns PG_ERROR when connection fails',
   assert.equal(body.error.code, 'PG_ERROR');
 });
 
-test('AC-UI: assortment panel exposes location and machine filters plus slot list containers', () => {
-  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
-
-  assert.match(html, /id="assortmentLocationFilter"/, 'missing location filter');
-  assert.match(html, /id="assortmentMachineFilter"/, 'missing machine filter');
-  assert.match(html, /id="assortmentSlotList"/, 'missing slot list');
-  assert.match(html, /id="assortmentIndicatorLegend"/, 'missing indicator legend');
-  assert.doesNotMatch(html, /api\/v2\/actions\/assortment/, 'assortment panel must not expose mutating action triggers');
-});
-
-test('AC-UI: v2.js fetches /api/v2/assortment-slots with location and machine query params', () => {
-  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
-
-  assert.match(js, /\/api\/v2\/assortment-slots/, 'v2.js must fetch assortment endpoint');
-  assert.match(js, /location=/, 'v2.js must include location param');
-  assert.match(js, /machine=/, 'v2.js must include machine param');
-  assert.match(js, /indicators/, 'v2.js must render indicator data');
-});
-
-test('AC-UI: v2.css defines compact assortment and indicator styles', () => {
-  const css = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.css'), 'utf8');
-
-  assert.match(css, /\.v2-assortment-list/, 'missing assortment list style');
-  assert.match(css, /\.v2-indicator-chip/, 'missing indicator chip style');
-  assert.match(css, /@media\s*\(max-width:\s*820px\)[\s\S]*\.v2-assortment-row/, 'missing mobile assortment row rules');
-});
-
 // ── Drehzahl-/Slow-Mover-Klassifikation (classifyTurnover im Datenpfad) ────────
 // Granularität pro Slot/Automat, quartilbasiert; Ladenhüter = 0 Verkäufe ≥30 Tage.
 
