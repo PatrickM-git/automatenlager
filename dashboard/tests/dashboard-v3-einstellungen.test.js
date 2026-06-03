@@ -63,7 +63,7 @@ test('GET /api/v2/settings/definitions liefert die Slow-Mover-Definitionen', asy
   assert.equal(body.ok, true);
   assert.ok(body.definitions && body.definitions.slowMover, 'definitions.slowMover muss vorhanden sein');
   assert.equal(body.definitions.slowMover.ladenhueterDays, SLOW_MOVER.ladenhueterDays);
-  assert.equal(body.definitions.slowMover.classes.length, 4);
+  assert.equal(body.definitions.slowMover.classes.length, 6);
 });
 
 // ── Frontend: /einstellungen-Seite rendert die Definitionen ───────────────────

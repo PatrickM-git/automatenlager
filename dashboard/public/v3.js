@@ -1110,6 +1110,8 @@
     { key: 'normal',         label: 'Normal',         short: 'Normal'   },
     { key: 'langsam_dreher', label: 'Langsam-Dreher', short: 'Langsam'  },
     { key: 'ladenhueter',    label: 'Ladenhüter',     short: 'Ladenh.'  },
+    { key: 'ek_fehlt',       label: 'EK fehlt',       short: 'EK?'      },
+    { key: 'neu',            label: 'Neu',            short: 'Neu'      },
   ];
   var TURNOVER_LABEL = {};
   var TURNOVER_SHORT = {};

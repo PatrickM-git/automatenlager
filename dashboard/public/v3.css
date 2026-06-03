@@ -1360,6 +1360,9 @@ a.v3-chip:focus-visible {
 .v3-badge--turnover-normal         { background: var(--paper-deep);   color: var(--ink-faint); border-color: var(--line-strong); }
 .v3-badge--turnover-langsam_dreher { background: rgba(180,83,9,.1);   color: var(--warn); border-color: rgba(180,83,9,.22); }
 .v3-badge--turnover-ladenhueter    { background: rgba(185,28,28,.1);  color: var(--crit); border-color: rgba(185,28,28,.22); }
+/* EK fehlt = neutral/grau (keine Bewertung, Lücke sichtbar). Neu = ruhig/blau (Schonfrist). */
+.v3-badge--turnover-ek_fehlt       { background: var(--paper-deep);   color: var(--ink-faint); border-color: var(--line-strong); border-style: dashed; }
+.v3-badge--turnover-neu            { background: rgba(37,99,235,.08);  color: #1d4ed8;     border-color: rgba(37,99,235,.22); }
 
 /* Kompaktes Drehzahl-Badge in der engen Slot-Zelle (/slots) */
 .v3-badge.v3-slot__turnover {
