@@ -256,31 +256,6 @@ test('AC-HTTP: /api/v2/economics response envelope matches v2 contract', async (
 const fs = require('node:fs');
 const path = require('node:path');
 
-test('AC-UI: economics panel exposes sort buttons for revenue_net, db_net, margin_pct, qty', () => {
-  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
-  for (const field of ['revenue_net', 'db_net', 'margin_pct', 'qty']) {
-    assert.match(html, new RegExp(`data-sort="${field}"`), `missing sort button for ${field}`);
-  }
-});
-
-test('AC-UI: economics panel has machine filter input', () => {
-  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
-  assert.match(html, /id="ecoMachineFilter"/, 'missing machine filter input');
-});
-
-test('AC-UI: v2.js fetches /api/v2/economics with sort and machine query params', () => {
-  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
-  assert.match(js, /\/api\/v2\/economics/, 'v2.js must fetch economics endpoint');
-  assert.match(js, /sort=/, 'v2.js must include sort param in URL');
-  assert.match(js, /machine=/, 'v2.js must include machine param in URL');
-});
-
-test('AC-UI: v2.css defines styles for the economics table', () => {
-  const css = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.css'), 'utf8');
-  assert.match(css, /\.v2-kpi-table/, 'v2.css must define .v2-kpi-table');
-  assert.match(css, /\.v2-sort-btn/, 'v2.css must define .v2-sort-btn');
-});
-
 // ── Issue #38: Produktnamen, Zeitfilter, Zeitraum-Label ──────────────────────
 
 test('AC-Name: parseProductRow propagates product_name from DB row', () => {
@@ -372,41 +347,4 @@ test('AC53: bySlot exposes revenue_gross and gross_profit', () => {
   const result = buildEconomicsData({ byProduct: [], bySlot: slotGross, inventoryValue: [] }, {});
   assert.equal(result.bySlot[0].revenue_gross, 85.60);
   assert.equal(result.bySlot[0].gross_profit, 30.00);
-});
-
-test('AC-UI: v2.js renders revenue_gross/gross_profit in economics panel', () => {
-  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
-  assert.match(js, /revenue_gross/, 'v2.js must display revenue_gross');
-  assert.match(js, /gross_profit/, 'v2.js must display gross_profit');
-});
-
-test('AC-UI: v2.html has month selector with id ecoMonthSelect', () => {
-  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
-  assert.match(html, /id="ecoMonthSelect"/, 'missing month selector');
-});
-
-test('AC-UI: v2.html product table header says Produkt not Produkt-ID', () => {
-  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
-  assert.doesNotMatch(html, /Produkt-ID/, 'header must not say Produkt-ID');
-});
-
-test('AC-UI: v2.js URL includes from= and to= params for economics API', () => {
-  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
-  assert.match(js, /from=/, 'v2.js must include from param in URL');
-  assert.match(js, /to=/, 'v2.js must include to param in URL');
-});
-
-test('AC-UI: v2.js renders product_name in product table rows', () => {
-  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
-  assert.match(js, /product_name/, 'v2.js must reference product_name in table rendering');
-});
-
-test('AC-UI: v2.js renders period label in hero strip', () => {
-  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.js'), 'utf8');
-  assert.match(js, /period/, 'v2.js must reference period when rendering hero strip');
-});
-
-test('AC-UI: v2.css defines style for month filter select', () => {
-  const css = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.css'), 'utf8');
-  assert.match(css, /v2-filter-select/, 'v2.css must define .v2-filter-select');
 });

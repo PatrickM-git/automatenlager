@@ -105,34 +105,6 @@ test('AC-COVERAGE: v2 overview covers all legacy business data categories', () =
   assert.ok(['green', 'yellow', 'red'].includes(workflowAmpel.state), 'workflow ampel must have valid state');
 });
 
-test('AC-PANELS: v2.html contains all panels covering legacy dashboard business concepts', () => {
-  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
-
-  assert.match(html, /id="economics"/, 'economics panel (GuV & KPI) must exist');
-  assert.match(html, /id="inventory"/, 'inventory panel (Bestand & MHD) must exist');
-  assert.match(html, /id="monitoring"/, 'monitoring panel must exist');
-  assert.match(html, /id="overview"/, 'overview panel must exist');
-  assert.match(html, /id="assortment"/, 'assortment panel must exist');
-  assert.match(html, /id="onboarding"/, 'onboarding panel must exist');
-  assert.match(html, /id="locationsPanel"/, 'locations panel must exist');
-  assert.match(html, /href="\/"/, 'link back to legacy dashboard must exist');
-});
-
-test('AC-MOBILE: v2.css protects all table panels from horizontal overflow on mobile', () => {
-  const css = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.css'), 'utf8');
-
-  assert.match(
-    css,
-    /\.v2-locations-table\s*\{[^}]*overflow-x:\s*auto/s,
-    'v2-locations-table must have overflow-x:auto for mobile scroll safety',
-  );
-  assert.match(
-    css,
-    /\.v2-kpi-table-wrap\s*\{[^}]*overflow-x:\s*auto/s,
-    'v2-kpi-table-wrap must retain overflow-x:auto (regression guard)',
-  );
-});
-
 test('AC-READONLY: all v2 write endpoints return 403 for guest users', async (t) => {
   const port = await getFreePort();
   const dashboard = await startDashboard(port);

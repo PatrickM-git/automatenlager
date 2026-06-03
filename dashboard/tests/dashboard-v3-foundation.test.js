@@ -119,16 +119,16 @@ test('v3 entry path and deep links serve the v3 shell without touching v2 or leg
   assert.equal(root.status, 302, '/ should redirect to v3');
   assert.equal(root.headers.location, '/v3', '/ redirect target is /v3');
 
-  // Legacy bleibt unter /v1 erreichbar, v2 unter /v2 — beide unverändert.
+  // Legacy bleibt unter /v1 erreichbar.
   const legacy = await request(port, '/v1');
   assert.equal(legacy.status, 200);
   assert.match(legacy.body, /Automatenlager Leitstand/);
   assert.doesNotMatch(legacy.body, /Dashboard v3/);
 
+  // v2-Frontend abgeschaltet (Issue #9): /v2 leitet dauerhaft auf /v3 um.
   const v2 = await request(port, '/v2');
-  assert.equal(v2.status, 200);
-  assert.match(v2.body, /Dashboard v2/);
-  assert.doesNotMatch(v2.body, /Dashboard v3/);
+  assert.equal(v2.status, 302);
+  assert.equal(v2.headers.location, '/v3');
 });
 
 test('v3 static assets are served with correct content types', async (t) => {

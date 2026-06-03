@@ -3411,8 +3411,16 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Root → v3 (Standard seit 2026-06-02). v3 ist die produktive Oberfläche;
-    // das Legacy-v1 bleibt unter /v1 erreichbar, v2 unter /v2.
+    // das Legacy-v1 bleibt unter /v1 erreichbar.
     if (parsed.pathname === '/') {
+      res.writeHead(302, { Location: '/v3' });
+      res.end();
+      return;
+    }
+
+    // v2 abgeschaltet (Issue #9, 2026-06-03): v3 deckt alle v2-Funktionen ab.
+    // Alte /v2-Links/Bookmarks dauerhaft auf v3 umleiten.
+    if (parsed.pathname === '/v2' || parsed.pathname === '/v2/' || parsed.pathname.indexOf('/v2/') === 0) {
       res.writeHead(302, { Location: '/v3' });
       res.end();
       return;
@@ -3426,11 +3434,9 @@ const server = http.createServer(async (req, res) => {
 
     const requestPath = parsed.pathname === '/v1'
       ? '/index.html'
-      : parsed.pathname === '/v2'
-        ? '/v2.html'
-        : isV3DeepLink
-          ? '/v3.html'
-          : parsed.pathname;
+      : isV3DeepLink
+        ? '/v3.html'
+        : parsed.pathname;
     const filePath = path.normalize(path.join(PUBLIC_DIR, requestPath));
     sendFile(res, filePath);
   } catch (error) {

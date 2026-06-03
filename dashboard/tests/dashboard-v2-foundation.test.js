@@ -81,7 +81,7 @@ function startDashboard(port, envOverrides = {}) {
   });
 }
 
-test('Dashboard v2 is reachable under /v2 without replacing the legacy dashboard', async (t) => {
+test('Root leitet auf v3, Legacy bleibt unter /v1, /v2 ist abgeschaltet (302 → /v3)', async (t) => {
   const port = await getFreePort();
   const dashboard = await startDashboard(port);
 
@@ -100,11 +100,9 @@ test('Dashboard v2 is reachable under /v2 without replacing the legacy dashboard
   assert.match(legacy.body, /Automatenlager Leitstand/);
   assert.doesNotMatch(legacy.body, /Dashboard v2/);
 
-  assert.equal(v2.status, 200);
-  assert.match(v2.headers['content-type'], /text\/html/);
-  assert.match(v2.body, /Dashboard v2/);
-  assert.match(v2.body, /Legacy-Dashboard/);
-  assert.match(v2.body, /\/api\/v2\/overview/);
+  // v2-Frontend abgeschaltet (Issue #9): /v2 leitet dauerhaft auf /v3 um.
+  assert.equal(v2.status, 302);
+  assert.equal(v2.headers.location, '/v3');
 });
 
 test('Dashboard v2 read endpoints expose stable PostgreSQL-first contracts', async (t) => {
@@ -199,16 +197,4 @@ test('Dashboard v2 mutating actions respect Admin and Read-Only roles', async (t
   assert.equal(adminBody.ok, false);
   assert.equal(adminBody.viewer.role, 'admin');
   assert.equal(adminBody.error.code, 'V2_ACTION_NOT_IMPLEMENTED');
-});
-
-test('Dashboard v2 shell exposes Faltrix branding and respects reduced motion', () => {
-  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.html'), 'utf8');
-  const css = fs.readFileSync(path.join(process.cwd(), 'public', 'v2.css'), 'utf8');
-
-  assert.match(html, /Faltrix/);
-  assert.match(html, /Dashboard v2/);
-  assert.match(html, /id="v2Status"[^>]*role="status"/);
-  assert.match(html, /id="v2Status"[^>]*aria-live="polite"/);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
-  assert.match(css, /animation:\s*none/);
 });

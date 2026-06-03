@@ -2,6 +2,29 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
+## Stand: 2026-06-03 (WF8 EK-Netto live auf Mini + v2-Frontend abgeschaltet · Issues #51/#9)
+
+Kurze Folge-Session zu zwei Aufräum-Punkten. Beides **live**.
+
+### 1. WF8 EK-Semantik-Fix auf die HP Mini deployt (Issue #51)
+- Der Fix aus PR #55 (`2be7cd1`, `unit_cost` = **netto**) war im Repo, lief aber auf der Mini-WF8 (`gyM9rnvUMfnv4x3G`) noch mit der alten **Brutto**-Logik.
+- Minimal-invasiv deployt: nur die `jsCode` der Node „Code - GuV aggregieren" (gleiche Node-ID `7d53fafe…`, restliche 10-Node-Struktur unangetastet) durch die getestete Repo-Version ersetzt, in-place per `PUT` über die Tailscale-API. WF bleibt aktiv.
+- Live verifiziert: `ekNetto=unit_cost`, `ekBrutto=ekNetto*(1+mwst)`, `warenein=qty*ekNetto`. `cost_of_goods` bleibt wertgleich → **kein guv_daily-Backfill**. Backup: `C:/tmp/wf8_mini_PRE_ek_semantik_backup.json`. Repo == Mini (Drift-Check zufrieden).
+
+### 2. v2-Frontend abgeschaltet (Issue #9)
+- Vorbedingung erfüllt: v3 ist produktiver Standard auf der Mini (Root → 302 → `/v3`).
+- **`/v2`-Route** liefert kein `v2.html` mehr, sondern **302 → `/v3`** (`/v2`, `/v2/`, `/v2/…`); alte Bookmarks bleiben gültig.
+- **Assets gelöscht:** `public/v2.html`, `v2.js`, `v2.css`. Die zwei „v2-Cockpit"-Links in `v3.html` (Sidebar-Fuß + `<noscript>`) entfernt.
+- **`/api/v2/…` bleibt** — das ist die gemeinsame Backend-API, die v3 nutzt (nicht das v2-Frontend).
+- **Tests:** 33 reine v2-UI-Assertions (lasen `v2.html/js/css`) aus 8 Dateien entfernt, alle Backend-/lib-Tests darin behalten; zwei `/v2=200`-Erwartungen (v2-/v3-foundation) auf 302→/v3 umgestellt; neuer Guard `tests/dashboard-v2-retired.test.js` (Assets weg, kein /v2-Link, /v2→302→/v3). Suite **712/712 grün**.
+- Doku: `dashboard/docs/cutover-v2.md` als historisch markiert (Abschaltungs-Banner).
+
+### Offen danach
+- `docs/specs/dashboard-v3-multipage.md` beschreibt v2 weiter als Vorgänger (Spec-Historie, bewusst unverändert).
+- Auth-Konzept-Issues (automatenlager #27–#34 + homelab #57–#59) unverändert offen.
+
+---
+
 ## Stand: 2026-06-03 (GuV-Seite: KW-Auswahl, taggenauer Zeitraum, Live-FIFO-GuV, Balkencharts, fehlende EK sichtbar, Jahr/Quartal-Fix)
 
 Iterative UX-/Korrektheits-Session an der **GuV-Seite (v3, `/guv`)**. Alles **live auf der HP Mini** (`84cdbef`) und über PRs dokumentiert. Vorheriger Stand (SQL-Migration #39/#41/#40/#60, Bestands-Rekonstruktion, Automaten-Verwaltung) siehe `HANDOVER_ARCHIVE/HANDOVER_2026-06-02_sql-migration-automaten.md`.
@@ -37,7 +60,7 @@ Iterative UX-/Korrektheits-Session an der **GuV-Seite (v3, `/guv`)**. Alles **li
 
 ### Offene Punkte / nächste Schritte
 - EK-Datenlücke in `stock_batches` (Sheet→SQL-Sync von `unit_cost_net`): in anderem Chat gefüllt; perspektivisch ein Guard/Validierung, der Chargen ohne EK früh markiert (das GuV-Banner deckt die Anzeige bereits ab).
-- Offene Issues unverändert: #9 v2-Abschaltung, Auth-Konzept-Issues (automatenlager #27–#34 + homelab #57–#59).
+- Offene Issues unverändert: Auth-Konzept-Issues (automatenlager #27–#34 + homelab #57–#59). (#9 v2-Abschaltung inzwischen erledigt, siehe oberster Stand.)
 
 ## Deploy auf die HP Mini (so läuft das Dashboard dort)
 
