@@ -15,7 +15,6 @@ const {
   isoWeekStart,
   isoWeeksInYear,
   fifoProvisionalCostForProduct,
-  latestKnownUnitCost,
   buildEconomicsData,
 } = require('../lib/economics.js');
 
@@ -128,27 +127,23 @@ test('FIFO: ohne Chargen -> Kosten 0, nicht complete', () => {
   assert.equal(r.complete, false);
 });
 
-test('FIFO: Nullkosten-Charge (fehlender EK) nutzt den Fallback-EK statt 0 (keine 100-%-Marge)', () => {
-  // Realfall Snickers: alte Charge geleert (EK 0,48), aktive Frontier ohne EK.
+test('FIFO: Nullkosten-Charge (fehlender EK) -> missingCost=true, KEIN geschätzter Wert', () => {
+  // Realfall Snickers: aktive Frontier-Charge ohne EK (unit_cost_net = 0).
   const batches = [
     { batch_id: 3, initial_qty: 17, remaining_qty: 0, unit_cost_net: '0.4815', received_at: '2026-05-01' },
     { batch_id: 49, initial_qty: 64, remaining_qty: 43, unit_cost_net: '0.0000', received_at: '2026-05-19' },
   ];
-  const fallback = latestKnownUnitCost(batches);
-  assert.equal(fallback, 0.4815);
-  const r = fifoProvisionalCostForProduct(batches, 1, fallback);
-  assert.equal(r.cost, 0.48);     // statt 0
-  assert.equal(r.estimated, true);
-  assert.equal(r.complete, true);
+  const r = fifoProvisionalCostForProduct(batches, 1);
+  assert.equal(r.missingCost, true);
+  assert.equal(r.cost, 0);        // nichts geschätzt – EK fehlt eben
+  assert.equal(r.complete, true); // Menge ist zugeordnet, nur der EK fehlt
 });
 
-test('latestKnownUnitCost: jüngste Charge mit EK>0; 0 wenn keine bekannt', () => {
-  assert.equal(latestKnownUnitCost([
-    { batch_id: 1, unit_cost_net: '1.00', received_at: '2026-04-01' },
-    { batch_id: 2, unit_cost_net: '1.50', received_at: '2026-05-01' },
-    { batch_id: 3, unit_cost_net: '0', received_at: '2026-05-20' },
-  ]), 1.5);
-  assert.equal(latestKnownUnitCost([{ batch_id: 1, unit_cost_net: '0', received_at: '2026-05-01' }]), 0);
+test('FIFO: bekannter EK -> missingCost=false', () => {
+  const batches = [{ batch_id: 1, initial_qty: 10, remaining_qty: 6, unit_cost_net: '1.20', received_at: '2026-05-01' }];
+  const r = fifoProvisionalCostForProduct(batches, 2);
+  assert.equal(r.missingCost, false);
+  assert.equal(r.cost, 2.4);
 });
 
 /* ---- buildEconomicsData: vorläufige GuV/Marge inkl. heute ----------------- */
@@ -243,4 +238,67 @@ test('AC-UI: v3.css stylt die KW-Auswahl und stellt den Filter in eine eigene Ze
   assert.match(css, /\.v3-guv-weekpick/, 'KW-Auswahl-Styling');
   // Automat-Filter: eigene Zeile (volle Breite + Trennlinie), kein unruhiger Umbruch.
   assert.match(css, /\.v3-guv-period__filter\s*\{[\s\S]*?border-top:/, 'Filter in eigener Zeile mit Trennlinie');
+});
+
+/* ---- Fehlender Einkaufspreis: ehrlich statt geschätzt ---------------------- */
+
+test('Missing-EK: Posten ohne EK fließt NICHT in GuV/Marge, Zeile als cost_missing markiert', () => {
+  const data = buildEconomicsData({
+    byProduct: [], // keine Nacht-Aggregation
+    provisional: {
+      revenue_gross: 4.0, revenue_net: 4.0, qty: 2, cost: 0, costMissing: true,
+      byProduct: [{ product_id: 53, product_name: 'Red Bull', qty: 2, revenue_gross: 4.0, revenue_net: 4.0, cost: 0, cost_missing: true }],
+      from_date: '2026-06-03', to_date: '2026-06-03',
+    },
+  }, { mode: 'month' });
+
+  assert.equal(data.costMissing, true);
+  // Umsatz/Menge inkl. heute, aber GuV bleibt 0 (kein erfundener Gewinn).
+  assert.equal(data.totalsWithProvisional.revenue_gross, 4.0);
+  assert.equal(data.totalsWithProvisional.qty, 2);
+  assert.equal(data.totalsWithProvisional.gross_profit, 0);
+  assert.equal(data.totalsWithProvisional.revenue_gross_costable, 0); // nichts costable
+  const rb = data.byProduct.find((r) => r.product_id === 53);
+  assert.equal(rb.cost_missing, true);
+  assert.equal(rb.margin_gross_pct, null); // Tabelle zeigt „–"
+});
+
+test('Missing-EK: gemischt – bekannter Posten zählt, fehlender nicht (Marge-Basis = costable)', () => {
+  const data = buildEconomicsData({
+    byProduct: [],
+    provisional: {
+      revenue_gross: 6.0, revenue_net: 6.0, qty: 3,
+      byProduct: [
+        { product_id: 1, product_name: 'Bekannt', qty: 1, revenue_gross: 2.0, revenue_net: 2.0, cost: 1.0, cost_missing: false },
+        { product_id: 2, product_name: 'OhneEK', qty: 2, revenue_gross: 4.0, revenue_net: 4.0, cost: 0, cost_missing: true },
+      ],
+      from_date: '2026-06-03', to_date: '2026-06-03',
+    },
+  }, { mode: 'month' });
+
+  assert.equal(data.totalsWithProvisional.revenue_gross, 6.0);          // alle
+  assert.equal(data.totalsWithProvisional.gross_profit, 1.0);           // nur bekannter (2-1)
+  assert.equal(data.totalsWithProvisional.revenue_gross_costable, 2.0); // nur bekannter Umsatz
+  assert.equal(data.costMissing, true);
+});
+
+test('missingCostBatches: aktive Chargen ohne EK werden durchgereicht (für das Dashboard-Banner)', () => {
+  const data = buildEconomicsData({
+    byProduct: [],
+    missingCostBatches: [
+      { product_id: 5, product_name: 'Snickers', batch_key: 'B_SNICKERS_20260520', remaining_qty: 43 },
+      { product_id: 53, product_name: 'Red Bull', batch_key: 'B_RED_BULL_20260520', remaining_qty: 15 },
+    ],
+  }, { mode: 'month' });
+  assert.equal(data.missingCostBatches.length, 2);
+  assert.equal(data.missingCostBatches[0].product_name, 'Snickers');
+  assert.equal(data.missingCostBatches[0].batch_key, 'B_SNICKERS_20260520');
+  assert.equal(data.costMissing, true);
+});
+
+test('AC-UI: v3.js zeigt ein Warnbanner für fehlende Einkaufspreise', () => {
+  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v3.js'), 'utf8');
+  assert.match(js, /guvMissingCostBanner/, 'Banner-Funktion vorhanden');
+  assert.match(js, /missingCostBatches/, 'liest die fehlenden EK-Chargen');
+  assert.match(js, /Einkaufspreis fehlt/, 'klarer Hinweistext');
 });
