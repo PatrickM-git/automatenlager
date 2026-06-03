@@ -1747,6 +1747,27 @@ a.v3-chip:focus-visible {
 .v3-guv-leg--margin::before { background: var(--warn); border-radius: 50%; }
 .v3-guv-leg--cum::before { background: var(--ok); border-radius: 50%; }
 
+/* #57 Segment-Interaktion: pro Segment Treffer + Highlight + Einzelwert-Tooltip.
+   Sichtbar bei Hover (Desktop), Fokus (Tastatur) oder Tipp (Touch, .is-tapped). */
+.v3-guv-seg { cursor: pointer; outline: none; }
+.v3-guv-seg__hit { fill: transparent; }
+.v3-guv-seg__hl {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s var(--ease);
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+.v3-guv-seg__hl--margin { fill: var(--card); stroke: var(--warn); stroke-width: 2; }
+.v3-guv-seg:hover .v3-guv-seg__hl,
+.v3-guv-seg:focus-within .v3-guv-seg__hl,
+.v3-guv-seg.is-tapped .v3-guv-seg__hl { opacity: 1; }
+.v3-guv-seg:hover .v3-guv-pt__tip,
+.v3-guv-seg:focus-within .v3-guv-pt__tip,
+.v3-guv-seg.is-tapped .v3-guv-pt__tip { opacity: 1; }
+.v3-guv-chart__hint { font-size: 11px; color: var(--ink-faint); margin: 2px 0 0; text-align: center; }
+
 /* ---- Diagramm-Karussell (Handy) --------------------------------------- */
 .v3-guv-chartsblock { display: flex; flex-direction: column; gap: 8px; }
 .v3-guv-cardots { display: none; }

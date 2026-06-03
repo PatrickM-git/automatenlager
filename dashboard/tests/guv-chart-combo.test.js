@@ -9,24 +9,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { buildCumulative, buildStackedBars } = require('../lib/guv-chart.js');
-
-test('buildCumulative: laufende Summe je Bucket', () => {
-  const series = [
-    { month: '2026-06-01', gross_profit: 10 },
-    { month: '2026-06-02', gross_profit: 5 },
-    { month: '2026-06-03', gross_profit: -3 },
-  ];
-  const out = buildCumulative(series, 'gross_profit');
-  assert.deepEqual(out.map((d) => d.cumulative), [10, 15, 12]);
-  assert.equal(out[0].month, '2026-06-01');
-  assert.equal(out[1].value, 5);
-});
-
-test('buildCumulative: leere/fehlende Reihe -> []', () => {
-  assert.deepEqual(buildCumulative([], 'gross_profit'), []);
-  assert.deepEqual(buildCumulative(null, 'gross_profit'), []);
-});
+const { buildStackedBars } = require('../lib/guv-chart.js');
 
 test('buildStackedBars: total = Wareneinsatz (unten) + Gewinn (oben)', () => {
   const series = [

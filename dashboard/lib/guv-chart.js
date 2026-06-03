@@ -96,18 +96,7 @@ function buildLineSeries(series, valueKey, opts = {}) {
   return { points, min, max, path, area };
 }
 
-// #57 Tagesverlauf: laufende (kumulierte) Summe je Bucket – Basis für die
-// kumulierte Gewinnlinie über der Umsatz-Fläche. Liefert {month, value, cumulative}.
-function buildCumulative(series, valueKey) {
-  let running = 0;
-  return (series || []).map((d) => {
-    const value = toNum(d[valueKey]);
-    running += value;
-    return { month: d.month, value: round2(value), cumulative: round2(running) };
-  });
-}
-
-// #57 Kombi-Chart (Monats-/Jahresvergleich): teilt je Periode den Brutto-Umsatz
+// #57 Kombi-Chart: teilt je Periode den Brutto-Umsatz
 // in Wareneinsatz (unten) + Gewinn (oben), sodass beide gestapelt exakt den
 // Umsatz ergeben. Gewinn wird auf [0, total] gedeckelt (Verlust -> 0, der ganze
 // Balken ist dann Kosten; Gewinn > Umsatz -> auf Umsatz begrenzt).
@@ -121,4 +110,4 @@ function buildStackedBars(series, { totalKey = 'revenue_gross', profitKey = 'gro
   });
 }
 
-module.exports = { aggregateTopProducts, buildLineSeries, buildCumulative, buildStackedBars };
+module.exports = { aggregateTopProducts, buildLineSeries, buildStackedBars };
