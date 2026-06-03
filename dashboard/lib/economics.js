@@ -430,6 +430,32 @@ function buildProvisional(row) {
 // Produktzeilen, damit die Top-Produkt-Tabelle konsistent zu den KPIs „inkl.
 // heute" ist. Nur wenn der EK live zugeordnet werden konnte (sonst würde die
 // Marge je Produkt still verfälscht).
+// Verdichtet die per-Monat-Produktzeilen (Mehrmonatsansichten liefern je Produkt
+// MEHRERE Zeilen) zu EINER Zeile je Produkt – summiert über den ganzen Zeitraum.
+// Ohne das würde die anschließende product_id-Map mehrmonatige Produkte auf einen
+// einzigen Monat zusammenfallen lassen (Jahr/Quartal zeigten dann zu wenig).
+function aggregateByProduct(rows) {
+  const byId = new Map();
+  for (const r of rows) {
+    const ex = byId.get(r.product_id);
+    if (ex) {
+      ex.revenue_net = round2(ex.revenue_net + r.revenue_net);
+      ex.db_net = round2(ex.db_net + r.db_net);
+      ex.revenue_gross = round2(ex.revenue_gross + r.revenue_gross);
+      ex.gross_profit = round2(ex.gross_profit + r.gross_profit);
+      ex.qty += r.qty;
+    } else {
+      byId.set(r.product_id, { ...r });
+    }
+  }
+  const out = [...byId.values()];
+  for (const r of out) {
+    r.margin_pct = marginPct(r.db_net, r.revenue_net);
+    r.margin_gross_pct = marginPct(r.gross_profit, r.revenue_gross);
+  }
+  return out;
+}
+
 function mergeProvisionalProducts(finalRows, provisional) {
   if (!provisional.hasProvisional || !provisional.byProduct.length) {
     return finalRows;
@@ -523,9 +549,14 @@ function buildEconomicsData(pgRows, query = {}) {
 
   const provisional = buildProvisional(pgRows.provisional);
 
-  // Top-Produkt-Tabelle: vorläufige Posten einmischen (nur mit Live-EK), sonst
-  // bliebe die Tabelle hinter den „inkl. heute"-KPIs zurück.
-  const byProduct = sortRows(mergeProvisionalProducts(finalProducts, provisional), sortBy, sortOrder);
+  // Top-Produkt-Tabelle: erst je Produkt über den Zeitraum verdichten (sonst
+  // verlöre die Provisional-Map mehrmonatige Produkte – Jahr/Quartal-Bug), dann
+  // die vorläufigen (heutigen) Posten einmischen.
+  const byProduct = sortRows(
+    mergeProvisionalProducts(aggregateByProduct(finalProducts), provisional),
+    sortBy,
+    sortOrder,
+  );
 
   // Bevorzugt die granularitäts-genaue Bucket-Serie aus der DB (Tag im
   // Monatsmodus, sonst Monat). Fehlt sie (z. B. in reinen Unit-Tests), fällt

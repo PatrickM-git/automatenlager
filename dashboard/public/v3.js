@@ -1601,13 +1601,14 @@
     var byId = {};
     (rows || []).forEach(function (r) {
       var id = Number(r.product_id) || 0;
-      var acc = byId[id] || { product_id: id, product_name: null, revenue_net: 0, db_net: 0, revenue_gross: 0, gross_profit: 0, qty: 0 };
+      var acc = byId[id] || { product_id: id, product_name: null, revenue_net: 0, db_net: 0, revenue_gross: 0, gross_profit: 0, qty: 0, cost_missing: false };
       if (r.product_name != null && r.product_name !== '') { acc.product_name = String(r.product_name); }
       acc.revenue_net   += Number(r.revenue_net)   || 0;
       acc.db_net        += Number(r.db_net)        || 0;
       acc.revenue_gross += Number(r.revenue_gross) || 0;
       acc.gross_profit  += Number(r.gross_profit)  || 0;
       acc.qty           += Number(r.qty)           || 0;
+      if (r.cost_missing) { acc.cost_missing = true; } // fehlt für irgendeinen Posten der EK -> Marge „–"
       byId[id] = acc;
     });
     return Object.keys(byId).map(function (k) {
@@ -1620,7 +1621,8 @@
         revenue_net: Math.round(p.revenue_net * 100) / 100,
         db_net: Math.round(p.db_net * 100) / 100,
         revenue_gross: rg, gross_profit: gp, qty: p.qty,
-        margin_gross_pct: rg > 0 ? Math.round((gp / rg) * 1000) / 10 : 0,
+        cost_missing: !!p.cost_missing,
+        margin_gross_pct: p.cost_missing ? null : (rg > 0 ? Math.round((gp / rg) * 1000) / 10 : 0),
       };
     });
   }
