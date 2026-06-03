@@ -302,3 +302,19 @@ test('AC-UI: v3.js zeigt ein Warnbanner für fehlende Einkaufspreise', () => {
   assert.match(js, /missingCostBatches/, 'liest die fehlenden EK-Chargen');
   assert.match(js, /Einkaufspreis fehlt/, 'klarer Hinweistext');
 });
+
+test('Mehrmonats-Aggregation: ein Produkt über mehrere Monate wird summiert statt überschrieben (Jahr/Quartal-Bug)', () => {
+  // Realfall „Ferrero Duplo Chocnut": je Monat eine Zeile -> Jahr muss summieren.
+  const data = buildEconomicsData({
+    byProduct: [
+      { product_id: 42, product_name: 'Ferrero Duplo Chocnut', month: '2026-05-01', qty: 3, revenue_net: 2.8, revenue_gross: 3.0, gross_profit: 1.2, db_net: 1.1 },
+      { product_id: 42, product_name: 'Ferrero Duplo Chocnut', month: '2026-06-01', qty: 2, revenue_net: 1.87, revenue_gross: 2.0, gross_profit: 0.8, db_net: 0.7 },
+      { product_id: 42, product_name: 'Ferrero Duplo Chocnut', month: '2026-01-01', qty: 1, revenue_net: 0.93, revenue_gross: 1.0, gross_profit: 0.4, db_net: 0.35 },
+    ],
+  }, { mode: 'year', year: '2026' });
+  const rows = data.byProduct.filter((r) => r.product_id === 42);
+  assert.equal(rows.length, 1, 'genau eine aggregierte Zeile je Produkt');
+  assert.equal(rows[0].qty, 6, '3 + 2 + 1, NICHT nur ein Monat');
+  assert.equal(rows[0].revenue_gross, 6.0);
+  assert.equal(rows[0].gross_profit, 2.4);
+});
