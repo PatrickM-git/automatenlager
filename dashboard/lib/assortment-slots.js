@@ -2,6 +2,7 @@
 
 const { resolvePeriod, formatProductName } = require('./economics.js');
 const { classifyTurnover } = require('./slow-mover.js');
+const { buildEffectiveConfig, normalizeCategoryKey, loadEffectiveConfig, DEFAULT_MANDANT } = require('./category-config.js');
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -41,14 +42,13 @@ function indicator(code, label, source, evidence) {
   };
 }
 
+// Indikatoren = transparente Zusatzhinweise (DB-stark, Marge schwach, MHD, …).
+// Die EINZIGE Renner/Langsam-Definition liefert classifyTurnover (lib/slow-mover.js)
+// über `turnover_class` — die frühere, hier hartcodierte Zweitdefinition
+// (qty>=30 || turnover_count>=20 = „Renner") ist bewusst entfernt (Issue #65),
+// damit derselbe Slot nie in zwei Ansichten unterschiedlich etikettiert wird.
 function buildIndicators(slot) {
   const indicators = [];
-  if (slot.qty >= 30 || slot.turnover_count >= 20) {
-    indicators.push(indicator('runner', 'Renner', 'kpi', `${slot.qty} Stk. / ${slot.turnover_count} Verkäufe`));
-  }
-  if ((slot.qty > 0 && slot.qty <= 2) || (slot.turnover_count > 0 && slot.turnover_count <= 2)) {
-    indicators.push(indicator('slow_mover', 'Langsamdreher', 'kpi', `${slot.qty} Stk. / ${slot.turnover_count} Verkäufe`));
-  }
   if (slot.db_net >= 20) {
     indicators.push(indicator('db_strong', 'DB-stark', 'kpi', `${slot.db_net.toLocaleString('de-DE')} EUR DB netto`));
   }
@@ -105,6 +105,12 @@ function parseSlotRow(row) {
     margin_pct: revenue > 0 ? round1((db / revenue) * 100) : 0,
     turnover_count: toNum(row.turnover_count),
     daysSinceLastSale: parseDaysSinceLastSale(row.days_since_last_sale),
+    // Geldbasierte Drehgeschwindigkeits-Klassifikation (#64/#65):
+    category: normalizeCategoryKey(row.category),                 // produktart (#62)
+    db_window: parseDaysSinceLastSale(row.db_window),            // Deckungsbeitrag im 4-Wochen-Fenster
+    listedDays: parseDaysSinceLastSale(row.listed_days),        // Tage seit Listung (Schonfrist)
+    // EK fehlt: im Fenster verkauft, aber kein Wareneinsatz erfasst → keine Bewertung.
+    ek_missing: toNum(row.window_qty) > 0 && toNum(row.cost_window) <= 0,
     value_per_product: Math.round(toNum(row.value_per_product) * 100) / 100,
     nearest_mhd_date: clean(row.nearest_mhd_date) || null,
     nearest_mhd_days: daysUntil(row.nearest_mhd_date),
@@ -134,18 +140,18 @@ function buildAssortmentSlotsData(pgRows, query = {}) {
       || a.machine_name.localeCompare(b.machine_name, 'de')
       || a.mdb_code - b.mdb_code);
 
-  // Quartilbasierte Drehzahl-Klasse pro Slot/Automat (lib/slow-mover.js).
-  // Quartile werden über die hier gezeigte (ggf. gefilterte) Slot-Population
-  // gebildet; jeder Slot trägt danach `turnover_class`.
-  const slots = classifyTurnover(parsed);
+  // Geldbasierte Drehgeschwindigkeits-Klasse pro Slot/Automat (lib/slow-mover.js,
+  // Issue #64): Deckungsbeitrag/Slot/Woche gegen die Kategorie-Latten der
+  // effektiven Config (#63). Fällt die Config (Unit-Tests) weg, greifen die
+  // Branchen-Anker-Defaults. Jeder Slot trägt danach `turnover_class`.
+  const config = pgRows.config || buildEffectiveConfig({});
+  const slots = classifyTurnover(parsed, config);
 
   return {
     slots,
     filters,
     recommendations: [],
     indicatorLegend: [
-      { code: 'runner', label: 'Renner', source: 'kpi' },
-      { code: 'slow_mover', label: 'Langsamdreher', source: 'kpi' },
       { code: 'db_strong', label: 'DB-stark', source: 'kpi' },
       { code: 'margin_weak', label: 'Marge schwach', source: 'kpi' },
       { code: 'mhd_risk', label: 'MHD-Risiko', source: 'stock' },
@@ -189,6 +195,20 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
             AND month <= $4::date
           GROUP BY machine_id, mdb_code
        ),
+       money_window AS (
+         -- Rollierendes 4-Wochen-Fenster (28 Tage) je Slot: Deckungsbeitrag,
+         -- Wareneinsatz und Menge — Basis der geldbasierten Klassifikation (#64).
+         -- historic_backfill ausgeschlossen, konsistent zu turnover/last_sale.
+         SELECT machine_id,
+                mdb_code,
+                SUM(gross_profit)  AS db_window,
+                SUM(cost_of_goods) AS cost_window,
+                SUM(quantity_sold)::int AS window_qty
+           FROM automatenlager.guv_daily
+          WHERE source != 'historic_backfill'
+            AND posting_date >= CURRENT_DATE - INTERVAL '28 days'
+          GROUP BY machine_id, mdb_code
+       ),
        last_sale AS (
          -- Letzter echter Verkauf je Slot (machine_id+mdb_code), zeitraum-unabhängig.
          -- historic_backfill ausgeschlossen — identisch zur v_slot_turnover-Semantik.
@@ -198,6 +218,16 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
            FROM automatenlager.sales_transactions st
           WHERE st.source != 'historic_backfill'
           GROUP BY st.machine_id, st.mdb_code
+       ),
+       first_sale AS (
+         -- Erster echter Verkauf je Produkt (produktweit, nicht slotweit) = „hatte
+         -- das Produkt je eine Chance". Robuster Schonfrist-Anker als die
+         -- Slot-valid_from, die bei jeder Slot-Neuzuordnung zurückgesetzt würde.
+         SELECT st.product_id,
+                MIN(st.settlement_at) AS first_sale_at
+           FROM automatenlager.sales_transactions st
+          WHERE st.source != 'historic_backfill'
+          GROUP BY st.product_id
        ),
        batch_status AS (
          SELECT product_id,
@@ -222,6 +252,7 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
               sa.mdb_code,
               p.product_id,
               p.name AS product_name,
+              p.category AS category,
               sa.current_machine_qty,
               sa.target_stock,
               sa.machine_capacity,
@@ -229,6 +260,13 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
               COALESCE(s.revenue_net, 0) AS revenue_net,
               COALESCE(s.db_net, 0) AS db_net,
               COALESCE(t.turnover_count, 0) AS turnover_count,
+              COALESCE(mw.db_window, 0) AS db_window,
+              COALESCE(mw.cost_window, 0) AS cost_window,
+              COALESCE(mw.window_qty, 0) AS window_qty,
+              COALESCE(
+                (CURRENT_DATE - (fs.first_sale_at AT TIME ZONE 'Europe/Berlin')::date),
+                (CURRENT_DATE - (sa.valid_from AT TIME ZONE 'Europe/Berlin')::date)
+              ) AS listed_days,
               (CURRENT_DATE - (ls.last_sale_at AT TIME ZONE 'Europe/Berlin')::date) AS days_since_last_sale,
               COALESCE(iv.value_per_product, 0) AS value_per_product,
               bs.nearest_mhd_date,
@@ -245,9 +283,14 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
          LEFT JOIN turnover t
            ON t.machine_id = sa.machine_id
           AND t.mdb_code = sa.mdb_code
+         LEFT JOIN money_window mw
+           ON mw.machine_id = sa.machine_id
+          AND mw.mdb_code = sa.mdb_code
          LEFT JOIN last_sale ls
            ON ls.machine_id = sa.machine_id
           AND ls.mdb_code = sa.mdb_code
+         LEFT JOIN first_sale fs
+           ON fs.product_id = sa.product_id
          LEFT JOIN automatenlager.mv_inventory_value_daily iv ON iv.product_id = sa.product_id
          LEFT JOIN batch_status bs ON bs.product_id = sa.product_id
          LEFT JOIN warning_status ws
@@ -259,7 +302,10 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
         ORDER BY l.name, m.name, sa.mdb_code`,
       [locationFilter, machineFilter, dateFrom, dateTo],
     );
-    return { slots: result.rows };
+    // Effektive Kategorie-/Schwellwert-Config des Mandanten (#63) — derselbe
+    // Client, eine Definition für die geldbasierte Klassifikation.
+    const config = await loadEffectiveConfig(client, DEFAULT_MANDANT);
+    return { slots: result.rows, config };
   } finally {
     await client.end();
   }

@@ -127,17 +127,19 @@ Read-Only guest access:
 
 ## Current Next Step
 
-**Planung abgeschlossen (2026-06-03) — Feature „Branchen-Anker" (Drehgeschwindigkeits-Klassifikation):**
-- SPEC liegt vor: `docs/specs/branchen-anker-drehgeschwindigkeit-v1.md`.
-- Kern: Renner/Normal/Langsam-Dreher umstellen von relativer Quartil-/Stückzahl-Logik (`dashboard/lib/slow-mover.js`) auf **absoluten Maßstab = Deckungsbeitrag pro Slot/Woche** (4-Wochen-Fenster), mit kategorie-eigenen Latten (Getränke 43 %, Snacks 52 %, Default 50 %), abgeleitet aus der Branchennorm statt aus eigenen Ist-Zahlen.
-- Ladenhüter bleibt eigenes zeitbasiertes Signal; fehlender EK → eigene Klasse „EK fehlt" (nie raten).
-- Editierbar + mandantenfähig (Konstruktions-Spalt, keine Voll-Tenancy); `produktart` wird von Sheets in die SQL-DB übernommen.
-- Bezug zu offenen Issues: #31 (editierbare Schwellwerte), #8/v3-H (Slow-Mover), #9 (v2/Sheets-Abschaltung).
+**Umgesetzt (2026-06-03) — Feature „Branchen-Anker" (Drehgeschwindigkeits-Klassifikation), Issues #62–#66:**
+- SPEC: `docs/specs/branchen-anker-drehgeschwindigkeit-v1.md`.
+- #62: `produktart` ist die echte SQL-Spalte `products.category` (kanonisch lowercase, Daten-/Schema-Guard `tests/dashboard-produktart-contract.test.js`); WF2-Hardcode `'Snack'`→`'snack'`. Doku `docs/data-model/produktart-semantics.md`.
+- #63: `dashboard/lib/category-config.js` — mandantenfähige, editierbare Config (Defaults Getränke 43 %/Snack 52 %/Fallback 50 %, Branchen-Norm 800 €, graceDays 14, ladenhueterDays 30), Latten-Ableitung, effektive Config = Defaults+Override; Persistenz `automatenlager.classification_settings` (JSONB je `mandant_id`, Default `__default__`).
+- #64: `dashboard/lib/slow-mover.js` geldbasiert (Deckungsbeitrag/Slot/Woche, 4-Wochen-Fenster) gegen Kategorie-Latten; Klassen `neu`→`ladenhueter`→`ek_fehlt`→`renner/normal/langsam_dreher` (Vorrang in dieser Reihenfolge).
+- #65: `assortment-slots.js` nur EINE Definition (zweite hartcodierte entfernt), SQL um produktart + 4-Wochen-Geldfenster + Schonfrist-Anker (erster Verkauf) + EK-fehlt; v3-Badges/CSS für alle 6 Klassen.
+- #66: `/einstellungen` editierbar — GET liefert effektive Config + `canEdit`, admin-only POST `/api/v2/settings/definitions` (Persistenz via #63, Teil-Speichern merged), v3-Formular für Margen/Latten/Schon-/Ladenhüter-Tage + Kategorie anlegen.
+- Status: Suite 740/740, live verifiziert (DB-Normalisierung, Klassen-Verteilung, Schreib-Round-Trip mit Snapshot/Restore). **Noch nicht auf den Mini deployt** (Code + DDL `classification_settings` liegen auf der Dev-DB; Mini-Deploy = `git pull --ff-only` + DDL + Container-Restart).
 
 **Naechste Schritte:**
-1. Domänenbegriffe via `ubiquitous-language`-Skill festschreiben (Branchen-Anker, Deckungsbeitrag/Slot, Kategorie-Marge, Renner/Langsam-Dreher/Ladenhüter, EK-fehlt-Klasse).
-2. Neuer Chat: `spec-to-issue` → SPEC in umsetzbare GitHub-Issues schneiden.
-3. Separates Issue anlegen: „Vollständigkeits-Audit Sheets→DB vor Cutover" (alle Sheet-Spalten, die noch nicht in der DB stehen; knüpft an `docs/specs/sql-only-migration.md` + Issue #9 an).
+1. PR mergen, auf den Mini deployen (DDL `classification_settings` dort anwenden — `loadEffectiveConfig` legt sie idempotent an).
+2. WF2-Änderung (`category:'snack'`) auf die Mini-Instanz bringen (n8n) — bis dahin schreibt die Prod-WF2 weiter `'Snack'` (read-side durch lowercase-Normalisierung abgesichert).
+3. Separates Issue: „Vollständigkeits-Audit Sheets→DB vor Cutover" (knüpft an `docs/specs/sql-only-migration.md` + Issue #9).
 
 ## WF7 Nachfuellung Webhook
 

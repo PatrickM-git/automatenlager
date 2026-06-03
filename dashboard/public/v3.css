@@ -1360,6 +1360,9 @@ a.v3-chip:focus-visible {
 .v3-badge--turnover-normal         { background: var(--paper-deep);   color: var(--ink-faint); border-color: var(--line-strong); }
 .v3-badge--turnover-langsam_dreher { background: rgba(180,83,9,.1);   color: var(--warn); border-color: rgba(180,83,9,.22); }
 .v3-badge--turnover-ladenhueter    { background: rgba(185,28,28,.1);  color: var(--crit); border-color: rgba(185,28,28,.22); }
+/* EK fehlt = neutral/grau (keine Bewertung, Lücke sichtbar). Neu = ruhig/blau (Schonfrist). */
+.v3-badge--turnover-ek_fehlt       { background: var(--paper-deep);   color: var(--ink-faint); border-color: var(--line-strong); border-style: dashed; }
+.v3-badge--turnover-neu            { background: rgba(37,99,235,.08);  color: #1d4ed8;     border-color: rgba(37,99,235,.22); }
 
 /* Kompaktes Drehzahl-Badge in der engen Slot-Zelle (/slots) */
 .v3-badge.v3-slot__turnover {
@@ -1424,8 +1427,26 @@ a.v3-chip:focus-visible {
 .v3-set-def      { display: grid; grid-template-columns: minmax(118px, max-content) 1fr; gap: 12px; align-items: start; }
 .v3-set-def__text { font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
 .v3-set-list     { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink-soft); line-height: 1.7; }
+
+/* Editierbare Schwellwerte/Margen (#66) */
+.v3-set-grid     { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.v3-set-field    { display: grid; gap: 4px; }
+.v3-set-field__label { font-size: 12.5px; font-weight: 700; color: var(--ink-soft); }
+.v3-set-field__hint  { font-size: 11.5px; color: var(--ink-faint); line-height: 1.4; }
+.v3-set-input    { padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--paper); color: var(--ink); font-size: 13px; font: inherit; }
+.v3-set-input:disabled { background: var(--paper-deep); color: var(--ink-faint); }
+.v3-set-input--num { max-width: 120px; }
+.v3-set-cattable { width: 100%; border-collapse: collapse; font-size: 13px; }
+.v3-set-cattable th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-faint); padding: 6px 8px; border-bottom: 1px solid var(--line-strong); }
+.v3-set-cattable td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.v3-set-input--cat { width: 100%; }
+.v3-set-latte    { color: var(--ink-soft); white-space: nowrap; }
+.v3-set-addcat   { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+.v3-set-savebar  { display: flex; gap: 12px; align-items: center; margin-top: 18px; }
+.v3-set-status   { font-size: 13px; color: var(--ink-soft); }
 @media (max-width: 560px) {
   .v3-set-def { grid-template-columns: 1fr; gap: 4px; }
+  .v3-set-latte { white-space: normal; }
 }
 
 /* Stats grid inside card */

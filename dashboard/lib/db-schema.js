@@ -56,6 +56,7 @@ const EXPECTED_RELATIONS = [
   { name: 'invoices',                 kind: 'table',   note: 'Rechnungen' },
   { name: 'invoice_items',            kind: 'table',   note: 'Rechnungspositionen' },
   { name: 'suppliers',                kind: 'table',   note: 'Lieferanten' },
+  { name: 'classification_settings',  kind: 'table',   note: 'Kategorie-/Schwellwert-Config je Mandant (#63)' },
   { name: 'v_warnings_open',          kind: 'view',    note: 'Offene Warnungen (View)' },
   { name: 'v_slot_turnover',          kind: 'view',    note: 'Slot-Umschlag (View)' },
   { name: 'mv_inventory_value_daily', kind: 'matview', note: 'Inventarwert (Materialized View)' },

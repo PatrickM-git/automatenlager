@@ -1078,7 +1078,7 @@
       return fetchJson('/api/v2/settings/definitions').then(function (res) {
         var defs = res && res.definitions ? res.definitions : null;
         if (!defs) { return { status: 'error' }; }
-        return { status: 'ok', settings: defs };
+        return { status: 'ok', settings: defs, canEdit: !!(res && res.canEdit) };
       }).catch(function () { return { status: 'error' }; });
     }
     return new Promise(function (resolve) {
@@ -1110,6 +1110,8 @@
     { key: 'normal',         label: 'Normal',         short: 'Normal'   },
     { key: 'langsam_dreher', label: 'Langsam-Dreher', short: 'Langsam'  },
     { key: 'ladenhueter',    label: 'Ladenhüter',     short: 'Ladenh.'  },
+    { key: 'ek_fehlt',       label: 'EK fehlt',       short: 'EK?'      },
+    { key: 'neu',            label: 'Neu',            short: 'Neu'      },
   ];
   var TURNOVER_LABEL = {};
   var TURNOVER_SHORT = {};
@@ -3841,10 +3843,24 @@
   }
 
   /* ---- Einstellungen-Seite (/einstellungen) ----------------------------- */
-  /* Zeigt die im Backend (lib/slow-mover.js) festgelegten Definitionen/Schwellwerte.
-     Quelle: GET /api/v2/settings/definitions → docs/UBIQUITOUS_LANGUAGE.md. */
-  function renderSettingsPage(settings) {
-    var sm = (settings && settings.slowMover) || { classes: [], ladenhueterDays: 30, minPointsForQuartiles: 4 };
+  /* Zeigt + editiert die Kategorie-/Schwellwert-Config (Branchen-Anker).
+     Quelle: GET/POST /api/v2/settings/definitions → docs/UBIQUITOUS_LANGUAGE.md.
+     Lesen für alle, Schreiben nur für Admins (canEdit). */
+  function numField(label, key, value, step, hint) {
+    return '<label class="v3-set-field">' +
+      '<span class="v3-set-field__label">' + esc(label) + '</span>' +
+      '<input class="v3-set-input" type="number" step="' + esc(step || '1') + '" data-set-key="' + esc(key) + '" value="' + esc(value) + '">' +
+      (hint ? '<span class="v3-set-field__hint">' + esc(hint) + '</span>' : '') +
+    '</label>';
+  }
+
+  function renderSettingsPage(settings, canEdit) {
+    var sm = (settings && settings.slowMover) || { classes: [], ladenhueterDays: 30, graceDays: 14 };
+    var cfg = (settings && settings.config) || {};
+    var cats = cfg.categories || {};
+    var latten = cfg.latten || {};
+    var ro = canEdit ? '' : ' disabled';
+
     var classRows = (sm.classes || []).map(function (c) {
       return '<li class="v3-set-def">' +
         '<span class="v3-badge v3-badge--turnover v3-badge--turnover-' + esc(c.key) + '">' + esc(c.label) + '</span>' +
@@ -3852,22 +3868,112 @@
       '</li>';
     }).join('');
 
-    var thresholds = '' +
-      '<ul class="v3-set-list">' +
-        '<li><strong>Ladenhüter-Schwelle:</strong> 0 Verkäufe seit ≥ ' + esc(sm.ladenhueterDays) + ' Tagen ' +
-          '(Grenzfall genau ' + esc(sm.ladenhueterDays) + ' Tage zählt bereits).</li>' +
-        '<li><strong>Verfahren:</strong> quartilbasiert pro Slot/Automat — oberstes Quartil = Renner, unterstes = Langsam-Dreher, dazwischen Normal.</li>' +
-        '<li><strong>Mindest-Datenpunkte:</strong> unter ' + esc(sm.minPointsForQuartiles) + ' aktiven Slots (oder ohne Streuung) → alle „Normal".</li>' +
-      '</ul>';
+    // Kategorie-Zeilen: Label + Marge (%) editierbar, abgeleitete Geld-Latten je Woche.
+    var catRows = Object.keys(cats).map(function (key) {
+      var c = cats[key]; var l = latten[key] || {};
+      return '<tr data-set-cat="' + esc(key) + '">' +
+        '<td><code>' + esc(key) + '</code></td>' +
+        '<td><input class="v3-set-input v3-set-input--cat" data-cat-field="label" type="text" value="' + esc(c.label || key) + '"' + ro + '></td>' +
+        '<td><input class="v3-set-input v3-set-input--cat v3-set-input--num" data-cat-field="marginPct" type="number" step="1" value="' + esc(c.marginPct) + '"' + ro + '></td>' +
+        '<td class="v3-set-latte">Renner ≥ ' + esc(l.rennerThreshold) + ' € · Langsam ≤ ' + esc(l.langsamThreshold) + ' € /Woche</td>' +
+      '</tr>';
+    }).join('');
+
+    var addCat = canEdit ? '' +
+      '<div class="v3-set-addcat">' +
+        '<input class="v3-set-input" id="v3-set-newcat-key" type="text" placeholder="schlüssel (z. B. spielzeug)">' +
+        '<input class="v3-set-input" id="v3-set-newcat-label" type="text" placeholder="Anzeigename">' +
+        '<input class="v3-set-input v3-set-input--num" id="v3-set-newcat-margin" type="number" step="1" placeholder="Marge %">' +
+        '<button type="button" class="v3-btn v3-btn--ghost" id="v3-set-addcat-btn">Kategorie hinzufügen</button>' +
+      '</div>' : '';
+
+    var saveBar = canEdit ? '' +
+      '<div class="v3-set-savebar">' +
+        '<button type="button" class="v3-btn v3-btn--primary" id="v3-set-save">Einstellungen speichern</button>' +
+        '<span class="v3-set-status" id="v3-set-status" role="status"></span>' +
+      '</div>' : '<p class="v3-state__msg">Nur Admins können diese Werte ändern (Read-Only-Zugang).</p>';
 
     return '' +
       '<section class="v3-card" aria-label="Drehzahl-Klassifikation">' +
-        '<h2 class="v3-set-title">Drehzahl-Klassen (Slow-Mover)</h2>' +
-        '<p class="v3-state__msg" style="margin:0 0 16px">Wie das Cockpit Produkte nach Umschlag je Slot/Automat einordnet. Diese Definitionen sind im Domänen-Glossar <code>docs/UBIQUITOUS_LANGUAGE.md</code> verbindlich festgeschrieben und liegen im Backend (<code>lib/slow-mover.js</code>).</p>' +
+        '<h2 class="v3-set-title">Drehgeschwindigkeits-Klassen (Branchen-Anker)</h2>' +
+        '<p class="v3-state__msg" style="margin:0 0 16px">Maßstab ist der <strong>Deckungsbeitrag pro Slot und Woche</strong> (4-Wochen-Fenster) gegen eine kategorie-eigene Geld-Latte aus der Branchennorm — nicht die reine Stückzahl. Verbindlich im Glossar <code>docs/UBIQUITOUS_LANGUAGE.md</code>, Logik in <code>lib/slow-mover.js</code> + <code>lib/category-config.js</code>.</p>' +
         '<ul class="v3-set-defs">' + classRows + '</ul>' +
+      '</section>' +
+      '<section class="v3-card" aria-label="Schwellwerte & Margen">' +
         '<h3 class="v3-set-subtitle">Schwellwerte</h3>' +
-        thresholds +
+        '<div class="v3-set-grid">' +
+          numField('Ladenhüter-Schwelle (Tage)', 'ladenhueterDays', cfg.ladenhueterDays, '1', '0 Verkäufe seit ≥ so vielen Tagen.') +
+          numField('Schonfrist neue Produkte (Tage)', 'graceDays', cfg.graceDays, '1', 'Jünger gelistet → Klasse „Neu", nie Langsam.') +
+          numField('Umsatz-Norm (€/Automat/Monat)', 'umsatzNormMonth', cfg.umsatzNormMonth, '10', 'Branchen-Anker, Quelle der Geld-Latte.') +
+          numField('Slots je Automat', 'slotsPerMachine', cfg.slotsPerMachine, '1', 'Für die Umrechnung auf €/Slot/Woche.') +
+          numField('Renner-Faktor', 'rennerFactor', cfg.rennerFactor, '0.05', 'Renner ab Erwartungswert × Faktor.') +
+          numField('Langsam-Faktor', 'langsamFactor', cfg.langsamFactor, '0.05', 'Langsam unter Erwartungswert × Faktor.') +
+          numField('Default-Marge unbek. Kategorie (%)', 'defaultMarginPct', cfg.defaultMarginPct, '1', 'Fallback für neue Kategorien.') +
+        '</div>' +
+        '<h3 class="v3-set-subtitle">Kategorie-Margen</h3>' +
+        '<table class="v3-set-cattable"><thead><tr><th>Schlüssel</th><th>Anzeigename</th><th>Marge %</th><th>Geld-Latte (abgeleitet)</th></tr></thead>' +
+          '<tbody>' + catRows + '</tbody></table>' +
+        addCat +
+        saveBar +
       '</section>';
+  }
+
+  // Sammelt die editierten Werte und speichert sie (Admin) über den Schreibpfad.
+  function bindSettingsControls() {
+    var saveBtn = document.getElementById('v3-set-save');
+    if (!saveBtn) { return; } // Read-Only: keine Steuerung.
+    var statusEl = document.getElementById('v3-set-status');
+
+    function collectOverride() {
+      var override = { categories: {} };
+      document.querySelectorAll('.v3-set-input[data-set-key]').forEach(function (inp) {
+        var v = inp.value.trim();
+        if (v !== '') { override[inp.getAttribute('data-set-key')] = Number(v); }
+      });
+      document.querySelectorAll('tr[data-set-cat]').forEach(function (row) {
+        var key = row.getAttribute('data-set-cat');
+        var entry = {};
+        var label = row.querySelector('[data-cat-field="label"]');
+        var margin = row.querySelector('[data-cat-field="marginPct"]');
+        if (label && label.value.trim() !== '') { entry.label = label.value.trim(); }
+        if (margin && margin.value.trim() !== '') { entry.marginPct = Number(margin.value); }
+        override.categories[key] = entry;
+      });
+      return override;
+    }
+
+    var addBtn = document.getElementById('v3-set-addcat-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', function () {
+        var key = (document.getElementById('v3-set-newcat-key').value || '').trim().toLowerCase();
+        var label = (document.getElementById('v3-set-newcat-label').value || '').trim();
+        var margin = (document.getElementById('v3-set-newcat-margin').value || '').trim();
+        if (!key) { statusEl.textContent = 'Bitte einen Kategorie-Schlüssel angeben.'; return; }
+        var override = collectOverride();
+        override.categories[key] = { label: label || key, marginPct: margin === '' ? undefined : Number(margin) };
+        save(override);
+      });
+    }
+
+    saveBtn.addEventListener('click', function () { save(collectOverride()); });
+
+    function save(override) {
+      saveBtn.disabled = true;
+      statusEl.textContent = 'Speichere …';
+      postJson('/api/v2/settings/definitions', { config: override }).then(function (res) {
+        saveBtn.disabled = false;
+        if (res.ok && res.json && res.json.ok) {
+          statusEl.textContent = 'Gespeichert ✓';
+          renderRoute(ROUTE_BY_PATH['/einstellungen']);
+        } else {
+          var msg = res.json && res.json.error ? res.json.error.message : ('Fehler ' + res.status);
+          statusEl.textContent = 'Fehlgeschlagen: ' + msg;
+        }
+      }).catch(function () {
+        saveBtn.disabled = false;
+        statusEl.textContent = 'Netzwerkfehler beim Speichern.';
+      });
+    }
   }
 
   function placeholderContent(route) {
@@ -3940,7 +4046,8 @@
         viewEl.innerHTML = pageHead(route) + renderMonitoringPage(result.monitoring);
         bindMonitoringControls();
       } else if (route.path === '/einstellungen' && result.settings) {
-        viewEl.innerHTML = pageHead(route) + renderSettingsPage(result.settings);
+        viewEl.innerHTML = pageHead(route) + renderSettingsPage(result.settings, result.canEdit);
+        bindSettingsControls();
       } else {
         viewEl.innerHTML = pageHead(route) + placeholderContent(route);
       }

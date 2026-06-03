@@ -109,10 +109,30 @@ test('AC1: assortment slots expose transparent indicators from KPI and stock dat
   const result = buildAssortmentSlotsData({ slots: SLOT_ROWS }, {});
   const slot = result.slots.find((row) => row.product_name === 'Snickers');
 
-  assert.ok(slot.indicators.some((item) => item.code === 'runner' && item.source === 'kpi'));
   assert.ok(slot.indicators.some((item) => item.code === 'db_strong' && item.source === 'kpi'));
   assert.ok(slot.indicators.some((item) => item.code === 'refill_need' && item.source === 'stock'));
   assert.ok(slot.indicators.some((item) => item.code === 'mhd_risk' && item.source === 'stock'));
+});
+
+test('AC1b: nur EINE Renner/Langsam-Definition — kein hartcodiertes runner/slow_mover-Indikator-Badge mehr', () => {
+  const result = buildAssortmentSlotsData({ slots: SLOT_ROWS }, {});
+  const allIndicators = result.slots.flatMap((slot) => slot.indicators);
+  // Die zweite, hartcodierte Definition (qty>=30 || turnover_count>=20) ist entfernt.
+  // Renner/Langsam kommt ausschliesslich aus turnover_class (lib/slow-mover.js).
+  assert.ok(!allIndicators.some((i) => i.code === 'runner'), 'kein runner-Indikator mehr');
+  assert.ok(!allIndicators.some((i) => i.code === 'slow_mover'), 'kein slow_mover-Indikator mehr');
+  for (const s of result.slots) {
+    assert.ok('turnover_class' in s, 'jeder Slot trägt die eine turnover_class-Definition');
+  }
+});
+
+test('AC1c: produktart (category) wird aus der DB-Spalte durchgereicht (#62/#65)', () => {
+  const rows = [{ ...SLOT_ROWS[0], category: 'Snack' }, { ...SLOT_ROWS[1], category: 'getraenk' }];
+  const result = buildAssortmentSlotsData({ slots: rows }, {});
+  const snickers = result.slots.find((r) => r.product_name === 'Snickers');
+  const protein = result.slots.find((r) => r.product_name === 'Proteinriegel');
+  assert.equal(snickers.category, 'snack', 'produktart kanonisch (lowercase) durchgereicht');
+  assert.equal(protein.category, 'getraenk');
 });
 
 test('AC2: indicators are explicitly separate from recommendations', () => {
@@ -215,22 +235,41 @@ function turnoverRow(mdb, turnover, days) {
   };
 }
 
-test('AC-T1: classifyTurnover wird angewandt — turnover_class liegt im API-Result je Slot', () => {
-  const rows = [10, 20, 30, 40, 50, 60, 70, 80].map((t, i) => turnoverRow(11 + i, t, 1));
-  const { slots } = buildAssortmentSlotsData({ slots: rows }, {});
+// Geldbasierte Zeile: category + 4-Wochen-Deckungsbeitrag (db_window) je Slot.
+function moneyRow(mdb, category, dbWindow, days = 1) {
+  const r = turnoverRow(mdb, 0, days);
+  r.category = category;
+  r.db_window = String(dbWindow);    // Marge im 28-Tage-Fenster
+  r.window_qty = '10';
+  r.cost_window = '5';               // EK vorhanden → nicht ek_fehlt
+  r.listed_days = '90';             // über Schonfrist
+  return r;
+}
 
-  assert.equal(slots.length, 8);
+test('AC-T1: geldbasierte classifyTurnover wird angewandt — turnover_class je Slot', () => {
+  // db_window/4 = €/Woche. Snack-Latten: renner ≥ 4.16, langsam ≤ 1.92.
+  const rows = [
+    moneyRow(11, 'snack', 24),  // 6.0/Woche → renner
+    moneyRow(12, 'snack', 12),  // 3.0/Woche → normal
+    moneyRow(13, 'snack', 4),   // 1.0/Woche → langsam_dreher
+  ];
+  const { slots } = buildAssortmentSlotsData({ slots: rows }, {});
+  assert.equal(slots.length, 3);
   for (const s of slots) {
-    assert.ok(['renner', 'normal', 'langsam_dreher', 'ladenhueter'].includes(s.turnover_class),
+    assert.ok(['renner', 'normal', 'langsam_dreher', 'ladenhueter', 'ek_fehlt', 'neu'].includes(s.turnover_class),
       `Slot ${s.mdb_code} braucht eine gültige turnover_class`);
   }
   const byMdb = Object.fromEntries(slots.map((s) => [s.mdb_code, s.turnover_class]));
-  // Q1≈27.5, Q3≈62.5 → t>=62.5 renner (70,80); t<=27.5 langsam (10,20); Rest normal.
-  assert.equal(byMdb[18], 'renner');         // turnover 80
-  assert.equal(byMdb[17], 'renner');         // turnover 70
-  assert.equal(byMdb[11], 'langsam_dreher'); // turnover 10
-  assert.equal(byMdb[12], 'langsam_dreher'); // turnover 20
-  assert.equal(byMdb[14], 'normal');         // turnover 40
+  assert.equal(byMdb[11], 'renner');
+  assert.equal(byMdb[12], 'normal');
+  assert.equal(byMdb[13], 'langsam_dreher');
+});
+
+test('AC-T1b: EK fehlt (im Fenster verkauft, aber kein Wareneinsatz) → ek_fehlt', () => {
+  const r = moneyRow(11, 'snack', 24);
+  r.cost_window = '0'; // kein EK trotz Verkäufen
+  const { slots } = buildAssortmentSlotsData({ slots: [r] }, {});
+  assert.equal(slots[0].turnover_class, 'ek_fehlt');
 });
 
 test('AC-T2: 0 Verkäufe seit ≥30 Tagen → ladenhueter, unabhängig von hoher Drehzahl', () => {
