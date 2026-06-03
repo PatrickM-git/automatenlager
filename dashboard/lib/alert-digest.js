@@ -97,18 +97,24 @@ function buildAlertDigest(raw = {}) {
     else mhdSoon.push(entry);
   }
 
-  // ── Lagerchargen: leer (<= 0) und niedrig (1..Schwellwert) ───────────────
+  // ── Lager (Backstock) leer (<= 0) und niedrig (1..Schwellwert) ───────────
+  // WICHTIG: remaining_qty läuft im Gesamt-Modell (Maschine + Lager, da WF3
+  // jeden Verkauf davon abzieht). Echter LAGER-Bestand = SUMME(remaining_qty)
+  // − current_machine_qty, exakt wie dashboard/lib/inventory-mhd.js (backstock_qty,
+  // GREATEST(..,0)). Sonst würde z.B. "1 Dose im Automat, 0 im Lager" fälschlich
+  // als "Lagerbestand 1" gemeldet. Die Query liefert backstock_qty bereits so;
+  // total_remaining bleibt als Fallback für direkt übergebene Testdaten.
   const emptyBatches = [];
   const lowBatches = [];
   for (const row of raw.batchTotals || []) {
-    const total = toNum(row.total_remaining);
+    const backstock = toNum(row.backstock_qty != null ? row.backstock_qty : row.total_remaining);
     const entry = {
       product_name: clean(row.product_name),
       product_key: clean(row.product_key),
-      total_remaining_qty: total,
+      total_remaining_qty: backstock,
       threshold: lowBatchThreshold,
     };
-    if (total <= 0) emptyBatches.push(entry);
+    if (backstock <= 0) emptyBatches.push(entry);
     else lowBatches.push(entry);
   }
 
@@ -188,20 +194,27 @@ async function queryAlertDigestPg(pgUrl, opts = {}) {
             AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'
           ORDER BY sb.mhd_date`,
       ),
-      // Lagerchargen-Aggregat je Produkt: verfügbare Menge je Produkt. 'leer'
-      // wird mitgeladen, damit komplett aufgebrauchte Produkte (Summe 0) noch
-      // erscheinen; gezählt wird aber nur die VERFÜGBARE Menge.
+      // LAGER-Bestand (Backstock) je Produkt, verankert an aktiven Slots —
+      // exakt wie inventory-mhd.js: backstock = GREATEST(SUMME(remaining_qty der
+      // verfügbaren Chargen) − SUMME(current_machine_qty der aktiven Slots), 0).
+      // remaining_qty ist Gesamt-Modell (Maschine+Lager), daher Maschinen-Anteil
+      // abziehen. Beispiel: 1 Charge-Stück, 1 im Automat → Lager 0 (nicht 1).
       client.query(
-        `SELECT p.name AS product_name, p.product_key,
-                COALESCE(SUM(CASE WHEN sb.status IN (${availableStatuses})
-                                  THEN sb.remaining_qty ELSE 0 END), 0)::int AS total_remaining
-           FROM automatenlager.stock_batches sb
-           JOIN automatenlager.products p ON p.product_id = sb.product_id
-          WHERE sb.status IN (${availableStatuses}, 'leer')
-          GROUP BY p.product_id, p.name, p.product_key
-         HAVING COALESCE(SUM(CASE WHEN sb.status IN (${availableStatuses})
-                                  THEN sb.remaining_qty ELSE 0 END), 0) <= $1
-          ORDER BY total_remaining, product_name`,
+        `WITH batch_totals AS (
+           SELECT product_id, SUM(remaining_qty)::int AS total_qty
+             FROM automatenlager.stock_batches
+            WHERE status IN (${availableStatuses})
+            GROUP BY product_id
+         )
+         SELECT p.name AS product_name, p.product_key,
+                GREATEST(COALESCE(bt.total_qty, 0) - COALESCE(SUM(sa.current_machine_qty), 0), 0)::int AS backstock_qty
+           FROM automatenlager.slot_assignments sa
+           JOIN automatenlager.products p ON p.product_id = sa.product_id
+           LEFT JOIN batch_totals bt ON bt.product_id = sa.product_id
+          WHERE sa.active = TRUE
+          GROUP BY p.product_id, p.name, p.product_key, bt.total_qty
+         HAVING GREATEST(COALESCE(bt.total_qty, 0) - COALESCE(SUM(sa.current_machine_qty), 0), 0) <= $1
+          ORDER BY backstock_qty, product_name`,
         [lowBatchThreshold],
       ),
       // Niedriger Bestand = aktive Slots mit Bestand 0 (PG-Fakt), exakt wie die

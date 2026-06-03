@@ -53,9 +53,10 @@ const RAW = {
     { product_name: 'Nick Nacks', batch_key: 'B1', mhd_date: '2026-05-31', remaining_qty: 3, days_remaining: -2 },
     { product_name: 'KitKat', batch_key: 'B2', mhd_date: '2026-06-20', remaining_qty: 10, days_remaining: 18 },
   ],
+  // backstock_qty = echter Lagerbestand (Charge − Automat), wie von der Query geliefert
   batchTotals: [
-    { product_name: 'Red Bull Spring', product_key: 'SKU_RED_BULL_SPRING', total_remaining: 5 },
-    { product_name: 'Bueno', product_key: 'SKU_BUENO', total_remaining: 0 },
+    { product_name: 'KitKat', product_key: 'SKU_KITKAT', backstock_qty: 4 },
+    { product_name: 'Bueno', product_key: 'SKU_BUENO', backstock_qty: 0 },
   ],
   emptySlots: [
     { product_slot_key: 'PS_1', machine_id: '1', mdb_code: '53', product_name: 'Bueno', current_machine_qty: 0 },
@@ -104,13 +105,25 @@ test('AD2: buildAlertDigest splits MHD into expired (<0) and soon (0..30)', () =
   assert.equal(d.mhdSoon[0].product_name, 'KitKat');
 });
 
-test('AD3: buildAlertDigest splits batch totals into empty (<=0) and low (1..threshold)', () => {
+test('AD3: buildAlertDigest splits backstock into empty (<=0) and low (1..threshold)', () => {
   const d = buildAlertDigest(RAW);
   assert.equal(d.counts.emptyBatches, 1);
   assert.equal(d.counts.lowBatches, 1);
   assert.equal(d.emptyBatches[0].product_name, 'Bueno');
-  assert.equal(d.lowBatches[0].product_name, 'Red Bull Spring');
-  assert.equal(d.lowBatches[0].total_remaining_qty, 5);
+  assert.equal(d.lowBatches[0].product_name, 'KitKat');
+  assert.equal(d.lowBatches[0].total_remaining_qty, 4);
+});
+
+test('AD3b: a product whose only unit is in the machine has backstock 0 → empty (not "Lager 1")', () => {
+  // Red-Bull-Spring-Fall: Charge-Summe 1, aber die 1 steckt im Automaten →
+  // echter Lagerbestand 0. Die Query liefert backstock_qty bereits abgezogen.
+  const d = buildAlertDigest({ batchTotals: [
+    { product_name: 'Red Bull Spring', product_key: 'SKU_RBS', backstock_qty: 0 },
+  ] });
+  assert.equal(d.counts.emptyBatches, 1);
+  assert.equal(d.counts.lowBatches, 0);
+  assert.equal(d.emptyBatches[0].product_name, 'Red Bull Spring');
+  assert.equal(d.emptyBatches[0].total_remaining_qty, 0);
 });
 
 test('AD4: empty slots come through as the "niedriger Bestand" section (PG, not Sheet)', () => {
