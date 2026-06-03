@@ -345,10 +345,9 @@ function isDayPreciseQuery(query = {}) {
 // geleerten älteren Chargen. Genau das verrechnet WF8 nachts; hier wird es für
 // heute live nachgebildet. unit_cost_net = EK-Basis von guv_daily.cost_of_goods
 // (empirisch bestätigt: cost_of_goods = Menge × unit_cost_net).
-function fifoProvisionalCostForProduct(batches, soldQty, fallbackUnitCost) {
+function fifoProvisionalCostForProduct(batches, soldQty) {
   const qty = Math.max(0, Math.round(toNum(soldQty)));
-  if (qty === 0) return { cost: 0, allocated: 0, complete: true, estimated: false };
-  const fb = toNum(fallbackUnitCost);
+  if (qty === 0) return { cost: 0, allocated: 0, complete: true, missingCost: false };
   const ordered = [...(batches || [])].sort((a, b) => {
     const ra = String(a.received_at || ''), rb = String(b.received_at || '');
     if (ra !== rb) return ra < rb ? -1 : 1;
@@ -356,34 +355,19 @@ function fifoProvisionalCostForProduct(batches, soldQty, fallbackUnitCost) {
   });
   let remaining = qty;
   let cost = 0;
-  let estimated = false;
+  let missingCost = false;
   for (let i = ordered.length - 1; i >= 0 && remaining > 0; i--) {
     const consumed = Math.max(0, toNum(ordered[i].initial_qty) - toNum(ordered[i].remaining_qty));
     if (consumed <= 0) continue;
     const take = Math.min(remaining, consumed);
-    // Fehlt der EK einer Charge (unit_cost_net = 0), greift der letzte bekannte
-    // EK des Produkts (Schätzung) statt einer falschen 100-%-Marge.
-    let unit = toNum(ordered[i].unit_cost_net);
-    if (unit <= 0) { unit = fb; if (fb > 0) estimated = true; }
-    cost += take * unit;
+    // EK kommt AUSSCHLIESSLICH aus der Charge (unit_cost_net, von der gescannten
+    // Rechnung). Fehlt er (=0), wird NICHTS geschätzt — die Position gilt als
+    // „EK fehlt" und muss vom User nachgetragen werden.
+    const unit = toNum(ordered[i].unit_cost_net);
+    if (unit <= 0) { missingCost = true; } else { cost += take * unit; }
     remaining -= take;
   }
-  return { cost: round2(cost), allocated: qty - remaining, complete: remaining === 0, estimated };
-}
-
-// Letzter bekannter Einkaufspreis (netto) eines Produkts als Fallback, wenn die
-// FIFO-getroffene Charge keinen EK trägt: jüngste Charge mit unit_cost_net > 0.
-function latestKnownUnitCost(batches) {
-  let best = null;
-  for (const b of batches || []) {
-    if (toNum(b.unit_cost_net) > 0) {
-      const key = String(b.received_at || '');
-      if (!best || key > best.key || (key === best.key && toNum(b.batch_id) > best.id)) {
-        best = { key, id: toNum(b.batch_id), cost: toNum(b.unit_cost_net) };
-      }
-    }
-  }
-  return best ? best.cost : 0;
+  return { cost: round2(cost), allocated: qty - remaining, complete: remaining === 0, missingCost };
 }
 
 // #40 / Live-FIFO: Vorläufige Position für den noch nicht von WF8 aggregierten
@@ -396,8 +380,6 @@ function buildProvisional(row) {
   const revenueNet = round2(toNum(row && row.revenue_net));
   const qty = Math.round(toNum(row && row.qty));
   const hasCost = !!(row && row.cost != null);
-  const cost = hasCost ? round2(toNum(row.cost)) : 0;
-  const grossProfit = hasCost ? round2(revenueGross - cost) : 0;
   const byProduct = Array.isArray(row && row.byProduct)
     ? row.byProduct.map((p) => ({
         product_id: toNum(p.product_id),
@@ -406,8 +388,28 @@ function buildProvisional(row) {
         revenue_gross: round2(toNum(p.revenue_gross)),
         revenue_net: round2(toNum(p.revenue_net)),
         cost: round2(toNum(p.cost)),
+        cost_missing: !!p.cost_missing,
       }))
     : [];
+  // Gewinn/Wareneinsatz/Marge NUR aus Posten mit bekanntem EK. Posten ohne EK
+  // tragen ihren Umsatz/Menge bei (das ist real), aber NICHT zur GuV/Marge —
+  // sonst entstünde eine geschätzte/falsche Zahl. costMissing flaggt die Lücke.
+  let cost = 0;
+  let grossProfit = 0;
+  let revenueGrossKnown = 0;
+  let costMissing = false;
+  for (const p of byProduct) {
+    if (p.cost_missing) { costMissing = true; continue; }
+    cost = round2(cost + p.cost);
+    grossProfit = round2(grossProfit + (p.revenue_gross - p.cost));
+    revenueGrossKnown = round2(revenueGrossKnown + p.revenue_gross);
+  }
+  // Fallback (z. B. Unit-Tests ohne byProduct): wie früher aus row.cost ableiten.
+  if (byProduct.length === 0 && hasCost) {
+    cost = round2(toNum(row.cost));
+    grossProfit = round2(revenueGross - cost);
+    revenueGrossKnown = revenueGross;
+  }
   return {
     hasProvisional: revenueGross > 0 || qty > 0,
     revenueGross,
@@ -415,8 +417,9 @@ function buildProvisional(row) {
     qty,
     cost,
     grossProfit,
-    hasCost,
-    costComplete: row ? row.costComplete !== false : true,
+    revenueGrossKnown,
+    hasCost: hasCost || byProduct.length > 0,
+    costMissing: row && row.costMissing != null ? !!row.costMissing : costMissing,
     byProduct,
     fromDate: row && row.from_date ? String(row.from_date) : null,
     toDate: row && row.to_date ? String(row.to_date) : null,
@@ -428,13 +431,16 @@ function buildProvisional(row) {
 // heute" ist. Nur wenn der EK live zugeordnet werden konnte (sonst würde die
 // Marge je Produkt still verfälscht).
 function mergeProvisionalProducts(finalRows, provisional) {
-  if (!provisional.hasProvisional || !provisional.hasCost || !provisional.byProduct.length) {
+  if (!provisional.hasProvisional || !provisional.byProduct.length) {
     return finalRows;
   }
   const byId = new Map(finalRows.map((r) => [r.product_id, { ...r }]));
   for (const pr of provisional.byProduct) {
-    const gp = round2(pr.revenue_gross - pr.cost);
-    const dbNet = round2(pr.revenue_net - pr.cost);
+    // Bei fehlendem EK: Umsatz/Menge mitzählen, aber KEINEN Gewinn ableiten und
+    // die Zeile als „cost_missing" markieren -> Tabelle zeigt Marge/GuV als „–".
+    const missing = !!pr.cost_missing;
+    const gp = missing ? 0 : round2(pr.revenue_gross - pr.cost);
+    const dbNet = missing ? 0 : round2(pr.revenue_net - pr.cost);
     const ex = byId.get(pr.product_id);
     if (ex) {
       ex.revenue_gross = round2(ex.revenue_gross + pr.revenue_gross);
@@ -442,8 +448,9 @@ function mergeProvisionalProducts(finalRows, provisional) {
       ex.gross_profit = round2(ex.gross_profit + gp);
       ex.db_net = round2(ex.db_net + dbNet);
       ex.qty += pr.qty;
-      ex.margin_pct = marginPct(ex.db_net, ex.revenue_net);
-      ex.margin_gross_pct = marginPct(ex.gross_profit, ex.revenue_gross);
+      if (missing) { ex.cost_missing = true; }
+      ex.margin_pct = ex.cost_missing ? null : marginPct(ex.db_net, ex.revenue_net);
+      ex.margin_gross_pct = ex.cost_missing ? null : marginPct(ex.gross_profit, ex.revenue_gross);
     } else {
       byId.set(pr.product_id, {
         product_id: pr.product_id,
@@ -454,8 +461,9 @@ function mergeProvisionalProducts(finalRows, provisional) {
         revenue_gross: pr.revenue_gross,
         gross_profit: gp,
         qty: pr.qty,
-        margin_pct: marginPct(dbNet, pr.revenue_net),
-        margin_gross_pct: marginPct(gp, pr.revenue_gross),
+        cost_missing: missing,
+        margin_pct: missing ? null : marginPct(dbNet, pr.revenue_net),
+        margin_gross_pct: missing ? null : marginPct(gp, pr.revenue_gross),
       });
     }
   }
@@ -540,13 +548,17 @@ function buildEconomicsData(pgRows, query = {}) {
   }
 
   // Headline inkl. laufendem Tag — Umsatz/Menge wie bisher (#38), zusätzlich
-  // jetzt GuV/Wareneinsatz via Live-FIFO (wenn EK zugeordnet werden konnte).
+  // jetzt GuV/Wareneinsatz via Live-FIFO. Gewinn fließt NUR aus Posten mit
+  // bekanntem EK ein (provisional.grossProfit); die Marge-Basis nutzt daher die
+  // „costable" Umsatzsumme, damit GuV-Zähler und Umsatz-Nenner dieselben Posten
+  // abdecken. `revenue_gross_costable` = Marge-Nenner, `revenue_gross` = Anzeige.
   const totalsWithProvisional = {
     revenue_gross: round2(totals.revenue_gross + provisional.revenueGross),
     revenue_net: round2(totals.revenue_net + provisional.revenueNet),
     qty: totals.qty + provisional.qty,
     gross_profit: round2(totals.gross_profit + provisional.grossProfit),
     cost_of_goods: round2((totals.revenue_gross - totals.gross_profit) + provisional.cost),
+    revenue_gross_costable: round2(totals.revenue_gross + provisional.revenueGrossKnown),
   };
 
   // Periode tagesgenau spiegeln, wenn der Resolver echte Tagesgrenzen lieferte.
@@ -556,6 +568,17 @@ function buildEconomicsData(pgRows, query = {}) {
     period.to = range.toDate;
   }
 
+  // Aktive Lagerchargen ohne Einkaufspreis (in der DB) – damit das Dashboard die
+  // Lücke sichtbar macht und der User den EK aus der Rechnung nachtragen kann.
+  const missingCostBatches = Array.isArray(pgRows.missingCostBatches)
+    ? pgRows.missingCostBatches.map((b) => ({
+        product_id: toNum(b.product_id),
+        product_name: formatProductName(b.product_name) ?? String(toNum(b.product_id)),
+        batch_key: b.batch_key != null ? String(b.batch_key) : null,
+        remaining_qty: Math.round(toNum(b.remaining_qty)),
+      }))
+    : [];
+
   return {
     byProduct,
     bySlot,
@@ -563,6 +586,8 @@ function buildEconomicsData(pgRows, query = {}) {
     totals,
     totalsWithProvisional,
     provisional,
+    costMissing: provisional.costMissing || missingCostBatches.length > 0,
+    missingCostBatches,
     series,
     granularity,
     period,
@@ -645,12 +670,25 @@ async function queryEconomicsPg(pgUrl, query = {}) {
       `SELECT * FROM automatenlager.mv_inventory_value_daily`,
     );
 
+    // Aktive Chargen mit Restbestand, aber ohne Einkaufspreis (unit_cost_net<=0).
+    // Diese verfälschen FIFO-Kosten/Marge -> auf dem Dashboard sichtbar machen,
+    // damit der User den EK aus der gescannten Rechnung nachträgt.
+    const missingRes = await client.query(
+      `SELECT b.product_id, p.name AS product_name, b.batch_key, b.remaining_qty
+         FROM automatenlager.stock_batches b
+         LEFT JOIN automatenlager.products p ON p.product_id = b.product_id
+        WHERE (b.unit_cost_net IS NULL OR b.unit_cost_net <= 0)
+          AND b.remaining_qty > 0
+        ORDER BY p.name NULLS LAST, b.batch_key`,
+    );
+
     return {
       byProduct: pr.rows,
       bySlot: sr.rows,
       series: ser.rows,
       granularity,
       inventoryValue: inventoryResult.rows,
+      missingCostBatches: missingRes.rows,
     };
   } finally {
     await client.end();
@@ -738,7 +776,7 @@ async function queryEconomicsProvisionalPg(pgUrl, query = {}) {
 
     const prodRows = byProdRes.rows;
     if (prodRows.length === 0) {
-      return { revenue_gross: 0, qty: 0, cost: 0, costComplete: true, byProduct: [], from_date: null, to_date: null };
+      return { revenue_gross: 0, qty: 0, cost: 0, costMissing: false, byProduct: [], from_date: null, to_date: null };
     }
 
     // FIFO-Bewertung: Chargen der beteiligten Produkte einmal laden.
@@ -762,14 +800,13 @@ async function queryEconomicsProvisionalPg(pgUrl, query = {}) {
     let totalNet = 0;
     let totalQty = 0;
     let totalCost = 0;
-    let costComplete = true;
+    let costMissing = false;
     const byProduct = [];
     for (const r of prodRows) {
       const qty = toNum(r.qty);
       const batches = batchesByProduct.get(String(r.product_id)) || [];
-      const fallback = latestKnownUnitCost(batches);
-      const fifo = fifoProvisionalCostForProduct(batches, qty, fallback);
-      if (!fifo.complete) costComplete = false;
+      const fifo = fifoProvisionalCostForProduct(batches, qty);
+      if (fifo.missingCost) costMissing = true;
       const rg = toNum(r.revenue_gross);
       const rn = toNum(r.revenue_net);
       totalGross += rg;
@@ -783,7 +820,7 @@ async function queryEconomicsProvisionalPg(pgUrl, query = {}) {
         revenue_gross: rg,
         revenue_net: rn,
         cost: fifo.cost,
-        cost_estimated: fifo.estimated,
+        cost_missing: fifo.missingCost,
       });
     }
 
@@ -793,7 +830,7 @@ async function queryEconomicsProvisionalPg(pgUrl, query = {}) {
       revenue_net: round2(totalNet),
       qty: totalQty,
       cost: round2(totalCost),
-      costComplete,
+      costMissing,
       byProduct,
       from_date: span.from_date ? dayKeyBerlin(span.from_date) : null,
       to_date: span.to_date ? dayKeyBerlin(span.to_date) : null,
@@ -813,7 +850,6 @@ module.exports = {
   isoWeekStart,
   isoWeeksInYear,
   fifoProvisionalCostForProduct,
-  latestKnownUnitCost,
   formatProductName,
   parseMachineFilter,
   buildSeriesFromBuckets,

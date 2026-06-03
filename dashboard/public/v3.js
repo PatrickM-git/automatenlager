@@ -1812,44 +1812,63 @@
   }
 
   /* KPI-Strip mit den Totalen des Zeitraums (Brutto wie Legacy).
-     #40: Umsatz + Stück schließen den laufenden Tag (vorläufig, aus
-     sales_transactions) ein — konsistent zur Live-Kachel. GuV/Marge bleiben auf
-     den endgültigen guv_daily-Zahlen, weil der EK live nicht vorliegt. */
+     #40: Umsatz + Stück schließen den laufenden Tag ein (aus sales_transactions),
+     GuV/Marge zusätzlich via Live-FIFO. Gewinn/Marge stammen NUR aus Posten mit
+     bekanntem EK; fehlt für Posten der EK, fließen sie NICHT in GuV/Marge ein
+     (kein geschätzter Wert) und es erscheint ein Warnhinweis. */
   function guvKpiStrip(data) {
     data = data || {};
     var totals = data.totals || {};
     var prov = data.provisional || { hasProvisional: false };
     var withProv = data.totalsWithProvisional || totals;
     var hasProv = !!prov.hasProvisional;
-    // GuV/Marge nur dann „inkl. heute", wenn der Live-EK (FIFO) zugeordnet werden
-    // konnte; sonst bliebe die Marge eine stille Falschangabe.
-    var withCost = hasProv && prov.hasCost;
+    var costMissing = !!data.costMissing;
 
     var umsatzVal = hasProv ? withProv.revenue_gross : totals.revenue_gross;
     var stueckVal = hasProv ? withProv.qty : totals.qty;
-    var guvVal    = withCost ? withProv.gross_profit : totals.gross_profit;
-    var margeRev  = withCost ? withProv.revenue_gross : totals.revenue_gross;
+    var guvVal    = withProv.gross_profit != null ? withProv.gross_profit : totals.gross_profit;
+    // Marge-Nenner = nur „costable" Umsatz (gleiche Posten wie der GuV-Zähler).
+    var margeRev  = withProv.revenue_gross_costable != null ? withProv.revenue_gross_costable : (withProv.revenue_gross != null ? withProv.revenue_gross : totals.revenue_gross);
     var marge     = Number(margeRev) > 0 ? (guvVal / margeRev) * 100 : 0;
 
-    // EK live zuordenbar -> echte „inkl. heute"-Zahl (nicht mehr „vorläufig").
-    var tag = withCost ? 'inkl. heute' : 'inkl. heute (vorläufig)';
-    var umsatzHint = hasProv ? tag + ': +' + fmtEuro(prov.revenueGross) + ' €' : '';
-    var stueckHint = hasProv ? tag + ': +' + fmtInt(prov.qty) : '';
-    var guvHint    = withCost ? 'inkl. heute: +' + fmtEuro(prov.grossProfit) + ' €' : '';
+    var umsatzHint = hasProv ? 'inkl. heute: +' + fmtEuro(prov.revenueGross) + ' €' : '';
+    var stueckHint = hasProv ? 'inkl. heute: +' + fmtInt(prov.qty) : '';
+    var guvHint    = (hasProv && Number(prov.grossProfit) > 0) ? 'inkl. heute: +' + fmtEuro(prov.grossProfit) + ' €' : '';
+    // Bei fehlendem EK: GuV/Marge sind unvollständig -> ehrlich kennzeichnen.
+    var margeHint  = costMissing ? '⚠ EK fehlt – unvollständig' : '';
+    if (costMissing && !guvHint) { guvHint = '⚠ EK fehlt'; }
 
-    function kpi(label, value, unit, hint) {
+    function kpi(label, value, unit, hint, warn) {
       return '<div class="v3-cockpit-kpi">' +
         '<span class="v3-cockpit-kpi__label">' + label + '</span>' +
         '<span class="v3-cockpit-kpi__value">' + value + (unit ? '<span class="v3-cockpit-kpi__unit"> ' + unit + '</span>' : '') + '</span>' +
-        (hint ? '<span class="v3-guv-kpi__prov">' + hint + '</span>' : '') +
+        (hint ? '<span class="v3-guv-kpi__prov' + (warn ? ' v3-guv-kpi__warn' : '') + '">' + hint + '</span>' : '') +
       '</div>';
     }
     return '<div class="v3-cockpit-kpis v3-guv-kpis">' +
-      kpi('Umsatz (brutto)', fmtEuro(umsatzVal), 'EUR', umsatzHint) +
-      kpi('GuV (brutto)', fmtEuro(guvVal), 'EUR', guvHint) +
-      kpi('Marge', fmtPct(marge), '', '') +
-      kpi('Stück', fmtInt(stueckVal), '', stueckHint) +
+      kpi('Umsatz (brutto)', fmtEuro(umsatzVal), 'EUR', umsatzHint, false) +
+      kpi('GuV (brutto)', fmtEuro(guvVal), 'EUR', guvHint, costMissing) +
+      kpi('Marge', fmtPct(marge), '', margeHint, costMissing) +
+      kpi('Stück', fmtInt(stueckVal), '', stueckHint, false) +
     '</div>';
+  }
+
+  /* Warnbanner: aktive Lagerchargen ohne Einkaufspreis. Macht die Datenlücke
+     sichtbar, damit der User den EK (aus der gescannten Rechnung) nachträgt –
+     erst dann sind GuV/Marge der betroffenen Produkte korrekt. */
+  function guvMissingCostBanner(data) {
+    var list = (data && data.missingCostBatches) || [];
+    if (!list.length) { return ''; }
+    var names = list.map(function (b) {
+      var n = b.product_name || ('#' + b.product_id);
+      return '<li><strong>' + esc(n) + '</strong>' + (b.batch_key ? ' <span class="v3-guv-missing__batch">' + esc(b.batch_key) + '</span>' : '') + '</li>';
+    }).join('');
+    return '<section class="v3-guv-missing" role="alert">' +
+      '<p class="v3-guv-missing__head">⚠ Einkaufspreis fehlt für ' + list.length + ' Lagercharge' + (list.length === 1 ? '' : 'n') +
+        ' – GuV &amp; Marge dieser Produkte sind unvollständig.</p>' +
+      '<ul class="v3-guv-missing__list">' + names + '</ul>' +
+      '<p class="v3-guv-missing__hint">Bitte den Einkaufspreis der Charge (aus der Rechnung) nachtragen, damit die Werte stimmen.</p>' +
+    '</section>';
   }
 
   /* Alle Tagesschlüssel ('YYYY-MM-DD') des Zeitraums – die X-Achse ist damit
@@ -2005,8 +2024,9 @@
      einer unplausiblen 100-%-Marge. */
   function guvMargeCell(r) {
     var cost = (Number(r.revenue_gross) || 0) - (Number(r.gross_profit) || 0);
-    if (Number(r.revenue_gross) > 0 && cost <= 0.005) {
-      return '<td class="v3-guv-table__num v3-guv-table__na" title="Einkaufspreis fehlt – Marge nicht berechenbar">–</td>';
+    var missing = r.cost_missing || r.margin_gross_pct == null || (Number(r.revenue_gross) > 0 && cost <= 0.005);
+    if (missing) {
+      return '<td class="v3-guv-table__num v3-guv-table__na" title="Einkaufspreis fehlt – Marge nicht berechenbar; bitte EK der Lagercharge nachtragen">–</td>';
     }
     return '<td class="v3-guv-table__num">' + fmtPct(r.margin_gross_pct) + '</td>';
   }
@@ -2085,10 +2105,10 @@
     var series    = (data && data.series)    || [];
     var byProduct = (data && data.byProduct) || [];
     if (series.length === 0) {
-      return guvRangeCaption(data) + guvKpiStrip(data) +
+      return guvRangeCaption(data) + guvMissingCostBanner(data) + guvKpiStrip(data) +
         renderState('empty', { message: 'Für den gewählten Zeitraum liegen keine Umsätze vor.' });
     }
-    return guvRangeCaption(data) + guvKpiStrip(data) + guvChartsPanel(data) + guvTable(byProduct, q);
+    return guvRangeCaption(data) + guvMissingCostBanner(data) + guvKpiStrip(data) + guvChartsPanel(data) + guvTable(byProduct, q);
   }
 
   /* ---- Live-Umsatz (quasi-live) ---------------------------------------- */
