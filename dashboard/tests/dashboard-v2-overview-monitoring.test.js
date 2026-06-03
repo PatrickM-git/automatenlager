@@ -425,6 +425,17 @@ test('AC-BO1: backups ampel is green when raw.hasBackupOk is true, yellow when f
   assert.equal(missing.ampels.find((a) => a.key === 'backups').state, 'yellow');
 });
 
+test('AC-LIVEMSG: LOW_BATCH/LOW_STOCK warning text is rebuilt from live PG backstock, not the frozen WF5 message', () => {
+  const src = fs.readFileSync(path.join(process.cwd(), 'lib', 'overview-monitoring.js'), 'utf8');
+
+  // Live-Backstock-CTE (Charge − Automat) muss existieren …
+  assert.match(src, /live_stock\s+AS/, 'warnings query must compute a live_stock CTE');
+  assert.match(src, /GREATEST\(COALESCE\(b\.total, 0\) - COALESCE\(s\.mq, 0\), 0\)/, 'backstock must subtract machine qty');
+  // … und für LOW_BATCH/LOW_STOCK den Meldungstext überschreiben (CASE in der Liste).
+  assert.match(src, /WHEN f\.warning_type = 'LOW_BATCH'[\s\S]{0,200}Lager leer/, 'LOW_BATCH message must be rebuilt live (Lager leer / Backstock)');
+  assert.match(src, /WHEN f\.warning_type = 'LOW_STOCK'[\s\S]{0,120}im Automaten/, 'LOW_STOCK message must be rebuilt from live machine qty');
+});
+
 test('AC-BO2: queryOverviewMonitoringPg sources hasBackupOk from a dedicated query, not the filtered warnings list', () => {
   const src = fs.readFileSync(path.join(process.cwd(), 'lib', 'overview-monitoring.js'), 'utf8');
 

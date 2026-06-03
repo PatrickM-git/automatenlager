@@ -300,10 +300,36 @@ async function queryOverviewMonitoringPg(pgUrl) {
           ORDER BY started_at DESC
           LIMIT 80`,
       ),
+      // Bestands-Warnungen (LOW_BATCH/LOW_STOCK) tragen einen von WF5
+      // EINGEFRORENEN Meldungstext mit veralteter Stückzahl (z. B. „Nur noch 5
+      // im Lager", obwohl längst leer). Das Cockpit prüft die Bedingung zwar
+      // live, zeigte aber die alte Zahl. Daher hier den Text für diese Typen aus
+      // dem AKTUELLEN PG-Stand neu bauen: Lager = echter Backstock
+      // GREATEST(SUM(remaining_qty) − SUM(current_machine_qty), 0), exakt wie
+      // inventory-mhd.js / alert-digest.js. MHD-/System-Warnungen bleiben
+      // unverändert (ihr Text ist datums-/zustandsbasiert).
       client.query(
-        `WITH filtered AS (
+        `WITH live_stock AS (
+           SELECT p.product_id, p.name,
+                  GREATEST(COALESCE(b.total, 0) - COALESCE(s.mq, 0), 0)::int AS backstock,
+                  COALESCE(s.mq, 0)::int AS machine_qty
+             FROM automatenlager.products p
+             LEFT JOIN (
+               SELECT product_id, SUM(remaining_qty)::int AS total
+                 FROM automatenlager.stock_batches
+                WHERE status IN (${availableBatchStatusSqlList()})
+                GROUP BY product_id
+             ) b ON b.product_id = p.product_id
+             LEFT JOIN (
+               SELECT product_id, SUM(current_machine_qty)::int AS mq
+                 FROM automatenlager.slot_assignments
+                WHERE active = TRUE
+                GROUP BY product_id
+             ) s ON s.product_id = p.product_id
+         ),
+         filtered AS (
            SELECT DISTINCT ON (warning_type, COALESCE(product_id::text, warning_key))
-             warning_type, severity, resolved, created_at, warning_key, message
+             warning_type, severity, resolved, created_at, warning_key, message, product_id
            FROM automatenlager.warnings w
            WHERE w.created_at >= now() - INTERVAL '7 days'
              AND w.warning_type != 'BACKUP_OK'
@@ -316,11 +342,21 @@ async function queryOverviewMonitoringPg(pgUrl) {
              AND (${LIVE_WARNING_RECONCILE_SQL})
            ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
          )
-         SELECT warning_type, severity, resolved, created_at, warning_key, message
-         FROM filtered
+         SELECT f.warning_type, f.severity, f.resolved, f.created_at, f.warning_key,
+                CASE
+                  WHEN f.warning_type = 'LOW_BATCH' AND ls.product_id IS NOT NULL THEN
+                    CASE WHEN ls.backstock <= 0
+                         THEN ls.name || ': Lager leer (0 im Lager, ' || ls.machine_qty || ' im Automat).'
+                         ELSE ls.name || ': Nur noch ' || ls.backstock || ' Stück im Lager (Schwellwert 5).' END
+                  WHEN f.warning_type = 'LOW_STOCK' AND ls.product_id IS NOT NULL THEN
+                    ls.name || ': ' || ls.machine_qty || ' Stück im Automaten.'
+                  ELSE f.message
+                END AS message
+         FROM filtered f
+         LEFT JOIN live_stock ls ON ls.product_id = f.product_id
          ORDER BY
-           CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
-           created_at DESC
+           CASE f.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+           f.created_at DESC
          LIMIT 40`,
       ),
       // BACKUP_OK separat zaehlen: aus der Warnungs-Liste oben gefiltert, aber
