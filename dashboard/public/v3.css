@@ -1679,7 +1679,7 @@ a.v3-chip:focus-visible {
 /* ---- Zeitreihen-Diagramme ---------------------------------------------- */
 .v3-guv-charts {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr;
   gap: 14px;
 }
 .v3-guv-chart { padding: 16px 16px 10px; display: flex; flex-direction: column; gap: 8px; }
@@ -1726,6 +1726,26 @@ a.v3-chip:focus-visible {
 .v3-guv-bar { transition: opacity 0.15s var(--ease); }
 .v3-guv-barg:hover .v3-guv-bar { opacity: 0.8; }
 .v3-guv-chartsvg { margin-top: 2px; }
+
+/* #57 Kombi-Chart: gestapelte Balken (Wareneinsatz unten / Gewinn oben),
+   Marge-Overlay-Linie auf der rechten Achse, kumulierte Gewinnlinie (Tag). */
+.v3-guv-bar--cost { fill: var(--brand); opacity: 0.22; }
+.v3-guv-bar--profit { fill: var(--ok); }
+.v3-guv-line--margin { stroke: var(--warn); stroke-width: 2; filter: none; }
+.v3-guv-line--cum { stroke: var(--ok); stroke-width: 2; stroke-dasharray: 4 3; filter: none; }
+.v3-guv-dot--margin { fill: var(--card); stroke: var(--warn); }
+.v3-guv-dot--cum { fill: var(--card); stroke: var(--ok); }
+.v3-guv-axisy--right { fill: var(--ink-faint); }
+
+/* Kompakte Chart-Legende */
+.v3-guv-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: var(--ink-soft); }
+.v3-guv-leg { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+.v3-guv-leg::before { content: ''; width: 10px; height: 10px; border-radius: 3px; background: var(--ink-faint); }
+.v3-guv-leg--rev::before { background: var(--brand); }
+.v3-guv-leg--cost::before { background: var(--brand); opacity: 0.35; }
+.v3-guv-leg--profit::before { background: var(--ok); }
+.v3-guv-leg--margin::before { background: var(--warn); border-radius: 50%; }
+.v3-guv-leg--cum::before { background: var(--ok); border-radius: 50%; }
 
 /* ---- Diagramm-Karussell (Handy) --------------------------------------- */
 .v3-guv-chartsblock { display: flex; flex-direction: column; gap: 8px; }
