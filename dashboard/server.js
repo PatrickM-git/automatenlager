@@ -30,6 +30,14 @@ const { runSchemaCheck } = require('./lib/db-schema.js');
 const { runStockCostCheck } = require('./lib/stock-cost-invariant.js');
 const { SLOW_MOVER } = require('./lib/slow-mover.js');
 const {
+  buildEffectiveConfig,
+  loadEffectiveConfig,
+  writeOverride,
+  sanitizeOverride,
+  readOverride,
+  DEFAULT_MANDANT,
+} = require('./lib/category-config.js');
+const {
   normalizeNayaxItems,
   buildAliasIndex,
   buildNayaxIdIndex,
@@ -246,6 +254,37 @@ function formatBerlinDateTime(date) {
 function dashboardV2PgUrl() {
   // Priorität: echte Prozess-Umgebung > .env.local (wie bei der n8n-Konfiguration).
   return resolvePgUrl(process.env, loadLocalEnv());
+}
+
+// Effektive Kategorie-/Schwellwert-Config (#63) für /einstellungen. Ohne erreichbare
+// DB fallen wir auf die Branchen-Anker-Defaults zurück (die Seite bleibt nutzbar).
+async function loadClassificationConfig(mandantId = DEFAULT_MANDANT) {
+  const pgUrl = dashboardV2PgUrl();
+  if (!pgUrl) return buildEffectiveConfig({});
+  const { Client } = require('pg');
+  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 3000 });
+  try {
+    await client.connect();
+    return await loadEffectiveConfig(client, mandantId);
+  } catch {
+    return buildEffectiveConfig({});
+  } finally {
+    try { await client.end(); } catch { /* ignore */ }
+  }
+}
+
+// Merge zweier bereits sanitierter Override-Objekte: skalare Felder von `incoming`
+// überschreiben, Kategorien werden je key tief gemerged — so verwirft ein
+// Teil-Speichern (z. B. nur eine Marge) nicht die übrigen Kategorien/Werte.
+function mergeSettingsOverride(current = {}, incoming = {}) {
+  const out = { ...current, ...incoming };
+  if (current.categories || incoming.categories) {
+    out.categories = { ...(current.categories || {}) };
+    for (const [key, val] of Object.entries(incoming.categories || {})) {
+      out.categories[key] = { ...(out.categories[key] || {}), ...val };
+    }
+  }
+  return out;
 }
 
 // Vollabgleich-Diff (Slotbelegung + Füllstand) Nayax -> PG, read-only.
@@ -2643,9 +2682,61 @@ const server = http.createServer(async (req, res) => {
     // ── Einstellungen: Definitionen/Schwellwerte (Slow-Mover etc.) ─────────────
 
     if (parsed.pathname === '/api/v2/settings/definitions' && req.method === 'GET') {
-      // Reine Referenzdaten aus lib/slow-mover.js (Single Source of Truth);
-      // wird unter /einstellungen angezeigt und ist im Glossar festgeschrieben.
-      sendJson(res, 200, { ok: true, definitions: { slowMover: SLOW_MOVER } });
+      // slowMover = Klassenkatalog (Single Source of Truth, Glossar). config =
+      // die EFFEKTIVE, editierbare Mandant-Config (#63/#66): Margen, Latten,
+      // Schon-/Ladenhüter-Tage. Ohne DB greifen die Branchen-Anker-Defaults.
+      const config = await loadClassificationConfig();
+      const viewer = getViewer(req);
+      sendJson(res, 200, {
+        ok: true,
+        canEdit: viewer.canTriggerActions,
+        definitions: { slowMover: SLOW_MOVER, config },
+      });
+      return;
+    }
+
+    // Schreibpfad (#66, Aufsatz auf #31): Margen/Latten/Schon-/Ladenhüter-Tage +
+    // Kategorien editieren. Admin-only, persistiert je Mandant (classification_settings).
+    if (parsed.pathname === '/api/v2/settings/definitions' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        auditGuestAccess(viewer, 'settings_write_denied', {});
+        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer dürfen die Einstellungen nicht ändern.' } });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await new Promise((resolve, reject) => {
+          let data = '';
+          req.on('data', (chunk) => { data += chunk; });
+          req.on('end', () => resolve(data));
+          req.on('error', reject);
+        }) || '{}');
+      } catch {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON im Request-Body.' } });
+        return;
+      }
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      const { Client } = require('pg');
+      const client = new Client({ connectionString: pgUrl });
+      try {
+        await client.connect();
+        // Bestehenden Override lesen und mit den eingehenden Feldern mergen, damit
+        // ein Teil-Speichern nicht die übrigen Werte verwirft.
+        const current = await readOverride(client, DEFAULT_MANDANT);
+        const incoming = sanitizeOverride(body && body.config ? body.config : body);
+        const mergedOverride = mergeSettingsOverride(current, incoming);
+        const config = await writeOverride(client, DEFAULT_MANDANT, mergedOverride);
+        sendJson(res, 200, { ok: true, definitions: { slowMover: SLOW_MOVER, config } });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      } finally {
+        await client.end();
+      }
       return;
     }
 
