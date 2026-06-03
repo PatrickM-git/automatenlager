@@ -25,8 +25,8 @@ test('AC-57: einheitlicher Stil – alle Zeiträume nutzen das Kombi-Chart', () 
   const panel = js.slice(js.indexOf('function guvChartsPanel'), js.indexOf('function guvChartsPanel') + 1400);
   assert.match(panel, /renderComboChartSvg/, 'guvChartsPanel muss das Kombi-Chart rendern');
   assert.doesNotMatch(panel, /renderDayChartSvg/, 'kein separater Tagesverlauf-Renderer mehr (Konsistenz)');
-  // Tagesgranularität wird auf alle Tage des Zeitraums aufgefüllt, dann ins Kombi.
-  assert.match(panel, /isDay[\s\S]*guvPeriodDays/, 'Tagesansicht füllt die X-Achse über alle Tage');
+  // Keine Null-Tage auffüllen – nur vorhandene Buckets zeigen.
+  assert.doesNotMatch(panel, /guvPeriodDays/, 'darf keine leeren Tage auffüllen');
 });
 
 test('AC-57: Kombi-Chart zeichnet gestapelte Balken + Marge-Overlay + rechte Achse', () => {
@@ -36,6 +36,7 @@ test('AC-57: Kombi-Chart zeichnet gestapelte Balken + Marge-Overlay + rechte Ach
   assert.match(combo, /v3-guv-bar--profit/, 'Gewinn-Segment (oben) fehlt');
   assert.match(combo, /v3-guv-line--margin/, 'Marge-Overlay-Linie fehlt');
   assert.match(combo, /v3-guv-axisy--right/, 'rechte (%) Achse fehlt');
+  assert.match(combo, /r\.total > 0/, 'Marge/0-Werte: nur Buckets mit Umsatz zeigen');
 });
 
 test('AC-57: pro Segment ein eigener Treffer mit Highlight + EINEM Wert', () => {

@@ -2038,8 +2038,10 @@
         '<path class="v3-guv-bar v3-guv-bar--profit" d="' + roundedTopBar(x, yTop, r2(barW), hProfit, rTop) + '"/>';
     }).join('');
 
-    var pts = rows.map(function (r, i) { return { x: r2(padL + slot * (i + 0.5)), y: r2(yM(r.margin)) }; });
-    var mline = '<path class="v3-guv-line v3-guv-line--margin" d="M' + pts.map(function (p) { return p.x + ' ' + p.y; }).join(' L') + '" fill="none"/>';
+    // Marge nur für Buckets mit Umsatz (>0) – keine 0-%-Linie über leere Perioden.
+    var pts = [];
+    rows.forEach(function (r, i) { if (r.total > 0) { pts.push({ x: r2(padL + slot * (i + 0.5)), y: r2(yM(r.margin)) }); } });
+    var mline = pts.length ? '<path class="v3-guv-line v3-guv-line--margin" d="M' + pts.map(function (p) { return p.x + ' ' + p.y; }).join(' L') + '" fill="none"/>' : '';
     var markers = pts.map(function (p) { return '<circle class="v3-guv-pt__dot v3-guv-dot--margin" cx="' + p.x + '" cy="' + p.y + '" r="2.6"/>'; }).join('');
 
     var n = rows.length, step = n <= 12 ? 1 : Math.ceil(n / 8);
@@ -2087,11 +2089,13 @@
           '<path class="v3-guv-seg__hl" d="' + roundedTopBar(x, yTop, bw, hProfit, rTop) + '"/>',
           cx, yTop);
       }
-      var my = r2(yM(r.margin));
-      out += segNode(per + ' · Marge ' + fmtPct(r.margin),
-        '<circle class="v3-guv-seg__hit" cx="' + r2(cx) + '" cy="' + my + '" r="11"/>',
-        '<circle class="v3-guv-seg__hl v3-guv-seg__hl--margin" cx="' + r2(cx) + '" cy="' + my + '" r="5"/>',
-        cx, my, 'v3-guv-seg--margin');
+      if (r.total > 0) {
+        var my = r2(yM(r.margin));
+        out += segNode(per + ' · Marge ' + fmtPct(r.margin),
+          '<circle class="v3-guv-seg__hit" cx="' + r2(cx) + '" cy="' + my + '" r="11"/>',
+          '<circle class="v3-guv-seg__hl v3-guv-seg__hl--margin" cx="' + r2(cx) + '" cy="' + my + '" r="5"/>',
+          cx, my, 'v3-guv-seg--margin');
+      }
       return out;
     }).join('');
 
@@ -2108,19 +2112,9 @@
      unterscheidet Tag/Woche vs. Monat/Quartal/Jahr. */
   function guvChartsPanel(data) {
     var series = (data && data.series) || [];
-    var isDay = (data && data.granularity) === 'day';
-    if (isDay) {
-      // X-Achse = alle Tage des Zeitraums (auch ohne Verkauf), damit der Verlauf
-      // vollständig ist und nicht nur Tage mit Daten zeigt.
-      var days = guvPeriodDays(data && data.period);
-      var byDay = {};
-      series.forEach(function (d) { byDay[d.month] = d; });
-      var keys = days.length ? days : series.map(function (d) { return d.month; });
-      series = keys.map(function (k) {
-        var d = byDay[k] || {};
-        return { month: k, revenue_gross: Number(d.revenue_gross) || 0, gross_profit: Number(d.gross_profit) || 0, margin_gross_pct: Number(d.margin_gross_pct) || 0 };
-      });
-    }
+    // Nur vorhandene Buckets zeigen (keine Null-Tage auffüllen) – einheitlich für
+    // alle Granularitäten. Verhindert die irritierende 0-%-Marge-Linie über
+    // verkaufsfreie Tage; gezeigt wird nur, was tatsächlich da ist.
     var svg = renderComboChartSvg(series, { label: 'Umsatz, Wareneinsatz und Marge je Periode' });
     var legend = '<div class="v3-guv-legend">' +
       '<span class="v3-guv-leg v3-guv-leg--cost">Wareneinsatz</span>' +
