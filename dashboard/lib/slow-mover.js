@@ -1,99 +1,144 @@
 'use strict';
 
 /**
- * Umschlag-/Slow-Mover-Klassifikation (Issue v3-H / #8).
+ * Drehgeschwindigkeits-Klassifikation (Issue #64, Branchen-Anker).
+ * ------------------------------------------------------------------
+ * Kernumbau: weg von der relativen Quartil-/Stückzahl-Logik, hin zu einem
+ * **absoluten, kategoriebasierten, mandantenfähigen** Maßstab.
  *
- * Granularität: pro Slot/Automat (nicht global pro Produkt).
- * Verfahren: quartilbasiert über die Drehzahl-Kennzahl (turnover) der aktiven
- *   Slots — oberstes Quartil = Renner, unterstes = Langsam-Dreher, dazwischen
- *   Normal.
- * Sonderklasse Ladenhüter: 0 Verkäufe seit ≥ ladenhueterDays Tagen (Default 30)
- *   → eindeutig Ladenhüter, unabhängig von der Quartilseinordnung.
+ * Maßstab = **Deckungsbeitrag (Marge) pro Slot pro Woche**, gemittelt über die
+ * letzten 4 Wochen. Geld statt Stückzahl macht alle Preisklassen fair
+ * vergleichbar (Energydrink mit hoher Marge vs. Kaugummi mit Mini-Marge).
+ *
+ * Die Latten kommen aus der Kategorie-/Schwellwert-Config (lib/category-config.js,
+ * Issue #63): pro Kategorie eine eigene Geld-Latte, abgeleitet aus der Branchennorm
+ * — nicht aus den eigenen (ggf. schwachen) Ist-Zahlen. Ein unterdurchschnittlicher
+ * Automat zeigt damit ehrlich überwiegend „Langsam-Dreher".
+ *
+ * Klassen (Vorrang von oben nach unten):
+ *   neu            Produkt in Schonfrist (< graceDays gelistet) — noch nicht fair
+ *                  bewertbar; nie Langsam-Dreher.
+ *   ladenhueter    0 Verkäufe seit ≥ ladenhueterDays Tagen — eigenes ZEIT-Signal
+ *                  (totes Kapital/MHD-Risiko), Vorrang vor den Geld-Klassen.
+ *   ek_fehlt       Einkaufspreis unbekannt → keine geratene Klasse, Lücke sichtbar.
+ *   renner/normal/langsam_dreher   geldbasiert über die Kategorie-Latte.
  *
  * Reine Funktion ohne DB-Abhängigkeit (testbar). Das Frontend interpretiert nur
- * die gelieferte Klasse (`turnover_class`) als Badge. Definitionen sind im
- * Glossar `docs/UBIQUITOUS_LANGUAGE.md` verbindlich festgeschrieben und werden
- * unter `/einstellungen` sichtbar gemacht — beides speist sich aus `SLOW_MOVER`.
+ * die gelieferte `turnover_class` als Badge. Definitionen sind im Glossar
+ * `docs/UBIQUITOUS_LANGUAGE.md` verbindlich und werden unter `/einstellungen`
+ * sichtbar/editierbar gemacht — beides speist sich aus dieser Klassenliste +
+ * der effektiven Config.
  */
 
+const { buildEffectiveConfig, DEFAULT_MANDANT, DEFAULT_CONFIG } = require('./category-config.js');
+
 const SLOW_MOVER = {
-  // Ein Slot ohne Verkauf seit ≥ diesen Tagen gilt als Ladenhüter.
-  ladenhueterDays: 30,
-  // Unter so vielen aktiven Slots sind Quartile nicht aussagekräftig → alle „normal".
-  minPointsForQuartiles: 4,
+  // Default-Schwellen (aus der Branchen-Anker-Config). Editierbar je Mandant.
+  ladenhueterDays: DEFAULT_CONFIG.ladenhueterDays,
+  graceDays: DEFAULT_CONFIG.graceDays,
+  // Default-Fenster für den Deckungsbeitrag/Woche (4 Wochen).
+  windowWeeks: 4,
   classes: [
-    { key: 'renner',         label: 'Renner',         description: 'Oberstes Quartil der Drehzahl je Slot/Automat — verkauft sich am schnellsten.' },
-    { key: 'normal',         label: 'Normal',         description: 'Mittlerer Drehzahl-Bereich zwischen unterem und oberem Quartil.' },
-    { key: 'langsam_dreher', label: 'Langsam-Dreher', description: 'Unterstes Quartil der Drehzahl — dreht langsam, beobachten.' },
-    { key: 'ladenhueter',    label: 'Ladenhüter',     description: '0 Verkäufe seit ≥ 30 Tagen — totes Kapital und MHD-Risiko, unabhängig vom Quartil.' },
+    { key: 'renner',         label: 'Renner',         description: 'Deckungsbeitrag pro Slot/Woche über der Renner-Latte der Kategorie — der Platz bringt überdurchschnittlich Geld.' },
+    { key: 'normal',         label: 'Normal',         description: 'Deckungsbeitrag im erwarteten Bereich der Kategorie zwischen Langsam- und Renner-Latte.' },
+    { key: 'langsam_dreher', label: 'Langsam-Dreher', description: 'Deckungsbeitrag pro Slot/Woche unter der Langsam-Latte — der Platz bringt zu wenig Geld.' },
+    { key: 'ladenhueter',    label: 'Ladenhüter',     description: '0 Verkäufe seit ≥ 30 Tagen — totes Kapital und MHD-Risiko (zeitbasiert, Vorrang vor den Geld-Klassen).' },
+    { key: 'ek_fehlt',       label: 'EK fehlt',       description: 'Einkaufspreis unbekannt — keine Bewertung möglich. Lücke sichtbar machen statt eine Klasse zu raten.' },
+    { key: 'neu',            label: 'Neu',            description: 'In der Schonfrist (< 14 Tage gelistet) — noch keine faire Bewertung, nie als Langsam-Dreher eingestuft.' },
   ],
 };
 
 const VALID_CLASSES = SLOW_MOVER.classes.map((c) => c.key);
 
-// Perzentil mit linearer Interpolation. Erwartet aufsteigend sortiertes Array.
-function quantile(sortedAsc, p) {
-  const n = sortedAsc.length;
-  if (n === 0) return NaN;
-  if (n === 1) return sortedAsc[0];
-  const idx = (n - 1) * p;
-  const lo = Math.floor(idx);
-  const hi = Math.ceil(idx);
-  if (lo === hi) return sortedAsc[lo];
-  return sortedAsc[lo] + (sortedAsc[hi] - sortedAsc[lo]) * (idx - lo);
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
-function turnoverValue(slot) {
-  const raw = slot.turnover != null ? slot.turnover : slot.turnover_count;
-  const num = Number(raw);
-  return Number.isFinite(num) ? num : 0;
+// Liefert eine effektive Config — akzeptiert sowohl eine bereits gebaute Config
+// (mit .latten) als auch einen rohen Override / leer (Defaults).
+function asConfig(config) {
+  if (config && typeof config === 'object' && config.latten) return config;
+  return buildEffectiveConfig(config || {});
+}
+
+// Latte für die Kategorie eines Slots; unbekannte Kategorie → Fallback-Latte.
+function lattenFor(config, categoryKey) {
+  const key = String(categoryKey ?? '').trim().toLowerCase();
+  return config.latten[key] || config.latten[DEFAULT_MANDANT];
+}
+
+/**
+ * Deckungsbeitrag pro Woche eines Slots:
+ *   - direkt `marginPerWeek` / `margin_per_week`, falls geliefert, sonst
+ *   - `db_window` (Marge im Fenster) ÷ Fensterwochen.
+ * Gibt null zurück, wenn keine valide Marge-Basis existiert → Klasse ek_fehlt.
+ */
+function marginPerWeek(slot, windowWeeks) {
+  const direct = finiteOrNull(slot.marginPerWeek != null ? slot.marginPerWeek : slot.margin_per_week);
+  if (direct != null) return direct;
+  const windowMargin = finiteOrNull(slot.db_window != null ? slot.db_window : slot.margin_window);
+  if (windowMargin == null) return null;
+  const weeks = finiteOrNull(slot.windowWeeks) || windowWeeks || 4;
+  return weeks > 0 ? windowMargin / weeks : null;
 }
 
 // Ladenhüter: kein Verkauf seit >= ladenhueterDays Tagen (oder nie verkauft).
 function isLadenhueter(slot, ladenhueterDays) {
-  const days = slot.daysSinceLastSale;
-  if (days == null) return true; // unbekannt / nie verkauft
-  return Number(days) >= ladenhueterDays;
+  const days = finiteOrNull(slot.daysSinceLastSale != null ? slot.daysSinceLastSale : slot.days_since_last_sale);
+  if (days == null) return true; // unbekannt / nie verkauft → totes Kapital
+  return days >= ladenhueterDays;
+}
+
+// EK fehlt, wenn explizit markiert ODER die Marge-Basis nicht berechenbar ist.
+function isEkMissing(slot, dbWeek) {
+  if (slot.ek_missing === true || slot.ekMissing === true) return true;
+  return dbWeek == null;
+}
+
+/**
+ * Klasse eines einzelnen Slots (Vorrang: neu → ladenhueter → ek_fehlt → Geld).
+ */
+function classFor(slot, config) {
+  const listed = finiteOrNull(slot.listedDays != null ? slot.listedDays : slot.listed_days);
+  // 1. Schonfrist: neue Produkte nicht einordnen (vor Ladenhüter, sonst würde ein
+  //    frisch gelistetes, nie verkauftes Produkt fälschlich als Ladenhüter gelten).
+  if (listed != null && listed < config.graceDays) return 'neu';
+  // 2. Ladenhüter (zeitbasiert, Vorrang vor den Geld-Klassen).
+  if (isLadenhueter(slot, config.ladenhueterDays)) return 'ladenhueter';
+  // 3. EK fehlt → keine geratene Klasse.
+  const dbWeek = marginPerWeek(slot, config.windowWeeks);
+  if (isEkMissing(slot, dbWeek)) return 'ek_fehlt';
+  // 4. Geld-Klassen über die Kategorie-Latte.
+  const latte = lattenFor(config, slot.category);
+  if (dbWeek >= latte.rennerThreshold) return 'renner';
+  if (dbWeek <= latte.langsamThreshold) return 'langsam_dreher';
+  return 'normal';
 }
 
 /**
  * Klassifiziert eine Liste von Slots. Gibt eine NEUE Liste zurück, in der jeder
  * Slot um `turnover_class` ergänzt ist (Eingabe bleibt unverändert).
  *
- * @param {Array<object>} slots  je Slot: { ...id, turnover|turnover_count, daysSinceLastSale }
- * @param {object} [opts] { ladenhueterDays, minPointsForQuartiles }
+ * @param {Array<object>} slots  je Slot: { category, marginPerWeek|db_window,
+ *   listedDays, daysSinceLastSale, ek_missing }
+ * @param {object} [config] effektive Config (lib/category-config.js) ODER roher
+ *   Override; fehlt sie, greifen die Branchen-Anker-Defaults.
  */
-function classifyTurnover(slots, opts = {}) {
-  const ladenhueterDays = opts.ladenhueterDays ?? SLOW_MOVER.ladenhueterDays;
-  const minPoints = opts.minPointsForQuartiles ?? SLOW_MOVER.minPointsForQuartiles;
-
-  const rows = (slots || []).map((s) => ({ ...s }));
-
-  const active = rows.filter((s) => !isLadenhueter(s, ladenhueterDays));
-  let q1 = NaN;
-  let q3 = NaN;
-  if (active.length >= minPoints) {
-    const vals = active.map(turnoverValue).sort((a, b) => a - b);
-    q1 = quantile(vals, 0.25);
-    q3 = quantile(vals, 0.75);
-  }
-  const hasSpread = Number.isFinite(q1) && Number.isFinite(q3) && q1 !== q3;
-
-  for (const s of rows) {
-    if (isLadenhueter(s, ladenhueterDays)) {
-      s.turnover_class = 'ladenhueter';
-      continue;
-    }
-    if (!hasSpread) {
-      s.turnover_class = 'normal';
-      continue;
-    }
-    const t = turnoverValue(s);
-    if (t >= q3) s.turnover_class = 'renner';
-    else if (t <= q1) s.turnover_class = 'langsam_dreher';
-    else s.turnover_class = 'normal';
-  }
-  return rows;
+function classifyTurnover(slots, config) {
+  const cfg = asConfig(config);
+  return (slots || []).map((s) => ({ ...s, turnover_class: classFor(s, cfg) }));
 }
 
-module.exports = { classifyTurnover, quantile, isLadenhueter, SLOW_MOVER, VALID_CLASSES };
+module.exports = {
+  classifyTurnover,
+  classFor,
+  marginPerWeek,
+  isLadenhueter,
+  isEkMissing,
+  lattenFor,
+  asConfig,
+  SLOW_MOVER,
+  VALID_CLASSES,
+};

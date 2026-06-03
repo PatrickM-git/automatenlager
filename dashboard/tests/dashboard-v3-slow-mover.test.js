@@ -1,121 +1,142 @@
 'use strict';
 
+/**
+ * Drehgeschwindigkeits-Klassifikation — geldbasiert (Issue #64).
+ * Gute Tests prüfen externes Verhalten (Eingabe-Slots + Config → turnover_class),
+ * nicht Implementierungsinterna. Latten kommen aus den Branchen-Anker-Defaults
+ * (lib/category-config.js).
+ */
+
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const {
-  classifyTurnover,
-  SLOW_MOVER,
-  quantile,
-} = require('../lib/slow-mover.js');
+const { classifyTurnover, SLOW_MOVER, VALID_CLASSES } = require('../lib/slow-mover.js');
+const { buildEffectiveConfig } = require('../lib/category-config.js');
 
-// Hilfsfunktion: Slot mit kürzlichem Verkauf (nicht Ladenhüter).
-function slot(key, turnover, daysSinceLastSale = 1) {
-  const [machine_id, mdb_code] = key.split(':');
-  return { machine_id, mdb_code, turnover, daysSinceLastSale };
+// Default-Latten (zur Kontrolle der Erwartungswerte in den Tests):
+//   umsatz/slot/woche = 800/30/4.33 ≈ 6.158
+//   snack    (52 %): expected 3.20 · renner ≥ 4.16 · langsam ≤ 1.92
+//   getraenk (43 %): expected 2.65 · renner ≥ 3.44 · langsam ≤ 1.59
+const CFG = buildEffectiveConfig({});
+
+// Slot-Helfer: standardmäßig kürzlich verkauft, lange gelistet, EK vorhanden.
+function slot(over = {}) {
+  return {
+    machine_id: 'VM01', mdb_code: '11',
+    category: 'snack',
+    daysSinceLastSale: 1,
+    listedDays: 90,
+    ek_missing: false,
+    ...over,
+  };
 }
 
-// ── Quartil-Klassifikation (kontrollierte Eingaben) ───────────────────────────
+function classOf(over) {
+  return classifyTurnover([slot(over)], CFG)[0].turnover_class;
+}
 
-test('classifyTurnover: oberstes Quartil = renner, unterstes = langsam_dreher, Mitte = normal', () => {
-  // 8 Slots, Drehzahl 1..8, alle kürzlich verkauft.
-  const slots = [1, 2, 3, 4, 5, 6, 7, 8].map((t, i) => slot(`VM01:${10 + i}`, t));
-  const out = classifyTurnover(slots);
-  const byTurnover = Object.fromEntries(out.map((s) => [s.turnover, s.turnover_class]));
+// ── Geldbasierte Einordnung (Kern) ────────────────────────────────────────────
 
-  // Q1≈2.75, Q3≈6.25 → t>=6.25 renner (7,8); t<=2.75 langsam (1,2); Rest normal.
-  assert.equal(byTurnover[8], 'renner');
-  assert.equal(byTurnover[7], 'renner');
-  assert.equal(byTurnover[1], 'langsam_dreher');
-  assert.equal(byTurnover[2], 'langsam_dreher');
-  assert.equal(byTurnover[4], 'normal');
-  assert.equal(byTurnover[5], 'normal');
+test('#64 Drink mit hoher Marge = renner, Kaugummi mit Mini-Marge = langsam_dreher', () => {
+  // Energydrink: wenige Stück, aber hohe Marge/Woche → renner.
+  assert.equal(classOf({ category: 'getraenk', marginPerWeek: 5.0 }), 'renner');
+  // Kaugummi: viele Stück, aber Mini-Marge/Woche → langsam_dreher.
+  assert.equal(classOf({ category: 'snack', marginPerWeek: 1.0 }), 'langsam_dreher');
 });
 
-test('classifyTurnover: Granularität pro Slot/Automat — eine Klasse je Eingabezeile', () => {
-  const slots = [1, 2, 3, 4, 5, 6, 7, 8].map((t, i) => slot(`VM0${(i % 2) + 1}:${10 + i}`, t));
-  const out = classifyTurnover(slots);
-  assert.equal(out.length, slots.length);
-  for (const s of out) {
-    assert.ok(['renner', 'normal', 'langsam_dreher', 'ladenhueter'].includes(s.turnover_class));
-    assert.ok(s.machine_id && s.mdb_code, 'Slot-Identität bleibt erhalten');
-  }
+test('#64 mittlere Marge = normal', () => {
+  assert.equal(classOf({ category: 'snack', marginPerWeek: 3.0 }), 'normal');
 });
 
-// ── Ladenhüter-Sonderregel (0 Verkäufe seit ≥ 30 Tagen) ───────────────────────
-
-test('classifyTurnover: ≥30 Tage ohne Verkauf = ladenhueter, unabhängig von der Quartilseinordnung', () => {
-  // Slot mit eigentlich hoher Drehzahl, aber letzter Verkauf vor 40 Tagen.
-  const slots = [
-    slot('VM01:10', 100, 40), // würde sonst renner sein
-    slot('VM01:11', 5, 1),
-    slot('VM01:12', 4, 1),
-    slot('VM01:13', 3, 1),
-    slot('VM01:14', 2, 1),
-  ];
-  const out = classifyTurnover(slots);
-  assert.equal(out.find((s) => s.mdb_code === '10').turnover_class, 'ladenhueter');
+test('#64 Kategorie-eigene Latten: gleicher €/Woche fällt je Kategorie anders', () => {
+  // 3.7 €/Woche: für Snack (Renner-Latte 4.16) noch normal, für Getränk (3.44) schon renner.
+  assert.equal(classOf({ category: 'snack', marginPerWeek: 3.7 }), 'normal');
+  assert.equal(classOf({ category: 'getraenk', marginPerWeek: 3.7 }), 'renner');
 });
 
-test('classifyTurnover: Grenzfall genau 30 Tage = ladenhueter, 29 Tage nicht', () => {
-  const base = [1, 2, 3, 4, 5, 6].map((t, i) => slot(`VM01:${20 + i}`, t, 1));
-  const at30 = classifyTurnover([...base, slot('VM01:30', 5, 30)]);
-  const at29 = classifyTurnover([...base, slot('VM01:31', 5, 29)]);
-  assert.equal(at30.find((s) => s.mdb_code === '30').turnover_class, 'ladenhueter');
-  assert.notEqual(at29.find((s) => s.mdb_code === '31').turnover_class, 'ladenhueter');
+test('#64 unbekannte Kategorie nutzt Fallback-Latte (Default-Marge 50 %)', () => {
+  // Fallback expected = 6.158*0.5 = 3.08, renner ≥ 4.00.
+  assert.equal(classOf({ category: 'spielzeug', marginPerWeek: 5.0 }), 'renner');
+  assert.equal(classOf({ category: 'spielzeug', marginPerWeek: 1.0 }), 'langsam_dreher');
 });
 
-test('classifyTurnover: nie verkauft (daysSinceLastSale null) = ladenhueter', () => {
-  const slots = [
-    slot('VM01:10', 0, null),
-    ...[1, 2, 3, 4].map((t, i) => slot(`VM01:${11 + i}`, t, 1)),
-  ];
-  const out = classifyTurnover(slots);
-  assert.equal(out.find((s) => s.mdb_code === '10').turnover_class, 'ladenhueter');
+// ── db_window / Fenster-Pfad ──────────────────────────────────────────────────
+
+test('#64 db_window ÷ Fensterwochen liefert die Marge/Woche', () => {
+  // 16 € Marge über 4 Wochen = 4.0 €/Woche → snack renner-nah? 4.0 < 4.16 → normal.
+  assert.equal(classOf({ category: 'snack', db_window: 16, windowWeeks: 4 }), 'normal');
+  // 20 € / 4 = 5.0 → renner.
+  assert.equal(classOf({ category: 'snack', db_window: 20, windowWeeks: 4 }), 'renner');
 });
 
-// ── Zu wenige Datenpunkte für sinnvolle Quartile ──────────────────────────────
+// ── Schonfrist (Vorrang vor Langsam) ──────────────────────────────────────────
 
-test('classifyTurnover: zu wenige aktive Slots (<4) → alle normal (keine Quartile)', () => {
-  const slots = [slot('VM01:10', 1), slot('VM01:11', 50), slot('VM01:12', 99)];
-  const out = classifyTurnover(slots);
-  for (const s of out) assert.equal(s.turnover_class, 'normal');
+test('#64 Schonfrist: neues Produkt (< graceDays) wird nie Langsam-Dreher, sondern neu', () => {
+  assert.equal(classOf({ listedDays: 5, marginPerWeek: 0.1 }), 'neu');
 });
 
-test('classifyTurnover: keine Streuung (alle gleiche Drehzahl) → alle normal', () => {
-  const slots = [5, 5, 5, 5, 5].map((t, i) => slot(`VM01:${10 + i}`, t));
-  const out = classifyTurnover(slots);
-  for (const s of out) assert.equal(s.turnover_class, 'normal');
+test('#64 Schonfrist: frisch gelistetes, nie verkauftes Produkt ist neu (nicht ladenhueter)', () => {
+  assert.equal(classOf({ listedDays: 3, daysSinceLastSale: null }), 'neu');
 });
 
-test('classifyTurnover: leere Eingabe → leeres Array', () => {
-  assert.deepEqual(classifyTurnover([]), []);
+test('#64 nach Schonfrist greift wieder die normale Einordnung', () => {
+  assert.equal(classOf({ listedDays: 20, marginPerWeek: 5.0 }), 'renner');
 });
 
-test('classifyTurnover: liest turnover_count, wenn turnover fehlt', () => {
-  const slots = [10, 20, 30, 40, 50, 60, 70, 80].map((c, i) => ({
-    machine_id: 'VM01', mdb_code: String(10 + i), turnover_count: c, daysSinceLastSale: 1,
-  }));
-  const out = classifyTurnover(slots);
-  assert.equal(out.find((s) => s.mdb_code === '17').turnover_class, 'renner'); // 80
-  assert.equal(out.find((s) => s.mdb_code === '10').turnover_class, 'langsam_dreher'); // 10
+// ── Ladenhüter (Vorrang vor Geld-Klassen) ─────────────────────────────────────
+
+test('#64 Ladenhüter hat Vorrang: 40 Tage kein Verkauf trotz hoher Marge = ladenhueter', () => {
+  assert.equal(classOf({ daysSinceLastSale: 40, marginPerWeek: 10 }), 'ladenhueter');
 });
 
-// ── Konfiguration / Definitionen (für /einstellungen + Glossar) ───────────────
+test('#64 nie verkauft (über Schonfrist) = ladenhueter', () => {
+  assert.equal(classOf({ daysSinceLastSale: null, listedDays: 90 }), 'ladenhueter');
+});
 
-test('SLOW_MOVER: Schwellwert Ladenhüter = 30 Tage, vier definierte Klassen', () => {
+test('#64 Grenzfall genau 30 Tage = ladenhueter, 29 Tage nicht', () => {
+  assert.equal(classOf({ daysSinceLastSale: 30, marginPerWeek: 3 }), 'ladenhueter');
+  assert.notEqual(classOf({ daysSinceLastSale: 29, marginPerWeek: 3 }), 'ladenhueter');
+});
+
+// ── EK fehlt (niemals raten) ──────────────────────────────────────────────────
+
+test('#64 EK fehlt (explizit) → ek_fehlt, niemals geratene Klasse', () => {
+  assert.equal(classOf({ ek_missing: true, marginPerWeek: 10 }), 'ek_fehlt');
+});
+
+test('#64 keine Marge-Basis berechenbar → ek_fehlt', () => {
+  assert.equal(classOf({ marginPerWeek: null, db_window: null }), 'ek_fehlt');
+});
+
+// ── Default-Config / Onboarding ───────────────────────────────────────────────
+
+test('#64 ohne Config-Argument greifen die Branchen-Anker-Defaults', () => {
+  const out = classifyTurnover([slot({ category: 'getraenk', marginPerWeek: 5.0 })]);
+  assert.equal(out[0].turnover_class, 'renner');
+});
+
+// ── Robustheit / Vertrag ──────────────────────────────────────────────────────
+
+test('#64 leere Eingabe → leeres Array', () => {
+  assert.deepEqual(classifyTurnover([], CFG), []);
+});
+
+test('#64 Eingabe bleibt unverändert, Identität erhalten, Klasse gültig', () => {
+  const input = [slot({ marginPerWeek: 3.0 })];
+  const out = classifyTurnover(input, CFG);
+  assert.equal(input[0].turnover_class, undefined, 'Eingabe darf nicht mutiert werden');
+  assert.ok(out[0].machine_id && out[0].mdb_code, 'Slot-Identität bleibt erhalten');
+  assert.ok(VALID_CLASSES.includes(out[0].turnover_class));
+});
+
+// ── Klassenkatalog (für /einstellungen + Glossar + Frontend-Badges) ───────────
+
+test('#64 SLOW_MOVER: sechs definierte Klassen mit Label + Beschreibung', () => {
+  const keys = SLOW_MOVER.classes.map((c) => c.key).sort();
+  assert.deepEqual(keys, ['ek_fehlt', 'ladenhueter', 'langsam_dreher', 'neu', 'normal', 'renner']);
   assert.equal(SLOW_MOVER.ladenhueterDays, 30);
-  const keys = SLOW_MOVER.classes.map((c) => c.key);
-  assert.deepEqual(keys.sort(), ['ladenhueter', 'langsam_dreher', 'normal', 'renner']);
+  assert.equal(SLOW_MOVER.graceDays, 14);
   for (const c of SLOW_MOVER.classes) {
     assert.ok(c.label && c.description, `Klasse ${c.key} braucht Label + Beschreibung`);
   }
-});
-
-test('quantile: lineare Interpolation, deterministisch', () => {
-  const v = [1, 2, 3, 4, 5, 6, 7, 8];
-  assert.equal(quantile(v, 0), 1);
-  assert.equal(quantile(v, 1), 8);
-  assert.equal(quantile(v, 0.25), 2.75);
-  assert.equal(quantile(v, 0.75), 6.25);
 });
