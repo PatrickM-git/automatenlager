@@ -11,32 +11,52 @@ bevor sie sich im Code verteilen.
 
 ---
 
-## Umschlag / Drehzahl (Slow-Mover-Klassifikation)
+## Drehgeschwindigkeit (Branchen-Anker-Klassifikation) *(aktualisiert)*
 
-**Drehzahl** = wie schnell sich ein Produkt **pro Slot/Automat** verkauft (nicht
-global pro Produkt). Kennzahl ist die Verkaufsmenge je Slot über das betrachtete
-Fenster (`turnover` / `turnover_count`, gespeist aus `automatenlager.v_slot_turnover`).
+> Umgestellt von relativer Quartil-/Stückzahl-Logik auf einen **absoluten,
+> kategoriebasierten Maßstab**. Quelle: SPEC `docs/specs/branchen-anker-drehgeschwindigkeit-v1.md`.
+> Bevorzugter Cluster-Name: **Drehgeschwindigkeit** (*zu vermeiden als Synonym: „Drehzahl",
+> „Umschlag" als Klassen­begriff*). Logik liegt im Backend (`classifyTurnover`,
+> `dashboard/lib/slow-mover.js`); das Frontend zeigt nur die gelieferte `turnover_class` als **Badge**.
 
-Die Klassifikation ist **quartilbasiert** über die aktiven Slots:
+**Drehgeschwindigkeits-Klasse** = wie wirtschaftlich sich ein **Slot/Automat** dreht, gemessen am
+**Deckungsbeitrag pro Slot pro Woche** (nicht an Stückzahl, nicht global pro Produkt):
 
 | Klasse (`key`) | Label | Definition |
 |---|---|---|
-| `renner` | **Renner** | Oberstes Quartil der Drehzahl (`turnover ≥ Q3`). Verkauft sich am schnellsten. |
-| `normal` | **Normal** | Mittlerer Bereich zwischen unterem und oberem Quartil (`Q1 < turnover < Q3`). |
-| `langsam_dreher` | **Langsam-Dreher** | Unterstes Quartil (`turnover ≤ Q1`). Dreht langsam — beobachten. |
-| `ladenhueter` | **Ladenhüter** | **0 Verkäufe seit ≥ 30 Tagen** — totes Kapital + MHD-Risiko. Gilt **unabhängig** von der Quartilseinordnung (Override). |
+| `renner` | **Renner** | Deckungsbeitrag/Slot/Woche **über** der kategorie­spezifischen oberen Latte. Der Platz verdient überdurchschnittlich. |
+| `normal` | **Normal** | Deckungsbeitrag/Slot/Woche **zwischen** unterer und oberer Latte. |
+| `langsam_dreher` | **Langsam-Dreher** | Deckungsbeitrag/Slot/Woche **unter** der unteren Latte. Der Platz verdient zu wenig — tauschen erwägen. |
+| `ladenhueter` | **Ladenhüter** | **0 Verkäufe seit ≥ `ladenhueterDays` (Default 30) Tagen** — totes Kapital + MHD-Risiko. **Zeitbasiert, Vorrang** vor den Geld-Klassen. |
+| `ek_fehlt` | **Bewertung nicht möglich (EK fehlt)** *(neu)* | Kein Einkaufspreis hinterlegt → Deckungsbeitrag nicht berechenbar → **keine geratene Klasse**, sondern neutraler Hinweis (= Nachpflege-Arbeitsvorrat). |
+| `neu` | **Neuling (Schonfrist)** *(neu)* | Produkt seit weniger als `graceDays` (Default 14) gelistet → von Renner/Langsam ausgenommen, damit Neulinge nicht vorschnell aussortiert werden. |
 
 Festlegungen:
 
-- **Granularität:** pro Slot/Automat, nicht pro Produkt.
-- **Quartile:** lineare Interpolation (25 %/75 %) über die Drehzahl der *aktiven*
-  Slots (Ladenhüter zählen nicht in die Quartilsbasis).
-- **Ladenhüter-Schwelle:** `ladenhueterDays = 30`. Grenzfall **genau 30 Tage** zählt
-  bereits als Ladenhüter (`≥`). Ein nie verkaufter Slot ist ebenfalls Ladenhüter.
-- **Zu wenige Datenpunkte:** unter `minPointsForQuartiles = 4` aktiven Slots (oder
-  ohne Streuung, `Q1 = Q3`) sind Quartile nicht aussagekräftig → alle `normal`.
-- Die Klassifikationslogik liegt im Backend (`classifyTurnover`); das Frontend
-  zeigt nur die gelieferte Klasse als **Badge**.
+- **Granularität:** pro Slot/Automat, nicht pro Produkt; durchgängig `machine_id`-parametrisch (N Automaten).
+- **Zeitfenster:** rollierend **4 Wochen (28 Tage)**; Verkäufe aus `automatenlager.sales_transactions`,
+  EK-Netto über `dashboard/lib/guv-ek.js`.
+- **Zwei getrennte Signale:** **Drehgeschwindigkeit** (Geld, „lohnt sich der Slot?") und **Ladenhüter**
+  (Zeit, „verrottet hier Kapital?") sind bewusst unabhängig.
+- Alle Schwellen (Latten, `graceDays`, `ladenhueterDays`) sind **editierbar und mandantenspezifisch**;
+  Defaults greifen ab Tag 1 (Onboarding ohne Konfiguration).
+
+---
+
+## Branchen-Anker, Kategorie-Marge & Produktkategorie *(neu)*
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **Branchen-Anker** | Die **von außen** (aus der Branchennorm) gesetzte Default-Latte für die Drehgeschwindigkeit — **nicht** aus den eigenen Ist-Zahlen abgeleitet. | „relativer Vergleich", „eigener Schnitt" |
+| **Deckungsbeitrag pro Slot/Woche** | Klassifikations-Kennzahl: `(Menge im 4-Wochen-Fenster × (VK_netto − EK_netto)) ÷ Wochen`, je Slot. | „Drehzahl", „Umsatz pro Slot" |
+| **Umsatz-Norm** | Branchenüblicher Umsatz eines gut positionierten Automaten (≈ 800–1200 €/Monat); **Quelle** der Default-Latte (× Kategorie-Marge), nicht selbst die Latte. | „Zielumsatz" |
+| **Kategorie-Marge** | Kategoriespezifischer Rohmargen-Anteil zum Ableiten der Latte. Defaults: **Getränke 43 %, Snacks 52 %, Fallback 50 %**. | „Aufschlag" |
+| **Produktkategorie (`produktart`)** | Warengruppe eines Produkts (`getraenk`, `snack`, …); mandantenerweiterbar. Wird aus Google Sheets **in die SQL-DB übernommen** (Single source of truth). | „Typ" (kollidiert mit Automaten-`type`) |
+| **Latte (untere/obere)** | Der kategoriespezifische Schwellwert des Deckungsbeitrags/Slot/Woche: **unter** der unteren Latte = Langsam-Dreher, **über** der oberen = Renner, dazwischen = Normal. Der Default jeder Latte ist der Branchen-Anker. | „Grenze", „Cutoff", „Quartil" |
+
+Beziehungen: Produkt **hat** genau eine Produktkategorie · Kategorie **trägt** eine Kategorie-Marge ·
+Umsatz-Norm × Kategorie-Marge **ergibt** den Branchen-Anker (Default-Latte) je Kategorie ·
+Mandant **kann** eigene Kategorien anlegen, zuordnen und deren Marge setzen.
 
 ---
 
@@ -142,8 +162,29 @@ Viewer **hat** genau eine Rolle (und damit deren Fähigkeiten).
   globalen Default schlägt.
 - **„Auf Standard zurücksetzen":** Reset eines Schwellwerts auf den Code-Default — **pro Wert** (↺)
   und als **globale** Aktion (alles zurücksetzen).
+- **Editierbar je Mandant** sind neben den Schwellwerten auch **Kategorien**, **Kategorie-Margen** und
+  die **Latten** der Drehgeschwindigkeit (siehe Branchen-Anker-Cluster).
 
 ---
+
+## Beispiel-Dialog (Branchen-Anker) *(neu)*
+
+> **Dev:** „Der Kaugummi-Slot verkauft 12×/Woche, der Cola-Slot nur 4×. Ist Kaugummi der Renner?"
+> **Domain Expert:** „Nein — wir messen **Deckungsbeitrag pro Slot/Woche**, nicht Stück. Cola macht
+> mehr Marge pro Stück, also kann Cola trotz weniger Verkäufen der Renner sein."
+> **Dev:** „Und wenn ein Slot unter der Latte liegt — automatisch Langsam-Dreher?"
+> **Domain Expert:** „Nur wenn der EK hinterlegt ist. Ohne EK gibt's `ek_fehlt`, keine geratene Klasse.
+> Und ein **Neuling** in der Schonfrist bleibt außen vor."
+> **Dev:** „Woher kommt die Latte selbst?"
+> **Domain Expert:** „Aus dem **Branchen-Anker** — Umsatz-Norm × Kategorie-Marge — nicht aus unseren
+> eigenen schwachen Zahlen. Deshalb darf unser Automat ehrlich überwiegend Langsam-Dreher zeigen."
+
+## Markierte Unklarheiten *(neu)*
+
+- **Slot-Zahl pro Automat** für die Latten-Ableitung (Umsatz-Norm ÷ Slot-Zahl): Quelle aus den
+  Stammdaten ist in der Umsetzung (TDD) zu fixieren — Empfehlung: aktive Slots je `machine_id`.
+- **Persistenzort der Mandanten-Konfiguration** (Kategorien/Margen/Latten): DB-Tabelle vs. bestehende
+  Settings-Datei — Empfehlung: DB-Tabelle mit `tenant_id`, konsistent zum Single-source-of-truth-Ziel.
 
 ## Secret-Handling & Audit
 

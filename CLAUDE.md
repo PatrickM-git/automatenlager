@@ -127,18 +127,17 @@ Read-Only guest access:
 
 ## Current Next Step
 
-**Session 22 abgeschlossen (2026-05-27) - Umsatz-/Workflow-Reparatur auf HP Mini:**
-- WF3 (`wbOhFKXQqBpJWB1w`) schreibt wieder neue Nayax-Verkaeufe nach `Verarbeitete_Transaktionen`.
-- WF8 (`gyM9rnvUMfnv4x3G`) aggregiert wieder nach `GuV_Tagesposten`; Sheet-Zugriff nutzt `sheetName.mode=name`, leere Laeufe geben `return []` zurueck.
-- WF1/WF2/WF3 verwenden aktuelle Credentials und ASCII-sichere Unicode-RegExes fuer deutsche Umlaute.
-- Legacy Dashboard Mai 2026: `umsatz_brutto=238,40`, `wareneinsatz_brutto=134,83`, `guv=103,57`, `quantity_sold=182`.
-- Tests: Dashboard 72/72 gruen; Homelab Workflow-/GuV-/Monitor-Tests 29/29 gruen.
+**Planung abgeschlossen (2026-06-03) — Feature „Branchen-Anker" (Drehgeschwindigkeits-Klassifikation):**
+- SPEC liegt vor: `docs/specs/branchen-anker-drehgeschwindigkeit-v1.md`.
+- Kern: Renner/Normal/Langsam-Dreher umstellen von relativer Quartil-/Stückzahl-Logik (`dashboard/lib/slow-mover.js`) auf **absoluten Maßstab = Deckungsbeitrag pro Slot/Woche** (4-Wochen-Fenster), mit kategorie-eigenen Latten (Getränke 43 %, Snacks 52 %, Default 50 %), abgeleitet aus der Branchennorm statt aus eigenen Ist-Zahlen.
+- Ladenhüter bleibt eigenes zeitbasiertes Signal; fehlender EK → eigene Klasse „EK fehlt" (nie raten).
+- Editierbar + mandantenfähig (Konstruktions-Spalt, keine Voll-Tenancy); `produktart` wird von Sheets in die SQL-DB übernommen.
+- Bezug zu offenen Issues: #31 (editierbare Schwellwerte), #8/v3-H (Slow-Mover), #9 (v2/Sheets-Abschaltung).
 
 **Naechste Schritte:**
-1. Nach User-Freigabe committen und pushen.
-2. Naechsten regulaeren WF8-Lauf um 02:00 Uhr beobachten: keine Duplikate, keine `_empty`-Zeilen.
-3. Beim naechsten echten Rechnungseingang WF1/WF2 produktiv beobachten.
-4. Alte Arbeitskopie `C:/Users/patri/Documents/automatenlager` archivieren oder entfernen, damit keine alten IDs mehr als Quelle verwechselt werden.
+1. Domänenbegriffe via `ubiquitous-language`-Skill festschreiben (Branchen-Anker, Deckungsbeitrag/Slot, Kategorie-Marge, Renner/Langsam-Dreher/Ladenhüter, EK-fehlt-Klasse).
+2. Neuer Chat: `spec-to-issue` → SPEC in umsetzbare GitHub-Issues schneiden.
+3. Separates Issue anlegen: „Vollständigkeits-Audit Sheets→DB vor Cutover" (alle Sheet-Spalten, die noch nicht in der DB stehen; knüpft an `docs/specs/sql-only-migration.md` + Issue #9 an).
 
 ## WF7 Nachfuellung Webhook
 
