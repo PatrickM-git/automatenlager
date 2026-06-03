@@ -27,6 +27,7 @@ const { queryEconomicsScopePg } = require('./lib/automaten-view.js');
 const { queryEconomicsLivePg } = require('./lib/economics-live.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
+const { runStockCostCheck } = require('./lib/stock-cost-invariant.js');
 const { SLOW_MOVER } = require('./lib/slow-mover.js');
 const {
   normalizeNayaxItems,
@@ -335,6 +336,36 @@ async function logStartupSchemaCheck() {
     }
   } catch (err) {
     console.log(`ℹ Schema-Check fehlgeschlagen: ${err.message}`);
+  } finally {
+    try { await client.end(); } catch { /* egal */ }
+  }
+}
+
+// Startup-Warnung: bestandswirksame Chargen ohne Einkaufspreis (siehe
+// lib/stock-cost-invariant.js). Reine Detektion, keine Datenänderung.
+async function logStartupStockCostCheck() {
+  const pgUrl = dashboardV2PgUrl();
+  if (!pgUrl) return;
+  let client;
+  try {
+    const { Client } = require('pg');
+    client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 4000 });
+    await client.connect();
+  } catch (err) {
+    if (client) { try { await client.end(); } catch { /* egal */ } }
+    return; // PG nicht erreichbar → bereits vom Schema-Check geloggt
+  }
+  try {
+    const report = await runStockCostCheck(client);
+    if (report.healthy) {
+      console.log('✓ EK-Invariant erfüllt (keine bestandswirksame Charge ohne Einkaufspreis).');
+    } else {
+      console.warn(`⚠ ${report.offenders.length} bestandswirksame Charge(n) ohne Einkaufspreis (unit_cost_net <= 0) — FIFO-Verkäufe buchen Wareneinsatz 0:`);
+      for (const o of report.offenders) console.warn(`  batch ${o.batchId} (product ${o.productId}, ${o.batchKey})`);
+      console.warn('  → Details: GET /api/v2/_diagnostics/stock-cost');
+    }
+  } catch (err) {
+    console.log(`ℹ EK-Invariant-Check fehlgeschlagen: ${err.message}`);
   } finally {
     try { await client.end(); } catch { /* egal */ }
   }
@@ -2652,6 +2683,34 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (parsed.pathname === '/api/v2/_diagnostics/stock-cost' && req.method === 'GET') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        sendJson(res, 403, { ok: false, error: { code: 'FORBIDDEN', message: 'Nur Admins können die EK-Invariant-Diagnose abrufen.' } });
+        return;
+      }
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      try {
+        const { Client } = require('pg');
+        const client = new Client({ connectionString: pgUrl });
+        await client.connect();
+        try {
+          const report = await runStockCostCheck(client);
+          // Gesund → 200, Invariant-Verletzung → 503 (per Status-Code überwachbar).
+          sendJson(res, report.healthy ? 200 : 503, { ok: report.healthy, report });
+        } finally {
+          await client.end();
+        }
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
     // ── GuV-Filter: Auswahlbaum Standorte + Automaten ─────────────────────────
 
     if (parsed.pathname === '/api/v2/economics/scope' && req.method === 'GET') {
@@ -3383,4 +3442,5 @@ server.listen(PORT, () => {
   console.log(`Automatenlager dashboard running at http://localhost:${PORT}`);
   // Nicht awaiten: Startup nicht blockieren, nur informativ loggen.
   logStartupSchemaCheck();
+  logStartupStockCostCheck();
 });
