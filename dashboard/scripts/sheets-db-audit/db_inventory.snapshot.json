@@ -1,0 +1,333 @@
+{
+ "classification_settings": {
+  "isTable": true,
+  "rows": 1,
+  "columns": [
+   "mandant_id",
+   "config",
+   "updated_at"
+  ]
+ },
+ "guv_daily": {
+  "isTable": true,
+  "rows": 508,
+  "columns": [
+   "guv_id",
+   "guv_key",
+   "posting_date",
+   "machine_id",
+   "mdb_code",
+   "product_id",
+   "quantity_sold",
+   "revenue_gross",
+   "revenue_net",
+   "cost_of_goods",
+   "gross_profit",
+   "source",
+   "created_at"
+  ]
+ },
+ "invoice_items": {
+  "isTable": true,
+  "rows": 6,
+  "columns": [
+   "invoice_item_id",
+   "invoice_id",
+   "line_number",
+   "product_id",
+   "description_raw",
+   "quantity",
+   "unit_price_net",
+   "total_net",
+   "vat_rate_pct",
+   "mhd_date"
+  ]
+ },
+ "invoices": {
+  "isTable": true,
+  "rows": 1,
+  "columns": [
+   "invoice_id",
+   "invoice_key",
+   "supplier_id",
+   "invoice_number",
+   "invoice_date",
+   "total_gross",
+   "total_net",
+   "vat_total",
+   "currency",
+   "source_pdf_path",
+   "claude_extraction_json",
+   "imported_at"
+  ]
+ },
+ "locations": {
+  "isTable": true,
+  "rows": 1,
+  "columns": [
+   "location_id",
+   "location_key",
+   "name",
+   "location_type",
+   "address",
+   "customer_group",
+   "opening_hours",
+   "notes",
+   "created_at",
+   "updated_at"
+  ]
+ },
+ "machine_profiles": {
+  "isTable": true,
+  "rows": 1,
+  "columns": [
+   "machine_profile_id",
+   "machine_id",
+   "area",
+   "type",
+   "position",
+   "nickname",
+   "created_at",
+   "updated_at"
+  ]
+ },
+ "machines": {
+  "isTable": true,
+  "rows": 1,
+  "columns": [
+   "machine_id",
+   "machine_key",
+   "name",
+   "location_id",
+   "machine_type",
+   "slot_count",
+   "installed_at",
+   "active",
+   "created_at",
+   "updated_at"
+  ]
+ },
+ "nayax_devices": {
+  "isTable": true,
+  "rows": 1,
+  "columns": [
+   "nayax_machine_id",
+   "machine_number",
+   "machine_name",
+   "last_seen_at",
+   "synced_at"
+  ]
+ },
+ "prices": {
+  "isTable": true,
+  "rows": 0,
+  "columns": [
+   "price_id",
+   "slot_assignment_id",
+   "sale_price_gross",
+   "valid_from",
+   "valid_to",
+   "source",
+   "experiment_id",
+   "created_at"
+  ]
+ },
+ "product_aliases": {
+  "isTable": true,
+  "rows": 88,
+  "columns": [
+   "alias_id",
+   "product_id",
+   "alias",
+   "source",
+   "is_primary",
+   "created_at"
+  ]
+ },
+ "product_change_proposals": {
+  "isTable": true,
+  "rows": 0,
+  "columns": [
+   "proposal_id",
+   "proposal_key",
+   "machine_id",
+   "product_id",
+   "mdb_code",
+   "proposal_type",
+   "reason",
+   "status",
+   "payload",
+   "created_at",
+   "decided_at",
+   "decided_by",
+   "decision_note"
+  ]
+ },
+ "products": {
+  "isTable": true,
+  "rows": 45,
+  "columns": [
+   "product_id",
+   "product_key",
+   "name",
+   "category",
+   "unit_of_measure",
+   "gtin",
+   "currency",
+   "vat_rate_pct",
+   "notes",
+   "created_at",
+   "updated_at"
+  ]
+ },
+ "sales_transactions": {
+  "isTable": true,
+  "rows": 342,
+  "columns": [
+   "transaction_id",
+   "nayax_transaction_id",
+   "machine_id",
+   "product_id",
+   "slot_assignment_id",
+   "mdb_code",
+   "product_name_raw",
+   "quantity",
+   "gross_amount",
+   "net_amount",
+   "vat_amount",
+   "settlement_at",
+   "processing_status",
+   "processing_note",
+   "source",
+   "imported_at"
+  ]
+ },
+ "slot_assignments": {
+  "isTable": true,
+  "rows": 92,
+  "columns": [
+   "slot_assignment_id",
+   "product_slot_key",
+   "machine_id",
+   "mdb_code",
+   "product_id",
+   "valid_from",
+   "valid_to",
+   "active",
+   "current_machine_qty",
+   "target_stock",
+   "machine_capacity",
+   "notes",
+   "created_at",
+   "updated_at"
+  ]
+ },
+ "stock_batches": {
+  "isTable": true,
+  "rows": 56,
+  "columns": [
+   "batch_id",
+   "batch_key",
+   "product_id",
+   "invoice_item_id",
+   "initial_qty",
+   "remaining_qty",
+   "unit_cost_net",
+   "mhd_date",
+   "status",
+   "received_at",
+   "created_at",
+   "updated_at"
+  ]
+ },
+ "stock_movements": {
+  "isTable": true,
+  "rows": 24,
+  "columns": [
+   "movement_id",
+   "movement_key",
+   "batch_id",
+   "slot_assignment_id",
+   "movement_type",
+   "quantity_delta_total",
+   "quantity_delta_slot",
+   "reason",
+   "source_transaction_id",
+   "source",
+   "occurred_at",
+   "created_at"
+  ]
+ },
+ "suppliers": {
+  "isTable": true,
+  "rows": 1,
+  "columns": [
+   "supplier_id",
+   "supplier_key",
+   "name",
+   "notes",
+   "created_at"
+  ]
+ },
+ "v_sales_daily": {
+  "isTable": false,
+  "rows": null,
+  "columns": [
+   "date",
+   "machine_id",
+   "product_id",
+   "mdb_code",
+   "quantity",
+   "revenue_net",
+   "cogs_net",
+   "db_net"
+  ]
+ },
+ "v_slot_turnover": {
+  "isTable": false,
+  "rows": null,
+  "columns": [
+   "machine_id",
+   "mdb_code",
+   "month",
+   "turnover_count"
+  ]
+ },
+ "v_warnings_open": {
+  "isTable": false,
+  "rows": null,
+  "columns": [
+   "warning_id",
+   "warning_key",
+   "warning_type",
+   "severity",
+   "product_id",
+   "slot_assignment_id",
+   "machine_id",
+   "mdb_code",
+   "message",
+   "source_workflow",
+   "created_at"
+  ]
+ },
+ "warnings": {
+  "isTable": true,
+  "rows": 389,
+  "columns": [
+   "warning_id",
+   "warning_key",
+   "warning_type",
+   "severity",
+   "product_id",
+   "slot_assignment_id",
+   "machine_id",
+   "mdb_code",
+   "message",
+   "source_workflow",
+   "resolved",
+   "resolved_at",
+   "resolved_by",
+   "created_at"
+  ]
+ }
+}
