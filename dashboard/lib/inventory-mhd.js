@@ -250,13 +250,13 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
     // slot_assignments, via #17 aktuell gehalten). Zeigt den echten Automatenbestand
     // unabhängig von der driftenden stock_batches.remaining_qty (#87).
     const allBatchesResult = await client.query(
-      // #92: MIN(sb.purchase_date) AS purchase_date nach Migration 0001 ergänzen
       `SELECT p.product_id,
               p.name                               AS product_name,
               sb.mhd_date,
               SUM(sb.remaining_qty)::int           AS remaining_qty,
               COUNT(*)::int                        AS batch_count,
               MIN(sb.batch_key)                    AS batch_key,
+              MIN(sb.purchase_date)                AS purchase_date,
               (sb.mhd_date::date - CURRENT_DATE)::int AS days_until_mhd,
               MAX(COALESCE(sa_agg.machine_qty, 0))::int AS machine_qty
          FROM automatenlager.stock_batches sb

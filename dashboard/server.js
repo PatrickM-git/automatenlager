@@ -799,7 +799,7 @@ async function buildDashboardV2Area(area, query = {}) {
               remaining_qty:  Number(r.remaining_qty) || 0,
               machine_qty:    Number(r.machine_qty)   || 0, // #87: Nayax-Abgleich-Wert
               days_until_mhd: r.days_until_mhd != null ? Number(r.days_until_mhd) : null,
-              // #92: purchase_date nach Migration 0001 (sb.purchase_date) ergänzen
+              purchase_date:  r.purchase_date ? toIsoDate(r.purchase_date) : null,
             })),
           },
           error: null,
