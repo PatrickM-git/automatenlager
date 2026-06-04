@@ -14,6 +14,7 @@ const { validateWriteOff, canWriteOff, buildWriteOffAuditEntry, WRITE_OFF_STATUS
 const { buildSlotChangePreview, validateSlotChange, buildSlotChangePayload, buildSlotChangeAuditEntry } = require('./lib/slot-change.js');
 const { buildProductOnboardingData, queryProductOnboardingPg } = require('./lib/product-onboarding.js');
 const { buildReportCsv, buildReportFilename } = require('./lib/reports.js');
+const { buildGuvPdf } = require('./lib/pdf-report.js');
 const { buildLocationProfile, buildLocationComparison, queryLocationsPg, upsertLocationPg, deleteLocationPg } = require('./lib/location-profiles.js');
 const { buildCorrectionCases, queryCorrectionCasesPg } = require('./lib/correction-cases.js');
 const { buildMachineProfile, getMachineOptions, queryMachineProfilesPg, upsertMachineProfilePg } = require('./lib/machine-profiles.js');
@@ -2747,6 +2748,68 @@ const server = http.createServer(async (req, res) => {
           'Content-Disposition': `attachment; filename="${filename}"`,
         });
         res.end(csv);
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    // ── PDF-Export (GuV-Bericht als echte Datei) ──────────────────────────────
+
+    if (parsed.pathname === '/api/v2/reports/pdf' && req.method === 'GET') {
+      requireCapability(viewer, 'finanzen.lesen', res);
+      if (res.headersSent) return;
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      const exportQuery = {
+        mode:     clean(parsed.query.mode),
+        year:     clean(parsed.query.year),
+        quarter:  clean(parsed.query.quarter),
+        from:     clean(parsed.query.from),
+        to:       clean(parsed.query.to),
+        machines: clean(parsed.query.machines),
+      };
+      try {
+        const rawData = await queryEconomicsPg(pgUrl, exportQuery);
+        const economicsData = buildEconomicsData(rawData, exportQuery);
+        const { from, to } = economicsData.period;
+        const rows = [...economicsData.byProduct].sort((a, b) => b.revenue_gross - a.revenue_gross);
+        const totals = economicsData.totals || {};
+        const prov = economicsData.provisional || { hasProvisional: false };
+        const withProv = economicsData.totalsWithProvisional || totals;
+        const sumRev = prov.hasProvisional ? withProv.revenue_gross : totals.revenue_gross;
+        const sumGuv = prov.hasProvisional && prov.hasCost ? withProv.gross_profit : totals.gross_profit;
+        const sumQty = prov.hasProvisional ? withProv.qty : totals.qty;
+        const marge  = Number(sumRev) > 0 ? (sumGuv / sumRev) * 100 : 0;
+
+        const fmtEur = (n) => { const v = Number(n); return Number.isFinite(v) ? v.toFixed(2).replace('.', ',') + ' €' : '–'; };
+        const fmtPct = (n) => { const v = Number(n); return Number.isFinite(v) ? v.toFixed(1).replace('.', ',') + ' %' : '–'; };
+        const periodLabel = `${from} – ${to}`;
+        const todayStr = new Date().toLocaleDateString('de-DE');
+
+        const pdf = buildGuvPdf({
+          title:   'GuV-Bericht',
+          period:  periodLabel,
+          machine: clean(parsed.query.machines) || 'Alle Automaten',
+          today:   todayStr,
+          kpis: [
+            { label: 'Umsatz (brutto)', value: fmtEur(sumRev) },
+            { label: 'GuV (brutto)',    value: fmtEur(sumGuv) },
+            { label: 'Marge',          value: fmtPct(marge)  },
+            { label: 'Stück',          value: String(Math.round(Number(sumQty) || 0)) },
+          ],
+          rows,
+        });
+        const filename = buildReportFilename(from, to, 'pdf');
+        res.writeHead(200, {
+          'Content-Type': 'application/pdf',
+          'Content-Length': pdf.length,
+          'Content-Disposition': `attachment; filename="${filename}"`,
+        });
+        res.end(pdf);
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
       }

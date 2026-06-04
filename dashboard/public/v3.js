@@ -1609,6 +1609,9 @@
   function guvExportUrl(q) {
     return '/api/v2/reports/export?' + guvPeriodParams(q).join('&');
   }
+  function guvPdfUrl(q) {
+    return '/api/v2/reports/pdf?' + guvPeriodParams(q).join('&');
+  }
   function loadGuvData(q) {
     return fetchJson(guvBuildUrl(q)).then(function (res) { return (res && res.data) ? res.data : null; });
   }
@@ -2220,7 +2223,7 @@
           '<div class="v3-guv-export" role="group" aria-label="Bericht exportieren">' +
             '<button type="button" class="v3-guv-export__btn" data-guv-export="csv" title="Als CSV/Excel herunterladen">' +
               ICONS.export + '<span>Excel</span></button>' +
-            '<button type="button" class="v3-guv-export__btn" data-guv-export="pdf" title="Als PDF speichern (Druckdialog)">' +
+            '<button type="button" class="v3-guv-export__btn" data-guv-export="pdf" title="Als PDF-Datei herunterladen">' +
               ICONS.print + '<span>PDF</span></button>' +
           '</div>' +
         '</div>' +
@@ -2598,7 +2601,11 @@
             a.click();
             document.body.removeChild(a);
           } else {
-            guvPrintReport();
+            var a2 = document.createElement('a');
+            a2.href = guvPdfUrl(_guvQuery);
+            document.body.appendChild(a2);
+            a2.click();
+            document.body.removeChild(a2);
           }
         });
       });
