@@ -137,10 +137,22 @@ test('AC2: buildRefillDetails returns slot info with free_capacity', () => {
   assert.equal(result.slot.free_capacity, 7);
 });
 
-test('AC2: buildRefillDetails sums backstock from active batches', () => {
+test('AC2: buildRefillDetails liefert Lager-Backstock im Gesamt-Modell (#36)', () => {
+  // remaining_qty führt den Gesamtbestand (Maschine+Lager). Backstock =
+  // GREATEST(SUM(remaining) − current_machine_qty, 0). 6+2+4=12, Maschine 5 → 7.
   const result = buildRefillDetails(SLOT_ROWS[0], BATCH_ROWS, TODAY);
-  assert.equal(result.backstock.total_qty, 12); // 6 + 2 + 4
+  assert.equal(result.backstock.total_qty, 7);
   assert.equal(result.backstock.batches_count, 3);
+});
+
+test('AC1/#36: Backstock zieht Maschinen-Bestand ab und wird nie negativ', () => {
+  const batches = [{ batch_key: 'G1', product_id: 10, remaining_qty: 30, mhd_date: null, status: 'active', unit_cost_net: '0.50' }];
+  // Maschine 10 von 30 gesamt → 20 im Lager.
+  assert.equal(buildRefillDetails({ ...SLOT_ROWS[0], current_machine_qty: 10 }, batches, TODAY).backstock.total_qty, 20);
+  // Maschine >= Gesamt → 0 (kein negativer Backstock).
+  assert.equal(buildRefillDetails({ ...SLOT_ROWS[0], current_machine_qty: 40 }, batches, TODAY).backstock.total_qty, 0);
+  // Maschine 0 → ganzer Gesamtbestand ist Lager.
+  assert.equal(buildRefillDetails({ ...SLOT_ROWS[0], current_machine_qty: 0 }, batches, TODAY).backstock.total_qty, 30);
 });
 
 // Regression Pick-Up-Drift (Session 31): 'reserve'-Chargen sind echter Bestand
@@ -150,7 +162,9 @@ test('AC2: buildRefillDetails zaehlt reserve-Chargen als Backstock', () => {
   const reserveBatch = [
     { batch_key: 'B_PICK_UP', product_id: 66, remaining_qty: 22, mhd_date: '2026-09-01', status: 'reserve', unit_cost_net: '0.50' },
   ];
-  const slot = { ...SLOT_ROWS[0], product_id: 66, product_name: 'Pick Up' };
+  // current_machine_qty:0 isoliert hier bewusst das Zähl-Verhalten (reserve zählt),
+  // unabhängig vom Maschinen-Abzug des Gesamt-Modells.
+  const slot = { ...SLOT_ROWS[0], product_id: 66, product_name: 'Pick Up', current_machine_qty: 0 };
   const result = buildRefillDetails(slot, reserveBatch, TODAY);
   assert.equal(result.backstock.total_qty, 22);
   assert.equal(result.backstock.batches_count, 1);
@@ -163,7 +177,9 @@ test('AC2: buildRefillDetails ignoriert ausgesondert/leer', () => {
     { batch_key: 'X2', product_id: 10, remaining_qty: 0, mhd_date: null, status: 'leer', unit_cost_net: '0.50' },
     { batch_key: 'X3', product_id: 10, remaining_qty: 3, mhd_date: null, status: 'aktiv', unit_cost_net: '0.50' },
   ];
-  const result = buildRefillDetails(SLOT_ROWS[0], batches, TODAY);
+  // current_machine_qty:0 isoliert das Status-Filtern (nur 'aktiv' zählt),
+  // unabhängig vom Maschinen-Abzug des Gesamt-Modells.
+  const result = buildRefillDetails({ ...SLOT_ROWS[0], current_machine_qty: 0 }, batches, TODAY);
   assert.equal(result.backstock.total_qty, 3);
   assert.equal(result.backstock.batches_count, 1);
 });

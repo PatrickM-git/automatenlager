@@ -19,7 +19,12 @@ function searchRefillTargets(query, slotRows) {
 function buildRefillDetails(slotRow, batchRows, today = new Date()) {
   const freeCap = (slotRow.capacity || 0) - (slotRow.current_machine_qty || 0);
   const activeBatches = (batchRows || []).filter((b) => isAvailableBatchStatus(b.status));
-  const totalBackstock = activeBatches.reduce((sum, b) => sum + (Number(b.remaining_qty) || 0), 0);
+  // Gesamt-Modell (#36, docs/data-model/remaining-qty-semantics.md): remaining_qty
+  // führt den GESAMTbestand der Charge (Maschine + Lager). Nachfüllbarer Lager-Rest
+  // = Gesamt − Maschinen-Bestand, nie negativ — konsistent zur kanonischen Formel
+  // in inventory-mhd.js (GREATEST(SUM(remaining_qty) − current_machine_qty, 0)).
+  const totalRemaining = activeBatches.reduce((sum, b) => sum + (Number(b.remaining_qty) || 0), 0);
+  const totalBackstock = Math.max(totalRemaining - (slotRow.current_machine_qty || 0), 0);
 
   const mhdBatches = activeBatches
     .filter((b) => b.mhd_date != null)
