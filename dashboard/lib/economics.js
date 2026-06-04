@@ -745,6 +745,14 @@ async function queryEconomicsProvisionalPg(pgUrl, query = {}) {
   const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
   await client.connect();
   try {
+    // Issue #56: Besteuerungsmodell des Mandanten (Kleinunternehmer → Brutto-EK
+    // als Wareneinsatz, sonst Netto). EINE Quelle (classification_settings, DB);
+    // wirkt NUR auf diesen vorläufigen Live-Pfad — guv_daily-Historie bleibt
+    // unangetastet (die wird von WF8 mit derselben Logik gebucht).
+    const { loadEffectiveConfig, resolveCategory } = require('./category-config.js');
+    const { costBasisMultiplier } = require('./guv-ek.js');
+    const taxConfig = await loadEffectiveConfig(client);
+
     // Letzter bereits aggregierter Tag im Zeitraum/Scope (Berlin). Fehlt er,
     // gilt der Tag vor Periodenbeginn -> die ganze Periode ist „vorläufig".
     const covParams = machineArr ? [fromDate, machineArr] : [fromDate];
@@ -788,13 +796,14 @@ async function queryEconomicsProvisionalPg(pgUrl, query = {}) {
     const byProdRes = await client.query(
       `SELECT s.product_id,
               p.name                            AS product_name,
+              p.category                        AS category,
               COALESCE(SUM(s.quantity), 0)::int AS qty,
               COALESCE(SUM(s.gross_amount), 0)  AS revenue_gross,
               COALESCE(SUM(s.net_amount), 0)    AS revenue_net
          FROM automatenlager.sales_transactions s
          LEFT JOIN automatenlager.products p ON p.product_id = s.product_id
         ${windowWhere}
-        GROUP BY s.product_id, p.name`,
+        GROUP BY s.product_id, p.name, p.category`,
       provParams,
     );
     const spanRes = await client.query(
@@ -838,19 +847,25 @@ async function queryEconomicsProvisionalPg(pgUrl, query = {}) {
       const batches = batchesByProduct.get(String(r.product_id)) || [];
       const fifo = fifoProvisionalCostForProduct(batches, qty);
       if (fifo.missingCost) costMissing = true;
+      // Issue #56: Netto-FIFO-Wareneinsatz auf die Kostenbasis des Mandanten
+      // heben. Alle Chargen eines Produkts teilen die Kategorie → eine MwSt →
+      // ein Multiplikator (round-genau wie WF8 pro Posten).
+      const catMwst = resolveCategory(taxConfig, r.category).mwstPct;
+      const mult = costBasisMultiplier(catMwst, { kleinunternehmer: taxConfig.kleinunternehmerAktiv });
+      const cost = round2(fifo.cost * mult);
       const rg = toNum(r.revenue_gross);
       const rn = toNum(r.revenue_net);
       totalGross += rg;
       totalNet += rn;
       totalQty += qty;
-      totalCost += fifo.cost;
+      totalCost += cost;
       byProduct.push({
         product_id: r.product_id,
         product_name: r.product_name,
         qty,
         revenue_gross: rg,
         revenue_net: rn,
-        cost: fifo.cost,
+        cost,
         cost_missing: fifo.missingCost,
       });
     }

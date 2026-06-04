@@ -56,9 +56,11 @@ test('WF8 enthält NICHT mehr die alte Brutto->Netto-Division (Anti-Regression, 
   }
 });
 
-test('WF8 bucht Wareneinsatz auf Netto-Basis (cost_of_goods unverändert, AC3/AC5)', () => {
+test('WF8 bucht Wareneinsatz flag-abhängig: Kleinunternehmer brutto, sonst netto (#56)', () => {
   for (const code of aggregatorCodes()) {
-    assert.match(code, /warenein\s*=\s*qty\s*\*\s*ekNetto/,
-      'Wareneinsatz muss qty * ekNetto (netto) sein -> cost_of_goods bleibt wie bisher menge*unit_cost');
+    // Issue #56: Die Kostenbasis hängt am Besteuerungsmodell. Regelbesteuert
+    // (Default) bleibt netto = wie bisher; Kleinunternehmer bucht brutto.
+    assert.match(code, /warenein\s*=\s*qty\s*\*\s*\(\s*\(?\s*kleinunternehmerAktiv[\s\S]*?\?\s*ekBrutto\s*:\s*ekNetto/,
+      'Wareneinsatz muss flag-abhängig sein: kleinunternehmerAktiv ? ekBrutto : ekNetto');
   }
 });
