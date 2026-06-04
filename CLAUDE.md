@@ -92,13 +92,15 @@ cd dashboard
 npm test
 ```
 
-Read-Only guest access:
+Read-Only guest access (Default-Deny seit #27, `dashboard/lib/auth.js` → `resolveViewer`):
 
-- The dashboard reads `Tailscale-User-Login`.
-- Missing header means local admin mode only on `localhost`/`127.0.0.1`; tailnet hosts without identity headers are guests.
-- Logins starting with `patrick` or listed in `DASHBOARD_ADMIN_LOGIN` are admins.
-- Other logins are guests: workflow trigger buttons are hidden and `POST /api/actions/:id/trigger` returns `403`.
-- Guest access is logged as JSONL under `dashboard/logs/guest-access.jsonl` unless `DASHBOARD_AUDIT_LOG` overrides the path.
+- The dashboard reads `Tailscale-User-Login` and resolves the viewer **default-deny**.
+- **Exact allowlist:** a present login is admin only if it **exactly** matches an entry in `DASHBOARD_ADMIN_LOGIN` (comma-separated, case-insensitive). The old `startsWith('patrick')` prefix rule is **removed** (`patrick-evil@…` is a guest). On the Mini `DASHBOARD_ADMIN_LOGIN=patrickmatthes2609@gmail.com` (the exact Tailscale-Serve login).
+- **No header:** guest — UNLESS the request is loopback **and** `DASHBOARD_DEV_LOCAL_ADMIN` is set (local dev/test escape hatch; OFF in production). This is also the lockout-recovery lever on the Mini.
+- **F1 path-based trust:** `Tailscale-*` headers are only trusted from a trusted source address. If `DASHBOARD_INTERNAL_PEER_CIDR` is set, requests from that range (internal Docker peers) are treated as guest/read-only with headers discarded. Currently **not enforced** (conservative) — see issue #78.
+- Role determination uses `req.socket.remoteAddress` (not the spoofable Host header).
+- `getViewer` returns `{ login, role, capabilities:Set, tenantId, can(cap), canTriggerActions }`; `canTriggerActions = can('workflows.starten')`.
+- Guests: trigger buttons hidden, admin-only `POST` endpoints return `403`. Guest access logged as JSONL under `dashboard/logs/guest-access.jsonl` (override via `DASHBOARD_AUDIT_LOG`).
 
 ## Security Rules — Mandatory
 
