@@ -60,6 +60,51 @@ test('canTriggerActions ist aus Fähigkeiten abgeleitet (workflows.starten)', ()
   assert.equal(guest.canTriggerActions, false);
 });
 
+// ── #28 RBAC: 3 Rollen + Fähigkeiten ───────────────────────────────────────
+
+const OPERATOR = 'auffueller@example.com';
+const rbacEnv = { DASHBOARD_ADMIN_LOGIN: ADMIN, DASHBOARD_OPERATOR_LOGIN: OPERATOR };
+
+test('Eigentümer: alle 6 Fähigkeiten', () => {
+  const v = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env: rbacEnv });
+  assert.equal(v.roleKey, 'eigentuemer');
+  assert.equal(v.role, 'admin');
+  for (const c of ['betrieb.lesen', 'finanzen.lesen', 'bestand.schreiben', 'workflows.starten', 'nayax.schreiben', 'system.verwalten']) {
+    assert.equal(v.can(c), true, c);
+  }
+});
+
+test('Auffüller: Bestand+Workflows, NICHT Finanzen/Nayax/System', () => {
+  const v = resolveViewer({ login: OPERATOR, remoteAddress: '127.0.0.1', env: rbacEnv });
+  assert.equal(v.roleKey, 'auffueller');
+  assert.equal(v.role, 'guest', 'binär: Auffüller ist kein voller Admin');
+  assert.equal(v.can('betrieb.lesen'), true);
+  assert.equal(v.can('bestand.schreiben'), true);
+  assert.equal(v.can('workflows.starten'), true);
+  assert.equal(v.can('finanzen.lesen'), false);
+  assert.equal(v.can('nayax.schreiben'), false);
+  assert.equal(v.can('system.verwalten'), false);
+});
+
+test('Gast: nur betrieb.lesen', () => {
+  const v = resolveViewer({ login: 'fremd@example.com', remoteAddress: '127.0.0.1', env: rbacEnv });
+  assert.equal(v.roleKey, 'gast');
+  assert.equal(v.can('betrieb.lesen'), true);
+  assert.equal(v.can('bestand.schreiben'), false);
+  assert.equal(v.can('workflows.starten'), false);
+});
+
+test('Rollen-Zuordnung ist konfigurativ (neuer Operator-Login ohne Code-Änderung)', () => {
+  const v = resolveViewer({ login: 'neu@team.de', remoteAddress: '127.0.0.1', env: { ...rbacEnv, DASHBOARD_OPERATOR_LOGIN: `${OPERATOR},neu@team.de` } });
+  assert.equal(v.roleKey, 'auffueller');
+});
+
+test('Dev-Notausgang gibt volle Eigentümer-Rolle', () => {
+  const v = resolveViewer({ login: '', remoteAddress: '127.0.0.1', env: { ...rbacEnv, DASHBOARD_DEV_LOCAL_ADMIN: '1' } });
+  assert.equal(v.roleKey, 'eigentuemer');
+  assert.equal(v.can('system.verwalten'), true);
+});
+
 // ── F1: pfad-basiertes Vertrauen ───────────────────────────────────────────
 
 test('F1 aus (Default, kein CIDR): Header wird überall vertraut -> kein Lockout', () => {

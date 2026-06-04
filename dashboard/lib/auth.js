@@ -9,16 +9,27 @@
 
 const TENANT_OWNER = 'eigentuemer';
 
-// Fähigkeiten-Vokabular (Fundament). Admin = alle, Gast = nur Lesen.
+// Issue #28: kanonisches Fähigkeiten-Vokabular (6 Verben, SPEC Säule 3).
 const ALL_CAPABILITIES = [
   'betrieb.lesen',
+  'finanzen.lesen',
+  'bestand.schreiben',
   'workflows.starten',
-  'inventar.schreiben',
-  'einstellungen.schreiben',
+  'nayax.schreiben',
   'system.verwalten',
-  'mandant.verwalten',
 ];
-const GUEST_CAPABILITIES = ['betrieb.lesen'];
+
+// Drei Voreinstellungs-Rollen → Fähigkeits-Bündel.
+//  - eigentuemer: alle (voller Admin)
+//  - auffueller:  Betrieb lesen + Bestand/Slots schreiben + Workflows auslösen;
+//                 NICHT finanzen.lesen / nayax.schreiben / system.verwalten
+//  - gast:        nur betrieb.lesen
+const ROLE_CAPABILITIES = {
+  eigentuemer: [...ALL_CAPABILITIES],
+  auffueller: ['betrieb.lesen', 'bestand.schreiben', 'workflows.starten'],
+  gast: ['betrieb.lesen'],
+};
+const GUEST_CAPABILITIES = ROLE_CAPABILITIES.gast;
 
 function clean(value) {
   return String(value == null ? '' : value).replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
@@ -72,7 +83,30 @@ function isTrustedIdentityPath(remoteAddress, env = {}) {
   return !ipInCidr(remoteAddress, cidr);
 }
 
-// Liefert {login, role, capabilities:Set, tenantId, can(cap), canTriggerActions}.
+function parseLoginList(value) {
+  return clean(value).split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
+}
+
+// Issue #28: Rolle (eigentuemer/auffueller/gast) aus der konfigurativen Login-
+// Zuordnung ableiten. Neue Logins werden ohne Code-Änderung über die Env
+// DASHBOARD_ADMIN_LOGIN (Eigentümer) bzw. DASHBOARD_OPERATOR_LOGIN (Auffüller)
+// zugewiesen. Default-Deny bleibt: alles andere ist Gast.
+function resolveRole({ normalizedLogin, remoteAddress, env }) {
+  if (normalizedLogin) {
+    if (parseLoginList(env.DASHBOARD_ADMIN_LOGIN).includes(normalizedLogin)) return 'eigentuemer';
+    if (parseLoginList(env.DASHBOARD_OPERATOR_LOGIN).includes(normalizedLogin)) return 'auffueller';
+    return 'gast';
+  }
+  // Kein (vertrauenswürdiger) Header: Default-Deny. Einziger Admin-Pfad ohne
+  // Header ist der Dev-Notausgang (Loopback + explizites Flag, Prod: aus).
+  const devLocalAdmin = clean(env.DASHBOARD_DEV_LOCAL_ADMIN) !== '';
+  if (devLocalAdmin && isLoopback(remoteAddress)) return 'eigentuemer';
+  return 'gast';
+}
+
+// Liefert {login, role, roleKey, capabilities:Set, tenantId, can(cap), canTriggerActions}.
+// `role` bleibt binär ('admin'|'guest') für Abwärtskompatibilität (is_admin, UI);
+// `roleKey` trägt die 3 Rollen; `capabilities`/`can` sind die eigentliche Autorität.
 function resolveViewer({ login, remoteAddress, host, env = {} } = {}) {
   void host; // Rolle hängt an der nicht-fälschbaren Quelladresse, nicht am Host-Header.
   const headerTrusted = isTrustedIdentityPath(remoteAddress, env);
@@ -80,29 +114,15 @@ function resolveViewer({ login, remoteAddress, host, env = {} } = {}) {
   const effectiveLogin = headerTrusted ? clean(login) : '';
   const normalizedLogin = effectiveLogin.toLowerCase();
 
-  const configuredAdmins = clean(env.DASHBOARD_ADMIN_LOGIN)
-    .split(',')
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-
-  let isAdmin;
-  if (normalizedLogin) {
-    // Header vorhanden (vertrauenswürdiger Pfad): EXAKTE Allowlist. Keine
-    // Präfix-Regel mehr — `patrick-evil@…` ist Gast, sofern nicht exakt gelistet.
-    isAdmin = configuredAdmins.includes(normalizedLogin);
-  } else {
-    // Default-Deny: ohne (vertrauenswürdigen) Header = Gast. Einziger Admin-Pfad
-    // ohne Header ist der Dev-Notausgang: Loopback + explizites Flag (Prod: aus).
-    const devLocalAdmin = clean(env.DASHBOARD_DEV_LOCAL_ADMIN) !== '';
-    isAdmin = devLocalAdmin && isLoopback(remoteAddress);
-  }
-
-  const capabilities = new Set(isAdmin ? ALL_CAPABILITIES : GUEST_CAPABILITIES);
+  const roleKey = resolveRole({ normalizedLogin, remoteAddress, env });
+  const capabilities = new Set(ROLE_CAPABILITIES[roleKey] || ROLE_CAPABILITIES.gast);
   const can = (capability) => capabilities.has(capability);
+  const isAdmin = roleKey === 'eigentuemer';
 
   return {
     login: effectiveLogin || (isAdmin ? 'local-admin' : 'guest'),
     role: isAdmin ? 'admin' : 'guest',
+    roleKey,
     capabilities,
     tenantId: TENANT_OWNER,
     can,
@@ -110,12 +130,20 @@ function resolveViewer({ login, remoteAddress, host, env = {} } = {}) {
   };
 }
 
+// Issue #28: zentrale Fähigkeits-Prüfung (rein). Der HTTP-403-Guard in server.js
+// (requireCapability mit res) baut darauf auf.
+function viewerCan(viewer, capability) {
+  return !!(viewer && typeof viewer.can === 'function' && viewer.can(capability));
+}
+
 module.exports = {
   resolveViewer,
+  viewerCan,
   isTrustedIdentityPath,
   isLoopback,
   ipInCidr,
   TENANT_OWNER,
   ALL_CAPABILITIES,
+  ROLE_CAPABILITIES,
   GUEST_CAPABILITIES,
 };

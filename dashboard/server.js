@@ -207,6 +207,18 @@ function getViewer(req) {
   });
 }
 
+// Issue #28: zentrale serverseitige Fähigkeits-Durchsetzung. Liefert true, wenn
+// der Viewer die Fähigkeit hat; sonst sendet sie 403 und liefert false (der
+// Aufrufer beendet dann mit `return`). Das ist die Autorität — nicht die UI.
+function requireCapability(viewer, capability, res) {
+  if (viewer && typeof viewer.can === 'function' && viewer.can(capability)) return true;
+  sendJson(res, 403, {
+    ok: false,
+    error: { code: 'CAPABILITY_REQUIRED', message: `Fehlende Berechtigung: ${capability}.` },
+  });
+  return false;
+}
+
 function auditGuestAccess(viewer, event, details = {}) {
   if (viewer.role !== 'guest') return;
   const auditPath = process.env.DASHBOARD_AUDIT_LOG || path.join(__dirname, 'logs', 'guest-access.jsonl');
@@ -2013,7 +2025,7 @@ const server = http.createServer(async (req, res) => {
     // Chargen; optimistic lock über expected_remaining_qty. Issue #21.
     if (parsed.pathname === '/api/v2/inventory/write-off' && req.method === 'POST') {
       const viewer = getViewer(req);
-      if (!viewer.canTriggerActions) {
+      if (!viewer.can('bestand.schreiben')) {
         auditGuestAccess(viewer, 'write_off_denied', {});
         sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer dürfen keine Charge ausbuchen.' } });
         return;
@@ -2194,7 +2206,7 @@ const server = http.createServer(async (req, res) => {
 
     if (parsed.pathname === '/api/v2/slot-change/confirm' && req.method === 'POST') {
       const viewer = getViewer(req);
-      if (!viewer.canTriggerActions) {
+      if (!viewer.can('bestand.schreiben')) {
         auditGuestAccess(viewer, 'slot_change_denied', {});
         sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer dürfen keinen Produktwechsel durchführen.' } });
         return;
@@ -2794,6 +2806,7 @@ const server = http.createServer(async (req, res) => {
     // ── GuV-Filter: Auswahlbaum Standorte + Automaten ─────────────────────────
 
     if (parsed.pathname === '/api/v2/economics/scope' && req.method === 'GET') {
+      if (!requireCapability(getViewer(req), 'finanzen.lesen', res)) return; // #28: GuV nur mit finanzen.lesen
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
@@ -2813,6 +2826,7 @@ const server = http.createServer(async (req, res) => {
     // v3-Live-Kachel; Filter machines=ID1,ID2 und limit wie bei /economics.
 
     if (parsed.pathname === '/api/v2/economics/live' && req.method === 'GET') {
+      if (!requireCapability(getViewer(req), 'finanzen.lesen', res)) return; // #28: GuV nur mit finanzen.lesen
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
@@ -3097,7 +3111,7 @@ const server = http.createServer(async (req, res) => {
 
     if (parsed.pathname === '/api/v2/correction-action/confirm' && req.method === 'POST') {
       const viewer = getViewer(req);
-      if (!viewer.canTriggerActions) {
+      if (!viewer.can('bestand.schreiben')) {
         auditGuestAccess(viewer, 'correction_action_denied', {});
         sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Nur Admins können Korrekturen bestätigen.' } });
         return;
@@ -3193,7 +3207,7 @@ const server = http.createServer(async (req, res) => {
     // Onboarding-/unmatchbare/PG-only-Slots werden NIE geschrieben (übersprungen).
     if (parsed.pathname === '/api/v2/nayax-abgleich/apply' && req.method === 'POST') {
       const viewer = getViewer(req);
-      if (!viewer.canTriggerActions) {
+      if (!viewer.can('nayax.schreiben')) {
         auditGuestAccess(viewer, 'nayax_abgleich_denied', {});
         sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Nur Admins dürfen den Abgleich übernehmen.' } });
         return;
@@ -3302,7 +3316,7 @@ const server = http.createServer(async (req, res) => {
 
     if (parsed.pathname === '/api/v2/onboarding/start' && req.method === 'POST') {
       const viewer = getViewer(req);
-      if (!viewer.canTriggerActions) {
+      if (!viewer.can('bestand.schreiben')) {
         sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Nur Admins können das Onboarding starten.' } });
         return;
       }
@@ -3431,7 +3445,7 @@ const server = http.createServer(async (req, res) => {
 
     if (parsed.pathname === '/api/v2/slot-assign-inline/confirm' && req.method === 'POST') {
       const viewer = getViewer(req);
-      if (!viewer.canTriggerActions) {
+      if (!viewer.can('bestand.schreiben')) {
         sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Nur Admin kann Slots zuweisen.' } });
         return;
       }
