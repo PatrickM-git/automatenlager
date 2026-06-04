@@ -150,7 +150,22 @@ test('AC-W2: POST als Read-Only-Gast → 403 (kein Schreibrecht)', async (t) => 
     body: { config: { graceDays: 99 } },
   });
   assert.equal(res.status, 403);
-  assert.equal(res.json().error.code, 'READ_ONLY_FORBIDDEN');
+  assert.equal(res.json().error.code, 'CAPABILITY_REQUIRED'); // #31: system.verwalten nötig
+});
+
+test('#31/US22: Auffüller (workflows.starten, NICHT system.verwalten) → 403 bei Schwellwert-Schreiben', async (t) => {
+  const port = await getFreePort();
+  // KEIN Dev-Flag hier: Rolle kommt aus dem Header + Operator-Allowlist.
+  const dashboard = await startDashboard(port, { DASHBOARD_DEV_LOCAL_ADMIN: '', DASHBOARD_OPERATOR_LOGIN: 'auffueller@example.test' });
+  t.after(() => dashboard.kill());
+
+  const res = await request(port, '/api/v2/settings/definitions', {
+    method: 'POST',
+    headers: { 'Tailscale-User-Login': 'auffueller@example.test' },
+    body: { config: { graceDays: 99 } },
+  });
+  assert.equal(res.status, 403, 'Auffüller darf Schwellwerte NICHT ändern');
+  assert.equal(res.json().error.code, 'CAPABILITY_REQUIRED');
 });
 
 test('AC-W3 LIVE: Admin-POST persistiert, GET spiegelt es (Snapshot/Restore)', async (t) => {
