@@ -170,6 +170,12 @@ function writeConfigFile(data) {
   return merged;
 }
 
+// #30 Design-Note (Zugangsdaten je Mandant, SPEC Story 27/37): Das Credential-
+// Modell (.dashboard-config.json / Env-Vorrang) ist heute SINGLE-TENANT. Sobald
+// ein zweiter echter Mandant dazukommt, ist ein Secret-Vault VERBINDLICH —
+// mehrere Kundenschlüssel (z. B. Nayax-API je Kunde) dürfen NICHT im Klartext an
+// einem Ort liegen. Künftiges Schema trägt `tenant_id` je Credential; bis dahin
+// gilt der Single-Tenant-Pfad mit system.verwalten-Guard + maskierten Rückgaben.
 function maskApiKey(key) {
   if (!key || key.length < 8) return key ? '••••••••' : '';
   return key.slice(0, 4) + '••••••••' + key.slice(-4);
@@ -2533,6 +2539,8 @@ const server = http.createServer(async (req, res) => {
 
     // GET /api/config — gibt aktuelle Einstellungen zurueck (API-Key NIEMALS im Klartext)
     if (parsed.pathname === '/api/config' && req.method === 'GET') {
+      // #30: Config (auch maskiert) ist System-Info → nur mit system.verwalten.
+      if (!requireCapability(getViewer(req), 'system.verwalten', res)) return;
       const cfg = dashboardConfig();
       sendJson(res, 200, {
         n8nBaseUrl:    cfg.n8nBaseUrl,
@@ -2545,6 +2553,10 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/config — speichert Einstellungen in .dashboard-config.json
     if (parsed.pathname === '/api/config' && req.method === 'POST') {
+      // #30 (SPEC F3): Schreiben von Zugangsdaten erfordert system.verwalten.
+      // VOR dem 409-Env-Check, damit Unbefugte 403 sehen (kein Info-Leak, ob ein
+      // Env-Key gesetzt ist). Der Env-Vorrang ist KEINE Sicherheit für sich.
+      if (!requireCapability(getViewer(req), 'system.verwalten', res)) return;
       // Kein Speichern wenn der Key per Umgebungsvariable gesetzt ist
       if (process.env.N8N_API_KEY) {
         sendJson(res, 409, { ok: false, message: 'N8N_API_KEY ist als Umgebungsvariable gesetzt und hat Vorrang. Bitte dort aendern.' });
