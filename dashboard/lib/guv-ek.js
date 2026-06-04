@@ -48,4 +48,23 @@ function wareneinsatzNet(qty, unitCostNet) {
   return round2(q * net);
 }
 
-module.exports = { ekFromNet, wareneinsatzNet, toNum, round2, round4 };
+// Issue #56: Wirtschaftlicher Wareneinsatz je nach Besteuerungsmodell.
+// EINE gemeinsame Basis für economics.js (Live) und WF8 (guv_daily), damit
+// derselbe Slot/Posten nie unterschiedlich bewertet wird.
+//   - regelbesteuert (Default): netto — Vorsteuer wird erstattet, netto ist
+//     der echte Aufwand. Identisch zu wareneinsatzNet (keine Verschiebung).
+//   - Kleinunternehmer (§19 UStG): brutto — gezahlte MwSt ist echte, nicht
+//     erstattete Kosten -> netto-EK × (1 + mwst/100).
+// `mwstSatz` in Prozent (z. B. 7 oder 19). Fehlt eine gültige MwSt, wird NICHT
+// erfunden -> Rückfall auf netto (kein geratener Aufschlag).
+function wareneinsatzCostBasis(qty, unitCostNet, mwstSatz, opts = {}) {
+  const q = toNum(qty);
+  const net = toNum(unitCostNet);
+  if (q <= 0 || net <= 0) return 0;
+  const rate = toNum(mwstSatz);
+  const kleinunternehmer = !!(opts && opts.kleinunternehmer);
+  const unit = kleinunternehmer && rate > 0 ? net * (1 + rate / 100) : net;
+  return round2(q * unit);
+}
+
+module.exports = { ekFromNet, wareneinsatzNet, wareneinsatzCostBasis, toNum, round2, round4 };
