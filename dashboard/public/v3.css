@@ -2192,9 +2192,13 @@ a.v3-chip:focus-visible {
   border-radius: 10px;
   transition: border-color 0.14s var(--ease), box-shadow 0.14s var(--ease), background 0.14s var(--ease), transform 0.12s var(--ease);
 }
-.v3-slot-tile:hover { border-color: var(--brand); box-shadow: var(--shadow-card); }
+.v3-slot-tile:hover { border-color: var(--brand); box-shadow: var(--shadow-card); background: var(--paper-deep); }
 .v3-slot-tile:active { cursor: grabbing; }
-.v3-slot-tile__grip { color: var(--ink-faint); font-size: 14px; line-height: 1; letter-spacing: -2px; }
+/* Greif-Affordance: der weiße OS-Hand-Cursor ist auf hellem Grund kaum
+   sichtbar — der Grip macht das „ziehbar" optisch deutlich (kräftiger als
+   --ink-faint, auf Hover Markenfarbe + leicht größer). */
+.v3-slot-tile__grip { color: var(--ink-soft); font-size: 16px; line-height: 1; letter-spacing: -2px; transition: color 0.14s var(--ease), transform 0.12s var(--ease); }
+.v3-slot-tile:hover .v3-slot-tile__grip { color: var(--brand); transform: scale(1.18); }
 .v3-slot-tile__name { font-size: 13px; font-weight: 600; color: var(--ink); }
 .v3-slot-tile.is-dragging { opacity: 0.5; }
 .v3-slot-tile.is-selected {

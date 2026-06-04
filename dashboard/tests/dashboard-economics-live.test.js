@@ -82,3 +82,15 @@ test('clampRecentLimit: Default und Grenzen', () => {
   assert.equal(clampRecentLimit('25'), 25);
   assert.equal(clampRecentLimit('9999'), 100); // Deckel
 });
+
+/* #89.2: Die „Verkäufe heute"-Liste muss auf den heutigen Tag (Europe/Berlin)
+   gefiltert sein — nicht datumsunabhängig die letzten N Verkäufe. Quell-Guard,
+   da der Filter in der SQL-Query liegt (kein Live-DB im Unit-Test). */
+test('queryEconomicsLivePg: recent-Query ist auf heute (Europe/Berlin) gefiltert', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'economics-live.js'), 'utf8');
+  // Beide Datumsklauseln (Tages-Aggregat + recent-Liste) referenzieren denselben Berlin-Tag.
+  const matches = src.match(/AT TIME ZONE 'Europe\/Berlin'\)::date\s*=\s*\(now\(\) AT TIME ZONE 'Europe\/Berlin'\)::date/g) || [];
+  assert.ok(matches.length >= 2, 'recent-Query muss denselben Heute-Filter wie das Tages-Aggregat haben');
+});
