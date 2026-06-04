@@ -89,6 +89,8 @@ async function queryEconomicsLivePg(pgUrl, query = {}) {
         machines.length ? [machines] : [],
       ),
       client.query(
+        // Nur die HEUTIGEN Verkäufe (Europe/Berlin), nicht die letzten N
+        // datumsunabhängig — deckungsgleich mit dem Tages-Aggregat oben.
         `SELECT s.nayax_transaction_id,
                 s.settlement_at,
                 s.machine_id,
@@ -99,6 +101,8 @@ async function queryEconomicsLivePg(pgUrl, query = {}) {
            FROM automatenlager.sales_transactions s
            LEFT JOIN automatenlager.products p ON p.product_id = s.product_id
           WHERE s.source <> '${HISTORIC_SOURCE}'
+            AND (s.settlement_at AT TIME ZONE 'Europe/Berlin')::date
+                = (now() AT TIME ZONE 'Europe/Berlin')::date
             ${machineClause}
           ORDER BY s.settlement_at DESC NULLS LAST
           LIMIT ${limitParam}`,

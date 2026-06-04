@@ -2313,9 +2313,9 @@
             '<span class="v3-live__amt">' + fmtEuro(r.grossAmount) + ' €</span>' +
           '</li>';
         }).join('') + '</ul>'
-      : '<p class="v3-live__empty">Noch keine Verkäufe.</p>';
+      : '<p class="v3-live__empty">Heute noch keine Verkäufe.</p>';
     return '<details class="v3-live__details" data-live-details' + (_liveListOpen ? ' open' : '') + '>' +
-      '<summary class="v3-live__summary">Letzte Verkäufe' + (count ? ' (' + count + ')' : '') + '</summary>' +
+      '<summary class="v3-live__summary">Verkäufe heute' + (count ? ' (' + count + ')' : '') + '</summary>' +
       inner +
     '</details>';
   }
@@ -2362,9 +2362,11 @@
   }
 
   function loadLiveData() {
-    var qs = '';
+    // limit=100 (Server-Deckel): an einem umsatzstarken Tag soll die „Verkäufe
+    // heute"-Liste vollständig sein, nicht bei 15 abschneiden.
+    var qs = '?limit=100';
     if (_guvQuery.machines && _guvQuery.machines.length) {
-      qs = '?machines=' + encodeURIComponent(_guvQuery.machines.join(','));
+      qs += '&machines=' + encodeURIComponent(_guvQuery.machines.join(','));
     }
     return fetchJson('/api/v2/economics/live' + qs)
       .then(function (res) { return (res && res.data) ? res.data : null; });
