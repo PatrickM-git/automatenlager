@@ -25,6 +25,7 @@ const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buil
 const { buildProductCatalog } = require('./lib/product-catalog.js');
 const { queryEconomicsScopePg } = require('./lib/automaten-view.js');
 const { queryEconomicsLivePg } = require('./lib/economics-live.js');
+const { resolveViewer } = require('./lib/auth.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
 const { runStockCostCheck } = require('./lib/stock-cost-invariant.js');
@@ -193,32 +194,17 @@ function dashboardConfig() {
   };
 }
 
+// Issue #27: Default-Deny + exakte Allowlist + F1-Pfadvertrauen. Logik liegt in
+// lib/auth.js (rein/testbar); hier nur das Extrahieren der Request-Felder.
+// req.socket.remoteAddress ist die nicht-fälschbare Quelladresse (Basis für F1
+// und den Loopback-Dev-Notausgang) — bewusst NICHT der spoofbare Host-Header.
 function getViewer(req) {
-  const login = clean(req.headers['tailscale-user-login']);
-  const configuredAdmins = clean(process.env.DASHBOARD_ADMIN_LOGIN)
-    .split(',')
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-  const normalizedLogin = login.toLowerCase();
-  // No Tailscale-Serve identity header = operator trust (plain TCP Tailscale or localhost).
-  // Guest status requires an explicit tailscale-user-login that is NOT in the admin list.
-  const isAdmin = !normalizedLogin
-    || configuredAdmins.includes(normalizedLogin)
-    || normalizedLogin.startsWith('patrick');
-
-  return {
-    login: login || (isLocalDashboardHost(req.headers.host) ? 'local-admin' : 'operator'),
-    role: isAdmin ? 'admin' : 'guest',
-    canTriggerActions: isAdmin,
-  };
-}
-
-function isLocalDashboardHost(hostHeader) {
-  const host = clean(hostHeader).toLowerCase();
-  const hostname = host.startsWith('[')
-    ? host.slice(1, host.indexOf(']'))
-    : host.split(':')[0];
-  return ['localhost', '127.0.0.1', '::1'].includes(hostname);
+  return resolveViewer({
+    login: req.headers['tailscale-user-login'],
+    remoteAddress: req.socket && req.socket.remoteAddress,
+    host: req.headers.host,
+    env: process.env,
+  });
 }
 
 function auditGuestAccess(viewer, event, details = {}) {

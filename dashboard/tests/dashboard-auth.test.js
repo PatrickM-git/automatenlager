@@ -177,10 +177,11 @@ test('requests with explicit non-admin Tailscale identity are guests on tailnet 
   assert.equal(mockN8n.calls.some((call) => call.method === 'POST' && call.url === '/webhook/dashboard-test-wf1'), false);
 });
 
-test('localhost requests without Tailscale identity stay admin for local operation', async (t) => {
+test('#27 Default-Deny: kein Header + kein Dev-Flag -> Gast (kann nicht auslösen)', async (t) => {
   const mockN8n = startMockN8n();
   const n8nPort = await listen(mockN8n.server);
   const dashboardPort = await getFreePort();
+  // KEIN DASHBOARD_DEV_LOCAL_ADMIN -> Default-Deny greift, auch auf Loopback.
   const dashboard = await startDashboard(dashboardPort, n8nPort);
 
   t.after(() => {
@@ -190,9 +191,27 @@ test('localhost requests without Tailscale identity stay admin for local operati
 
   const response = await fetch(`http://127.0.0.1:${dashboardPort}/api/actions/invoice-intake/trigger`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  assert.equal(response.status, 403, 'ohne Header/Flag kein Admin mehr (Kern-Regression)');
+  assert.equal(mockN8n.calls.some((call) => call.method === 'POST' && call.url === '/webhook/dashboard-test-wf1'), false);
+});
+
+test('#27 Dev-Notausgang: localhost ohne Header MIT DASHBOARD_DEV_LOCAL_ADMIN -> Admin', async (t) => {
+  const mockN8n = startMockN8n();
+  const n8nPort = await listen(mockN8n.server);
+  const dashboardPort = await getFreePort();
+  const dashboard = await startDashboard(dashboardPort, n8nPort, { DASHBOARD_DEV_LOCAL_ADMIN: '1' });
+
+  t.after(() => {
+    dashboard.kill();
+    mockN8n.server.close();
+  });
+
+  const response = await fetch(`http://127.0.0.1:${dashboardPort}/api/actions/invoice-intake/trigger`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
   });
 
   assert.equal(response.status, 200);
