@@ -3893,12 +3893,27 @@
         '<span class="v3-set-status" id="v3-set-status" role="status"></span>' +
       '</div>' : '<p class="v3-state__msg">Nur Admins können diese Werte ändern (Read-Only-Zugang).</p>';
 
+    // Besteuerungsmodell (#56): steuert Netto- vs. Brutto-EK im Wareneinsatz.
+    var taxSel = '' +
+      '<section class="v3-card" aria-label="Besteuerungsmodell">' +
+        '<h3 class="v3-set-subtitle">Besteuerungsmodell</h3>' +
+        '<p class="v3-state__msg" style="margin:0 0 12px"><strong>Kleinunternehmer</strong> (§19 UStG) bucht den <strong>Brutto-EK</strong> als Wareneinsatz (gezahlte MwSt ist echte, nicht erstattete Kosten); <strong>regelbesteuert</strong> den <strong>Netto-EK</strong> (Vorsteuer wird erstattet). Wirkt auf die Live-Marge und ab dem nächsten Lauf auf die Nacht-GuV (WF8). Default für neue Mandanten: regelbesteuert.</p>' +
+        '<label class="v3-set-field">' +
+          '<span class="v3-set-field__label">Modell</span>' +
+          '<select class="v3-set-input" data-set-tax="1"' + ro + '>' +
+            '<option value="regelbesteuert"' + (cfg.kleinunternehmerAktiv ? '' : ' selected') + '>Regelbesteuert (Netto-EK)</option>' +
+            '<option value="kleinunternehmer"' + (cfg.kleinunternehmerAktiv ? ' selected' : '') + '>Kleinunternehmer §19 (Brutto-EK)</option>' +
+          '</select>' +
+        '</label>' +
+      '</section>';
+
     return '' +
       '<section class="v3-card" aria-label="Drehzahl-Klassifikation">' +
         '<h2 class="v3-set-title">Drehgeschwindigkeits-Klassen (Branchen-Anker)</h2>' +
         '<p class="v3-state__msg" style="margin:0 0 16px">Maßstab ist der <strong>Deckungsbeitrag pro Slot und Woche</strong> (4-Wochen-Fenster) gegen eine kategorie-eigene Geld-Latte aus der Branchennorm — nicht die reine Stückzahl. Verbindlich im Glossar <code>docs/UBIQUITOUS_LANGUAGE.md</code>, Logik in <code>lib/slow-mover.js</code> + <code>lib/category-config.js</code>.</p>' +
         '<ul class="v3-set-defs">' + classRows + '</ul>' +
       '</section>' +
+      taxSel +
       '<section class="v3-card" aria-label="Schwellwerte & Margen">' +
         '<h3 class="v3-set-subtitle">Schwellwerte</h3>' +
         '<div class="v3-set-grid">' +
@@ -3930,6 +3945,8 @@
         var v = inp.value.trim();
         if (v !== '') { override[inp.getAttribute('data-set-key')] = Number(v); }
       });
+      var taxEl = document.querySelector('[data-set-tax]');
+      if (taxEl) { override.kleinunternehmerAktiv = (taxEl.value === 'kleinunternehmer'); }
       document.querySelectorAll('tr[data-set-cat]').forEach(function (row) {
         var key = row.getAttribute('data-set-cat');
         var entry = {};
