@@ -1017,7 +1017,7 @@
     if (route.path === '/guv') {
       return loadGuvData(_guvQuery)
         .then(function (data) { return { status: 'ok', guv: data }; })
-        .catch(function () { return { status: 'error' }; });
+        .catch(function (err) { return { status: err && err.message === '403' ? 'forbidden' : 'error' }; });
     }
     if (route.path === '/slots') {
       return Promise.all([
@@ -2532,11 +2532,15 @@
         body.innerHTML = renderGuvBody(data, _guvQuery);
         bindBody();
         refreshLiveTile(); // Live-Kachel dem evtl. geänderten Automaten-Filter nachziehen
-      }).catch(function () {
+      }).catch(function (err) {
         if (!body) { return; }
         body.classList.remove('is-loading');
         body.setAttribute('aria-busy', 'false');
-        body.innerHTML = renderState('error', { message: 'Die GuV-Daten für diesen Zeitraum konnten nicht geladen werden.' });
+        if (err && err.message === '403') {
+          body.innerHTML = renderState('empty', { title: 'Keine Berechtigung', message: 'Dieser Bereich ist nur für Eigentümer zugänglich.' });
+        } else {
+          body.innerHTML = renderState('error', { message: 'Die GuV-Daten für diesen Zeitraum konnten nicht geladen werden.' });
+        }
       });
     }
 
@@ -4071,7 +4075,10 @@
     loadPage(route).then(function (result) {
       if (token !== loadToken) { return; } // veralteter Ladevorgang – verwerfen
       viewEl.setAttribute('aria-busy', 'false');
-      if (result.status === 'error') {
+      if (result.status === 'forbidden') {
+        viewEl.innerHTML = pageHead(route) +
+          renderState('empty', { title: 'Keine Berechtigung', message: 'Dieser Bereich ist nur für Eigentümer zugänglich.' });
+      } else if (result.status === 'error') {
         viewEl.innerHTML = pageHead(route) +
           renderState('error', { message: 'Die Daten für „' + route.title + '" konnten nicht geladen werden.', onRetry: true });
         bindRetry(route);

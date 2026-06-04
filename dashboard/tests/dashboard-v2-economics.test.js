@@ -222,6 +222,8 @@ test('AC5: historic_backfill rows are excluded from bySlot', () => {
   assert.equal(result.bySlot.length, 2);
 });
 
+const ADMIN_HDR = { 'Tailscale-User-Login': 'patrick@example.test' }; // #80: economics erfordert finanzen.lesen
+
 test('AC-HTTP: /api/v2/economics returns PG_ERROR when connection fails', async (t) => {
   const port = await getFreePort();
   const dashboard = await startDashboard(port, {
@@ -229,7 +231,7 @@ test('AC-HTTP: /api/v2/economics returns PG_ERROR when connection fails', async 
   });
   t.after(() => dashboard.kill());
 
-  const response = await request(port, '/api/v2/economics');
+  const response = await request(port, '/api/v2/economics', ADMIN_HDR);
   assert.equal(response.status, 503);
   const body = response.json();
   assert.equal(body.ok, false);
@@ -245,7 +247,7 @@ test('AC-HTTP: /api/v2/economics response envelope matches v2 contract', async (
   });
   t.after(() => dashboard.kill());
 
-  const response = await request(port, '/api/v2/economics');
+  const response = await request(port, '/api/v2/economics', ADMIN_HDR);
   const body = response.json();
   assert.match(body.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.match(body.generatedAtDisplay, /\bMESZ\b|\bMEZ\b/);

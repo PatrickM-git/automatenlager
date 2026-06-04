@@ -126,12 +126,23 @@ test('AC2: buildCsvFilename returns range filename for multi-month', () => {
 
 // ── AC2: HTTP Export-Endpunkt ─────────────────────────────────────────────────
 
-test('AC2-HTTP: GET /api/v2/reports/export returns 503 when PG not configured', async (t) => {
+const ADMIN_HDR = { 'Tailscale-User-Login': 'patrick@example.test' }; // #80: reports/export erfordert finanzen.lesen
+
+test('#80 GET /api/v2/reports/export returns 403 without finanzen.lesen', async (t) => {
   const port = await getFreePort();
   const dashboard = await startDashboard(port);
   t.after(() => dashboard.kill());
 
   const res = await request(port, '/api/v2/reports/export?format=csv&from=2026-05&to=2026-05');
+  assert.equal(res.status, 403, 'export ohne finanzen.lesen → 403');
+});
+
+test('AC2-HTTP: GET /api/v2/reports/export returns 503 when PG not configured', async (t) => {
+  const port = await getFreePort();
+  const dashboard = await startDashboard(port);
+  t.after(() => dashboard.kill());
+
+  const res = await request(port, '/api/v2/reports/export?format=csv&from=2026-05&to=2026-05', { headers: ADMIN_HDR });
   assert.equal(res.status, 503);
   const body = res.json();
   assert.equal(body.ok, false);
@@ -144,22 +155,20 @@ test('AC2-HTTP: GET /api/v2/reports/export returns 503 with PG error when DB unr
   });
   t.after(() => dashboard.kill());
 
-  const res = await request(port, '/api/v2/reports/export?format=csv&from=2026-05&to=2026-05');
+  const res = await request(port, '/api/v2/reports/export?format=csv&from=2026-05&to=2026-05', { headers: ADMIN_HDR });
   assert.equal(res.status, 503);
   const body = res.json();
   assert.equal(body.error.code, 'PG_ERROR');
 });
 
 test('AC2-HTTP: GET /api/v2/reports/export with format=csv returns Content-Type text/csv when PG unavailable', async (t) => {
-  // We test that the server at least attempts CSV when DB works.
-  // With a real DB we would get a CSV file. Here we verify the 503 response is JSON.
   const port = await getFreePort();
   const dashboard = await startDashboard(port, {
     DASHBOARD_V2_PG_URL: 'postgresql://invalid-host-x:5432/nonexistent',
   });
   t.after(() => dashboard.kill());
 
-  const res = await request(port, '/api/v2/reports/export?format=csv&from=2026-05&to=2026-05');
+  const res = await request(port, '/api/v2/reports/export?format=csv&from=2026-05&to=2026-05', { headers: ADMIN_HDR });
   // Even on error, response envelope is consistent
   assert.equal(res.status, 503);
 });

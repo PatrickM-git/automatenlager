@@ -401,3 +401,23 @@ test('#32 Abgewiesener Trigger (Gast, 403) erzeugt denied-Audit-Eintrag', async 
   assert.equal(entry.outcome, 'denied');
   assert.equal(entry.role, 'guest');
 });
+
+// ── #80: finanzen.lesen vollständig — alle drei GuV/Finanz-Pfade ──────────────
+
+test('#80 Auffüller NICHT /api/v2/economics (area dispatcher) → 403', async (t) => {
+  const port = await startWithOperator(t);
+  const res = await fetch(`http://127.0.0.1:${port}/api/v2/economics`, { headers: OP_HDR });
+  assert.equal(res.status, 403);
+});
+
+test('#80 Auffüller NICHT /api/v2/reports/export → 403', async (t) => {
+  const port = await startWithOperator(t);
+  const res = await fetch(`http://127.0.0.1:${port}/api/v2/reports/export`, { headers: OP_HDR });
+  assert.equal(res.status, 403);
+});
+
+test('#80 Auffüller NICHT /api/v2/reports/pdf → 403', async (t) => {
+  const port = await startWithOperator(t);
+  const res = await fetch(`http://127.0.0.1:${port}/api/v2/reports/pdf`, { headers: OP_HDR });
+  assert.equal(res.status, 403);
+});

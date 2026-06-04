@@ -118,7 +118,7 @@ test('Dashboard v2 read endpoints expose stable PostgreSQL-first contracts', asy
   const endpoints = [
     ['/api/v2/overview', 'overview'],
     ['/api/v2/inventory-mhd', 'inventory-mhd'],
-    ['/api/v2/economics', 'economics'],
+    // economics requires finanzen.lesen — tested separately below with admin header
     ['/api/v2/assortment-slots', 'assortment-slots'],
     ['/api/v2/monitoring', 'monitoring'],
   ];
@@ -137,6 +137,22 @@ test('Dashboard v2 read endpoints expose stable PostgreSQL-first contracts', asy
     assert.equal(body.error.code, 'PG_UNCONFIGURED');
     assert.match(body.error.message, /PostgreSQL/);
   }
+});
+
+test('#80 /api/v2/economics requires finanzen.lesen: 403 without auth, 503 with admin header when PG absent', async (t) => {
+  const port = await getFreePort();
+  const dashboard = await startDashboard(port, { DASHBOARD_V2_PG_URL: '' });
+  t.after(() => dashboard.kill());
+
+  const noAuth = await request(port, '/api/v2/economics');
+  assert.equal(noAuth.status, 403, 'economics ohne Berechtigung → 403');
+
+  const adminHdr = { 'Tailscale-User-Login': 'patrick@example.test' };
+  const withAuth = await request(port, '/api/v2/economics', adminHdr);
+  assert.equal(withAuth.status, 503, 'economics mit Admin-Header + kein PG → 503');
+  const body = withAuth.json();
+  assert.equal(body.area, 'economics');
+  assert.equal(body.error.code, 'PG_UNCONFIGURED');
 });
 
 test('Dashboard v2 PG failures expose last successful PG timestamp without legacy fallback', async (t) => {

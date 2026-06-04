@@ -1885,6 +1885,10 @@ const server = http.createServer(async (req, res) => {
     const v2Area = [...dashboardV2Areas.entries()]
       .find(([, config]) => parsed.pathname === config.path);
     if (v2Area && req.method === 'GET') {
+      if (v2Area[0] === 'economics') { // #80: GuV ist finanzen.lesen-Bereich
+        const areaViewer = getViewer(req);
+        if (!requireCapability(areaViewer, 'finanzen.lesen', res)) return;
+      }
       const result = await buildDashboardV2Area(v2Area[0], parsed.query);
       sendJson(res, result.status, result.body);
       return;
@@ -2720,6 +2724,7 @@ const server = http.createServer(async (req, res) => {
     // ── Reports export route ──────────────────────────────────────────────────
 
     if (parsed.pathname === '/api/v2/reports/export' && req.method === 'GET') {
+      if (!requireCapability(getViewer(req), 'finanzen.lesen', res)) return; // #80
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
@@ -2758,8 +2763,7 @@ const server = http.createServer(async (req, res) => {
     // ── PDF-Export (GuV-Bericht als echte Datei) ──────────────────────────────
 
     if (parsed.pathname === '/api/v2/reports/pdf' && req.method === 'GET') {
-      requireCapability(viewer, 'finanzen.lesen', res);
-      if (res.headersSent) return;
+      if (!requireCapability(getViewer(req), 'finanzen.lesen', res)) return; // #80: viewer war undefiniert
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
