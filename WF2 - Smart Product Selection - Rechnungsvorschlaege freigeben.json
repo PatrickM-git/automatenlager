@@ -1,5 +1,6 @@
 {
   "name": "WF2 - Smart Product Selection - Rechnungsvorschlaege freigeben",
+  "active": true,
   "nodes": [
     {
       "parameters": {
