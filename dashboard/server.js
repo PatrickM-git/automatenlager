@@ -218,6 +218,7 @@ function getViewer(req) {
 // Aufrufer beendet dann mit `return`). Das ist die Autorität — nicht die UI.
 function requireCapability(viewer, capability, res) {
   if (viewer && typeof viewer.can === 'function' && viewer.can(capability)) return true;
+  auditDenied(viewer, 'capability_denied', { capability }); // #32: abgewiesene Aktion protokollieren
   sendJson(res, 403, {
     ok: false,
     error: { code: 'CAPABILITY_REQUIRED', message: `Fehlende Berechtigung: ${capability}.` },
@@ -240,18 +241,39 @@ function viewerPublic(viewer) {
   };
 }
 
-function auditGuestAccess(viewer, event, details = {}) {
-  if (viewer.role !== 'guest') return;
+// #32 (Säule 5 — Audit-Trail): zentrales append-only JSONL-Audit für privilegierte
+// Aktionen. Hält wer/wann/was/Ergebnis fest — für ALLE Rollen (auch Admin/Auffüller)
+// und auch ABGEWIESENE Versuche (outcome='denied'). KEINE Secret-Werte: nur die vom
+// Aufrufer übergebenen, secret-freien `details`. Restriktive Dateirechte (0600);
+// Pfad konsistent zum Gast-Log, via DASHBOARD_AUDIT_LOG überschreibbar.
+function auditAction(viewer, event, details = {}, outcome = 'ok') {
   const auditPath = process.env.DASHBOARD_AUDIT_LOG || path.join(__dirname, 'logs', 'guest-access.jsonl');
   const entry = {
     timestamp: new Date().toISOString(),
     event,
-    login: viewer.login,
-    role: viewer.role,
+    outcome,
+    login: viewer && viewer.login,
+    role: viewer && viewer.role,
+    roleKey: viewer && viewer.roleKey,
+    tenantId: viewer && viewer.tenantId,
     ...details,
   };
-  fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-  fs.appendFileSync(auditPath, `${JSON.stringify(entry)}\n`, 'utf8');
+  try {
+    fs.mkdirSync(path.dirname(auditPath), { recursive: true });
+    fs.appendFileSync(auditPath, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: 0o600 });
+  } catch (_) { /* Audit darf die Aktion nie kippen */ }
+}
+
+// #32: abgewiesene privilegierte Aktion (403) — für ALLE Rollen protokollieren.
+function auditDenied(viewer, event, details = {}) {
+  auditAction(viewer, event, details, 'denied');
+}
+
+// Gast-VIEW-Logging (read): bleibt gast-only, damit häufige Admin-Reads den Trail
+// nicht zuspammen. Privilegierte AKTIONEN nutzen auditAction (alle Rollen).
+function auditGuestAccess(viewer, event, details = {}) {
+  if (viewer.role !== 'guest') return;
+  auditAction(viewer, event, details, 'guest_view');
 }
 
 function clean(value) {
@@ -1975,7 +1997,7 @@ const server = http.createServer(async (req, res) => {
     if (parsed.pathname === '/api/v2/refill/trigger' && req.method === 'POST') {
       const viewer = getViewer(req);
       if (!viewer.canTriggerActions) {
-        auditGuestAccess(viewer, 'refill_trigger_denied', {});
+        auditDenied(viewer, 'refill_trigger_denied', {});
         sendJson(res, 403, {
           ok: false,
           error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer duerfen keine Nachfuellung ausloesen.' },
@@ -2047,7 +2069,7 @@ const server = http.createServer(async (req, res) => {
     if (parsed.pathname === '/api/v2/inventory/write-off' && req.method === 'POST') {
       const viewer = getViewer(req);
       if (!viewer.can('bestand.schreiben')) {
-        auditGuestAccess(viewer, 'write_off_denied', {});
+        auditDenied(viewer, 'write_off_denied', {});
         sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer dürfen keine Charge ausbuchen.' } });
         return;
       }
@@ -2228,7 +2250,7 @@ const server = http.createServer(async (req, res) => {
     if (parsed.pathname === '/api/v2/slot-change/confirm' && req.method === 'POST') {
       const viewer = getViewer(req);
       if (!viewer.can('bestand.schreiben')) {
-        auditGuestAccess(viewer, 'slot_change_denied', {});
+        auditDenied(viewer, 'slot_change_denied', {});
         sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer dürfen keinen Produktwechsel durchführen.' } });
         return;
       }
@@ -2294,7 +2316,7 @@ const server = http.createServer(async (req, res) => {
     if (v2ActionMatch && req.method === 'POST') {
       const viewer = getViewer(req);
       if (!viewer.canTriggerActions) {
-        auditGuestAccess(viewer, 'v2_action_trigger_denied', {
+        auditDenied(viewer, 'v2_action_trigger_denied', {
           actionId: decodeURIComponent(v2ActionMatch[1]),
         });
         sendJson(res, 403, {
@@ -2348,7 +2370,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (!viewer.canTriggerActions) {
-        auditGuestAccess(viewer, 'v2_upload_denied', { target: routeTarget });
+        auditDenied(viewer, 'v2_upload_denied', { target: routeTarget });
         sendJson(res, 403, {
           ok: false,
           viewer,
@@ -2556,7 +2578,8 @@ const server = http.createServer(async (req, res) => {
       // #30 (SPEC F3): Schreiben von Zugangsdaten erfordert system.verwalten.
       // VOR dem 409-Env-Check, damit Unbefugte 403 sehen (kein Info-Leak, ob ein
       // Env-Key gesetzt ist). Der Env-Vorrang ist KEINE Sicherheit für sich.
-      if (!requireCapability(getViewer(req), 'system.verwalten', res)) return;
+      const configViewer = getViewer(req);
+      if (!requireCapability(configViewer, 'system.verwalten', res)) return;
       // Kein Speichern wenn der Key per Umgebungsvariable gesetzt ist
       if (process.env.N8N_API_KEY) {
         sendJson(res, 409, { ok: false, message: 'N8N_API_KEY ist als Umgebungsvariable gesetzt und hat Vorrang. Bitte dort aendern.' });
@@ -2578,6 +2601,8 @@ const server = http.createServer(async (req, res) => {
         update.n8nApiKey = body.n8nApiKey.trim();
       }
       const saved = writeConfigFile(update);
+      // #32: Config-Änderung protokollieren — NUR welche Felder, NIE der Key-Wert.
+      auditAction(configViewer, 'config_write', { changed: Object.keys(update), apiKeyChanged: !!update.n8nApiKey }, 'ok');
       sendJson(res, 200, {
         ok:           true,
         n8nBaseUrl:   saved.n8nBaseUrl || dashboardConfig().n8nBaseUrl,
@@ -2592,7 +2617,7 @@ const server = http.createServer(async (req, res) => {
     if (actionMatch && req.method === 'POST') {
       const viewer = getViewer(req);
       if (!viewer.canTriggerActions) {
-        auditGuestAccess(viewer, 'action_trigger_denied', {
+        auditDenied(viewer, 'action_trigger_denied', {
           actionId: decodeURIComponent(actionMatch[1]),
         });
         sendJson(res, 403, {
@@ -2653,6 +2678,9 @@ const server = http.createServer(async (req, res) => {
           });
           return;
         }
+        // #32: Workflow-Trigger protokollieren (actionId + Ergebnis; NICHT die
+        // Webhook-Antwort, die könnte Nutzdaten enthalten).
+        auditAction(viewer, 'workflow_trigger', { actionId: action.id, workflowId: action.workflowId }, response.ok ? 'ok' : 'error');
         sendJson(res, response.ok ? 200 : 502, {
           ok: response.ok,
           mode: 'webhook',
@@ -2730,7 +2758,7 @@ const server = http.createServer(async (req, res) => {
       // #31 (US22): Schwellwerte sind System-Einstellungen → nur system.verwalten.
       // Vorher canTriggerActions (= workflows.starten), das ein Auffüller hat — Lücke.
       if (!viewer.can('system.verwalten')) {
-        auditGuestAccess(viewer, 'settings_write_denied', {});
+        auditDenied(viewer, 'settings_write_denied', {});
         sendJson(res, 403, { ok: false, error: { code: 'CAPABILITY_REQUIRED', message: 'Nur system.verwalten darf die Einstellungen ändern.' } });
         return;
       }
@@ -2761,6 +2789,10 @@ const server = http.createServer(async (req, res) => {
         const incoming = sanitizeOverride(body && body.config ? body.config : body);
         const mergedOverride = mergeSettingsOverride(current, incoming);
         const config = await writeOverride(client, DEFAULT_MANDANT, mergedOverride);
+        // #32: Schwellwert-Änderung protokollieren — nur die geänderten Schlüssel,
+        // KEINE Werte (Audit-Hygiene; Schwellwerte sind zwar keine Secrets, aber wir
+        // halten den Trail bewusst schlank + secret-frei).
+        auditAction(viewer, 'settings_write', { changedKeys: Object.keys(incoming || {}) }, 'ok');
         sendJson(res, 200, { ok: true, definitions: { slowMover: SLOW_MOVER, config } });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
@@ -3141,7 +3173,7 @@ const server = http.createServer(async (req, res) => {
     if (parsed.pathname === '/api/v2/correction-action/confirm' && req.method === 'POST') {
       const viewer = getViewer(req);
       if (!viewer.can('bestand.schreiben')) {
-        auditGuestAccess(viewer, 'correction_action_denied', {});
+        auditDenied(viewer, 'correction_action_denied', {});
         sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Nur Admins können Korrekturen bestätigen.' } });
         return;
       }
@@ -3237,7 +3269,7 @@ const server = http.createServer(async (req, res) => {
     if (parsed.pathname === '/api/v2/nayax-abgleich/apply' && req.method === 'POST') {
       const viewer = getViewer(req);
       if (!viewer.can('nayax.schreiben')) {
-        auditGuestAccess(viewer, 'nayax_abgleich_denied', {});
+        auditDenied(viewer, 'nayax_abgleich_denied', {});
         sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Nur Admins dürfen den Abgleich übernehmen.' } });
         return;
       }

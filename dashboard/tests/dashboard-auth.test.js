@@ -363,3 +363,41 @@ test('#29 /api/dashboard: Gast hat nur betrieb.lesen', async (t) => {
   const caps = (await res.json()).viewer.capabilities;
   assert.deepEqual(caps, ['betrieb.lesen']);
 });
+
+// ── #32 Audit-Trail: privilegierte Aktionen (Erfolg + abgewiesen), keine Secrets ──
+
+const SECRET_KEY = 'SECRET-n8n-AUDIT-9z8y7x';
+
+test('#32 Erfolgreicher Trigger (Admin) erzeugt workflow_trigger-Audit (outcome ok), kein Secret', async (t) => {
+  const auditPath = path.join(os.tmpdir(), `audit-ok-${Date.now()}.jsonl`);
+  const mockN8n = startMockN8n();
+  const n8nPort = await listen(mockN8n.server);
+  const port = await getFreePort();
+  const dashboard = await startDashboard(port, n8nPort, { DASHBOARD_AUDIT_LOG: auditPath, DASHBOARD_DEV_LOCAL_ADMIN: '1', N8N_API_KEY: SECRET_KEY });
+  t.after(() => { dashboard.kill(); mockN8n.server.close(); fs.rmSync(auditPath, { force: true }); });
+
+  const res = await fetch(`http://127.0.0.1:${port}/api/actions/invoice-intake/trigger`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+  assert.equal(res.status, 200);
+  const lines = fs.readFileSync(auditPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const entry = lines.find((e) => e.event === 'workflow_trigger');
+  assert.ok(entry, 'workflow_trigger-Eintrag vorhanden');
+  assert.equal(entry.outcome, 'ok');
+  assert.ok(entry.timestamp && entry.roleKey);
+  assert.ok(!fs.readFileSync(auditPath, 'utf8').includes(SECRET_KEY), 'kein Secret im Audit');
+});
+
+test('#32 Abgewiesener Trigger (Gast, 403) erzeugt denied-Audit-Eintrag', async (t) => {
+  const auditPath = path.join(os.tmpdir(), `audit-deny-${Date.now()}.jsonl`);
+  const mockN8n = startMockN8n();
+  const n8nPort = await listen(mockN8n.server);
+  const port = await getFreePort();
+  const dashboard = await startDashboard(port, n8nPort, { DASHBOARD_AUDIT_LOG: auditPath });
+  t.after(() => { dashboard.kill(); mockN8n.server.close(); fs.rmSync(auditPath, { force: true }); });
+
+  const res = await fetch(`http://127.0.0.1:${port}/api/actions/invoice-intake/trigger`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Tailscale-User-Login': 'freund@example.test' } });
+  assert.equal(res.status, 403);
+  const entry = fs.readFileSync(auditPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.event === 'action_trigger_denied');
+  assert.ok(entry, 'denied-Eintrag vorhanden');
+  assert.equal(entry.outcome, 'denied');
+  assert.equal(entry.role, 'guest');
+});
