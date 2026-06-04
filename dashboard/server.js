@@ -219,6 +219,21 @@ function requireCapability(viewer, capability, res) {
   return false;
 }
 
+// Issue #29: JSON-sichere Viewer-Form fürs Frontend. `capabilities` ist intern ein
+// Set (+ `can`-Funktion) — fürs Frontend als Array + roleKey liefern, damit die
+// v3-Shell Reiter/Buttons je Fähigkeit ein-/ausblenden kann (Komfort; die Autorität
+// bleibt serverseitig in #28).
+function viewerPublic(viewer) {
+  return {
+    login: viewer.login,
+    role: viewer.role,
+    roleKey: viewer.roleKey,
+    tenantId: viewer.tenantId,
+    canTriggerActions: viewer.canTriggerActions,
+    capabilities: [...(viewer.capabilities || [])],
+  };
+}
+
 function auditGuestAccess(viewer, event, details = {}) {
   if (viewer.role !== 'guest') return;
   const auditPath = process.env.DASHBOARD_AUDIT_LOG || path.join(__dirname, 'logs', 'guest-access.jsonl');
@@ -584,7 +599,7 @@ function resolveV2UploadWorkflow(targetConfig, n8n) {
 
 function buildV2UploadCapabilities(viewer) {
   return {
-    viewer,
+    viewer: viewerPublic(viewer),
     canUpload: viewer.canTriggerActions,
     targets: Object.values(dashboardV2UploadTargets).map((target) => ({
       id: target.id,
@@ -1816,7 +1831,7 @@ const server = http.createServer(async (req, res) => {
       const dashboard = await buildDashboard();
       sendJson(res, 200, {
         ...dashboard,
-        viewer,
+        viewer: viewerPublic(viewer),
       });
       return;
     }
@@ -2690,7 +2705,7 @@ const server = http.createServer(async (req, res) => {
       const viewer = getViewer(req);
       sendJson(res, 200, {
         ok: true,
-        canEdit: viewer.canTriggerActions,
+        canEdit: viewer.can('system.verwalten'), // #29/#28: Einstellungen erfordern system.verwalten
         definitions: { slowMover: SLOW_MOVER, config },
       });
       return;
