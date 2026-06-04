@@ -121,10 +121,25 @@ Bewusste Ausnahmen (kein Bestands-Read):
 
 ---
 
-## 5. Offen (separates Issue)
+## 5. Reconciliation (Issue #36 — ERLEDIGT 2026-06-04)
 
-- **Reconciliation `remaining_qty`:** WF7-Lager-Modell und `refill.js` auf das
-  Gesamt-Modell vereinheitlichen, damit der Backstock überall identisch
-  gerechnet wird.
+- **`refill.js` (`buildRefillDetails`) auf Gesamt-Modell umgestellt:** Backstock =
+  `Math.max(SUM(remaining_qty) − current_machine_qty, 0)` statt reiner Summe —
+  konsistent zu `inventory-mhd.js`, `alert-digest.js`, `overview-monitoring.js`.
+  Wirkt zugleich auf den v3-Bulk-Refill (leitet `available_backstock` aus
+  `buildRefillDetails().backstock.total_qty` ab). Tests:
+  `dashboard/tests/dashboard-v2-refill.test.js` (Gesamt-Modell + Clamping ≥ 0).
+- **WF7 (Nachfüllung melden) verifiziert — KEINE Änderung nötig:** WF7 schreibt
+  ausschließlich `current_machine_qty` hoch und bucht den Refill-Movement mit
+  `quantity_delta_total: 0` (reine Umlagerung Lager→Maschine, Gesamt unverändert);
+  `remaining_qty` wird nie geschrieben. Das ist bereits Gesamt-Modell-konform —
+  Nachfüllen verschiebt nur Bestand innerhalb der Charge, ändert den Gesamtbestand
+  nicht. Damit ist die frühere „Lager-Modell"-Vermutung für WF7 entkräftet.
+
+> Ergebnis: Alle Backstock-Berechnungen im System folgen jetzt **einheitlich** dem
+> Gesamt-Modell.
+
+## 6. Offen (separat)
+
 - **Sheet↔PG-Konvergenz:** Restmengen inaktiver Slots im „Produkte"-Sheet
   manuell bereinigen (nicht automatisiert — Projektregel).
