@@ -2,6 +2,26 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
+## Stand: 2026-06-04 (Nayax-Abgleich erkennt neue Produkte über Produktnamen · PR #72)
+
+**Live auf dem Mini, verifiziert.**
+
+### Symptom
+„2 NAYAX-VERKNÜPFUNG OFFEN"; beim „Aus Nayax abgleichen" wurden **Hochwald Eiskaffee** + **Red Bull summer edition** als **unbekannt übersprungen**, obwohl in Dashboard + MoMa eingepflegt.
+
+### Wurzelursache
+`matchNayaxProduct` (lib/nayax-abgleich.js) matchte Nayax→PG nur über `nayax`/`nayax_id`-Aliase, **nicht** über `products.name`. Die neuen Produkte hatten nur den Rechnungs-Alias (`250ml HOCHWALD EISKAFFEE` …) → kein Match. Die Slots existierten (mdb 51 = vorher Sprite, mdb 53 = vorher Red Bull), nur die Nayax-Verknüpfung fehlte.
+
+### Behoben (zweistufig)
+1. **Sofort-Datenfix:** zwei `source='nayax'`-Aliase via `pgw_write` angelegt (Hochwald Eiskaffee→200, Red Bull summer edition→201, idempotent). „NAYAX-VERKNÜPFUNG OFFEN" → 0; Preview zeigt 2 saubere Umbuchungen.
+2. **Dauerfix (PR #72, `18fec90`):** `matchNayaxProduct` bekommt 3. Priorität **normalisierter `products.name`** (nach NayaxProductID + nayax-Alias). Neuer `buildNameIndex`; `computeNayaxAbgleichDiff` reicht `opts.nameIndex` durch. Additiv/rückwärtskompatibel — Alias/ID gehen weiter vor (kein Fehl-Umbuchen). Tests +3, Suite **757/757**. Deployt: Mini `git pull` + `docker restart homelab-dashboard`, Preview live OK.
+
+### Offen / nächster Schritt für den Nutzer
+- Im Dashboard **„Aus Nayax abgleichen" → „Übernehmen"** klicken → Slots 51/53 werden auf die neuen Produkte (je 5) umgebucht → verkaufsbereit.
+- Hinweis: Der Abgleich legt selbst **keine neuen Slots** an (by design) — nur Umbuchung/Menge auf bestehenden Slots.
+
+---
+
 ## Stand: 2026-06-04 (Dashboard-Kachel „Rechnungen freigeben (WF2)" — Formular-URL-Fix · PR #70)
 
 Kurze Fix-Session. **Live auf dem Mini, verifiziert.**
