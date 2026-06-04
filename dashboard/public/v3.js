@@ -1327,6 +1327,11 @@
         vb = b.remaining_qty;
         return dir === 'asc' ? va - vb : vb - va;
       }
+      if (col === 'machine_qty') {
+        va = typeof a.machine_qty === 'number' ? a.machine_qty : -1;
+        vb = typeof b.machine_qty === 'number' ? b.machine_qty : -1;
+        return dir === 'asc' ? va - vb : vb - va;
+      }
       if (col === 'product_name') {
         va = a.product_name || '';
         vb = b.product_name || '';
@@ -1360,13 +1365,20 @@
             'data-batch-count="' + batchCount + '" ' +
             'title="Aussortieren">×</button>'
         : '';
+      var machineQty = typeof b.machine_qty === 'number' ? b.machine_qty : null;
+      var hasDrift = machineQty !== null && Math.abs(b.remaining_qty - machineQty) > 0;
+      var driftNote = hasDrift
+        ? ' <span class="v3-lager-drift" title="Chargenrest (' + b.remaining_qty + ') weicht vom Nayax-Abgleich (' + machineQty + ') ab">⚠</span>'
+        : '';
       return '<tr class="v3-lager-row' + sevCls + '">' +
         '<td class="v3-lager-td v3-lager-td--name">' + esc(b.product_name) + '</td>' +
         '<td class="v3-lager-td v3-lager-td--mhd">' + esc(mhdDisplay) + '</td>' +
         '<td class="v3-lager-td v3-lager-td--days">' +
           '<span class="v3-badge ' + tagCls + '">' + esc(label) + '</span>' +
         '</td>' +
-        '<td class="v3-lager-td v3-lager-td--qty">' + b.remaining_qty + ' Stk.</td>' +
+        '<td class="v3-lager-td v3-lager-td--qty v3-lager-td--machine">' +
+          (machineQty !== null ? machineQty + ' Stk.' : '–') + '</td>' +
+        '<td class="v3-lager-td v3-lager-td--qty">' + b.remaining_qty + ' Stk.' + driftNote + '</td>' +
         (_lagerCanEdit ? '<td class="v3-lager-td v3-lager-td--action">' + writeOffBtn + '</td>' : '') +
       '</tr>';
     }).join('');
@@ -1378,7 +1390,8 @@
           '<th class="v3-lager-th v3-lager-th--sortable" data-sort="product_name">Produkt ' + sortArrow('product_name') + '</th>' +
           '<th class="v3-lager-th v3-lager-th--sortable" data-sort="mhd_date">MHD ' + sortArrow('mhd_date') + '</th>' +
           '<th class="v3-lager-th">Dringlichkeit</th>' +
-          '<th class="v3-lager-th v3-lager-th--sortable" data-sort="remaining_qty">Lagerbestand ' + sortArrow('remaining_qty') + '</th>' +
+          '<th class="v3-lager-th v3-lager-th--sortable" data-sort="machine_qty" title="Aktueller Bestand im Automaten (Nayax-Abgleich #17)">Im Automaten ' + sortArrow('machine_qty') + '</th>' +
+          '<th class="v3-lager-th v3-lager-th--sortable" data-sort="remaining_qty" title="Buchhalterischer Chargenrest (kann driften – #87)">Chargenrest ' + sortArrow('remaining_qty') + '</th>' +
           actionCol +
         '</tr></thead>' +
         '<tbody>' + rows + '</tbody>' +

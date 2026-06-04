@@ -2848,8 +2848,10 @@ a.v3-chip:focus-visible {
 .v3-lager-td--name { font-weight: 600; max-width: 200px; }
 .v3-lager-td--mhd  { color: var(--ink-soft); font-size: 13px; }
 .v3-lager-td--days { white-space: nowrap; }
-.v3-lager-td--qty  { font-weight: 600; text-align: right; }
-.v3-lager-td--action { width: 40px; text-align: center; }
+.v3-lager-td--qty     { font-weight: 600; text-align: right; }
+.v3-lager-td--machine { font-weight: 600; text-align: right; color: var(--ok); }
+.v3-lager-td--action  { width: 40px; text-align: center; }
+.v3-lager-drift { font-size: 11px; color: var(--warn); cursor: help; margin-left: 4px; }
 .v3-lager-row:last-child .v3-lager-td { border-bottom: none; }
 .v3-lager-row--crit .v3-lager-td--name { color: var(--crit); }
 .v3-lager-row--warn .v3-lager-td--name { color: var(--warn); }

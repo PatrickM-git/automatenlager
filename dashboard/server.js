@@ -791,12 +791,13 @@ async function buildDashboardV2Area(area, query = {}) {
           data: {
             ...data,
             allBatches: (pgRows.allBatches || []).map((r) => ({
-              batch_key:     String(r.batch_key || ''),
-              batch_count:   Number(r.batch_count) || 1,
-              product_id:    Number(r.product_id),
-              product_name:  formatProductName(String(r.product_name || '')),
-              mhd_date:      toIsoDate(r.mhd_date),
-              remaining_qty: Number(r.remaining_qty) || 0,
+              batch_key:      String(r.batch_key || ''),
+              batch_count:    Number(r.batch_count) || 1,
+              product_id:     Number(r.product_id),
+              product_name:   formatProductName(String(r.product_name || '')),
+              mhd_date:       toIsoDate(r.mhd_date),
+              remaining_qty:  Number(r.remaining_qty) || 0,
+              machine_qty:    Number(r.machine_qty)   || 0, // #87: Nayax-Abgleich-Wert
               days_until_mhd: r.days_until_mhd != null ? Number(r.days_until_mhd) : null,
             })),
           },

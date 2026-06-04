@@ -246,6 +246,9 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
     // Doppeleinträge aus mehreren Rechnungen (unterschiedliche batch_key,
     // gleicher product_id + mhd_date) zu einer übersichtlichen Zeile zusammen-
     // gefasst. MIN(batch_key) dient als Anker für den Aussortieren-Button.
+    // machine_qty: verlässlicher Nayax-Abgleich-Wert (current_machine_qty aus
+    // slot_assignments, via #17 aktuell gehalten). Zeigt den echten Automatenbestand
+    // unabhängig von der driftenden stock_batches.remaining_qty (#87).
     const allBatchesResult = await client.query(
       `SELECT p.product_id,
               p.name                               AS product_name,
@@ -253,9 +256,16 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
               SUM(sb.remaining_qty)::int           AS remaining_qty,
               COUNT(*)::int                        AS batch_count,
               MIN(sb.batch_key)                    AS batch_key,
-              (sb.mhd_date::date - CURRENT_DATE)::int AS days_until_mhd
+              (sb.mhd_date::date - CURRENT_DATE)::int AS days_until_mhd,
+              MAX(COALESCE(sa_agg.machine_qty, 0))::int AS machine_qty
          FROM automatenlager.stock_batches sb
          JOIN automatenlager.products p ON p.product_id = sb.product_id
+         LEFT JOIN (
+           SELECT product_id, SUM(current_machine_qty)::int AS machine_qty
+             FROM automatenlager.slot_assignments
+            WHERE active = TRUE
+            GROUP BY product_id
+         ) sa_agg ON sa_agg.product_id = sb.product_id
         WHERE sb.status IN (${availableBatchStatusSqlList()})
           AND sb.remaining_qty > 0
         GROUP BY p.product_id, p.name, sb.mhd_date,
