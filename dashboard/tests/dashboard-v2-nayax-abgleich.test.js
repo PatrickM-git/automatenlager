@@ -14,6 +14,7 @@ const {
   normalizeName,
   normalizeNayaxItems,
   buildAliasIndex,
+  buildNameIndex,
   buildNayaxIdIndex,
   matchNayaxProduct,
   buildAbgleichDiff,
@@ -165,6 +166,45 @@ test('matchNayaxProduct: faellt auf Namen zurueck, wenn ID unbekannt/fehlt', () 
   assert.equal(matchNayaxProduct({ product_name: 'Snickers' }, nameIdx, idIdx), 101);
   // leerer idIndex -> exakt altes Verhalten (rueckwaertskompatibel)
   assert.equal(matchNayaxProduct({ nayax_product_id: '457', product_name: 'Snickers' }, nameIdx, new Map()), 101);
+});
+
+test('buildNameIndex + matchNayaxProduct: Fallback ueber products.name (Produkt ohne nayax-Alias)', () => {
+  // Realer Fall (Hochwald Eiskaffee / Red Bull summer edition): Nayax-Name ==
+  // products.name, aber KEIN nayax-Alias gepflegt -> frueher kein_match.
+  const nameIndex = buildNameIndex([
+    { name: 'Hochwald Eiskaffee', product_id: 200 },
+    { name: 'Red Bull summer edition', product_id: 201 },
+  ]);
+  // kein aliasIndex/idIndex-Treffer -> Name-Fallback greift
+  assert.equal(matchNayaxProduct({ product_name: 'Hochwald Eiskaffee' }, new Map(), new Map(), nameIndex), 200);
+  assert.equal(matchNayaxProduct({ product_name: 'RED BULL  summer edition' }, new Map(), new Map(), nameIndex), 201, 'normalisiert (Gross/Whitespace)');
+  assert.equal(matchNayaxProduct({ product_name: 'Gibt es nicht' }, new Map(), new Map(), nameIndex), null);
+});
+
+test('matchNayaxProduct: nayax-Alias hat Vorrang vor dem Namens-Fallback', () => {
+  // Alias zeigt bewusst auf ein ANDERES Produkt als der Name -> Alias gewinnt.
+  const aliasIndex = buildAliasIndex([{ alias: 'Cola', product_id: 500 }]);
+  const nameIndex = buildNameIndex([{ name: 'Cola', product_id: 999 }]);
+  assert.equal(matchNayaxProduct({ product_name: 'Cola' }, aliasIndex, new Map(), nameIndex), 500);
+});
+
+test('buildAbgleichDiff: Namens-Fallback macht Umbuchung sichtbar (Produkt ohne nayax-Alias)', () => {
+  // PG-Slot mdb 51 traegt noch das alte Produkt (Sprite); Nayax meldet dort das
+  // neu eingepflegte "Hochwald Eiskaffee" (kein nayax-Alias, aber products.name).
+  const pgSlots = [{ slot_assignment_id: 1, machine_key: '457107528', mdb_code: 51, product_id: 51, product_key: 'SKU_SPRITE', product_name: 'Sprite', current_machine_qty: 5, product_slot_key: 'PS_51', target_stock: 8, machine_capacity: 8 }];
+  const nayaxItems = normalizeNayaxItems([{ MDBCode: 51, Name: 'Hochwald Eiskaffee', PAR: 5, MissingStockByMDB: 0 }]);
+  const nameIndex = buildNameIndex([{ name: 'Hochwald Eiskaffee', product_id: 200 }, { name: 'Sprite', product_id: 51 }]);
+  // OHNE nameIndex: kein_match (alt verhalten)
+  const without = buildAbgleichDiff(pgSlots, nayaxItems, new Map(), { machineId: '457107528' });
+  assert.equal(without.onboarding.length, 1);
+  assert.equal(without.onboarding[0].reason, 'kein_match');
+  assert.equal(without.assignment_changes.length, 0);
+  // MIT nameIndex: saubere Umbuchung Sprite -> Hochwald Eiskaffee
+  const withName = buildAbgleichDiff(pgSlots, nayaxItems, new Map(), { machineId: '457107528', nameIndex, productsById: { 200: 'Hochwald Eiskaffee' } });
+  assert.equal(withName.onboarding.length, 0, 'kein Ueberspringen mehr');
+  assert.equal(withName.assignment_changes.length, 1);
+  assert.equal(withName.assignment_changes[0].new_product_id, 200);
+  assert.equal(withName.assignment_changes[0].new_qty, 5);
 });
 
 test('buildAbgleichDiff: ID-Match macht abweichenden Namen unschaedlich (kein Fehl-Umbuchen)', () => {

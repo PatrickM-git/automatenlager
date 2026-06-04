@@ -40,6 +40,7 @@ const {
 const {
   normalizeNayaxItems,
   buildAliasIndex,
+  buildNameIndex,
   buildNayaxIdIndex,
   buildAbgleichDiff,
   buildApplyPlan,
@@ -334,6 +335,8 @@ async function computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey) {
   }
   const aliasIndex = buildAliasIndex(aliasRows);
   const idIndex = buildNayaxIdIndex(idAliasRows);
+  // Fallback-Match ueber products.name (Produkte ohne gepflegten nayax-Alias).
+  const nameIndex = buildNameIndex(productRows);
   const productsById = {};
   const productKeyById = {};
   for (const r of productRows) {
@@ -343,7 +346,7 @@ async function computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey) {
   // Alte/Slot-Produktnamen ebenfalls als Klartext anzeigen (sonst rohe SKU im
   // Diff, vgl. Issue #5); neue Namen kommen bereits formatiert aus productsById.
   for (const s of pgSlots) { s.product_name = formatProductName(s.product_name) ?? s.product_name; }
-  const diff = buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, { machineId: machineKey, productsById, idIndex });
+  const diff = buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, { machineId: machineKey, productsById, idIndex, nameIndex });
   return { diff, productKeyById };
 }
 

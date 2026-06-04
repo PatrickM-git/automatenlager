@@ -104,6 +104,22 @@ function buildAliasIndex(aliasRows) {
   return index;
 }
 
+/** product-Rows [{name, product_id}] -> Map normalisierter products.name -> product_id.
+ *  Fallback-Match fuer Produkte OHNE nayax-Alias: wenn der Nayax-Produktname exakt
+ *  (normalisiert) dem Produktnamen entspricht. Niedrigste Prioritaet (nach
+ *  NayaxProductID und nayax-Alias), damit ein gepflegter Alias immer vorgeht. */
+function buildNameIndex(productRows) {
+  const index = new Map();
+  for (const row of productRows || []) {
+    const key = normalizeName(row && row.name);
+    if (!key) continue;
+    const pid = Number(row.product_id);
+    if (!Number.isFinite(pid)) continue;
+    if (!index.has(key)) index.set(key, pid); // erster Treffer gewinnt (deterministisch)
+  }
+  return index;
+}
+
 /** id-Rows [{alias|nayax_product_id, product_id}] -> Map String(NayaxProductID) -> product_id.
  *  Exakter String-Schluessel (keine Namensnormalisierung) — die ID ist eindeutig. */
 function buildNayaxIdIndex(idRows) {
@@ -119,19 +135,25 @@ function buildNayaxIdIndex(idRows) {
   return index;
 }
 
-/** Nayax-Item -> product_id (oder null). Bevorzugt die eindeutige NayaxProductID
- *  (schreibweise-invariant, Issue #18); faellt sonst auf den Produktnamen zurueck. */
-function matchNayaxProduct(nayaxItem, aliasIndex, idIndex) {
+/** Nayax-Item -> product_id (oder null). Prioritaet:
+ *  1) eindeutige NayaxProductID (schreibweise-invariant, Issue #18),
+ *  2) nayax-Alias (gepflegter Nayax-Name -> product_id),
+ *  3) Fallback: exakter (normalisierter) products.name — damit ein frisch
+ *     eingepflegtes Produkt, dessen Name dem Nayax-Namen entspricht, auch OHNE
+ *     manuell gesetzten nayax-Alias erkannt wird (sonst „kein_match"/uebersprungen). */
+function matchNayaxProduct(nayaxItem, aliasIndex, idIndex, nameIndex) {
   // 1) Robust: ueber die NayaxProductID (sofern bekannt + gemappt).
   if (idIndex && nayaxItem && nayaxItem.nayax_product_id != null) {
     const idKey = String(nayaxItem.nayax_product_id).trim();
     if (idKey && idIndex.has(idKey)) return idIndex.get(idKey);
   }
-  // 2) Fallback: ueber den normalisierten Produktnamen.
-  if (!aliasIndex) return null;
   const key = normalizeName(nayaxItem && nayaxItem.product_name);
   if (!key) return null;
-  return aliasIndex.has(key) ? aliasIndex.get(key) : null;
+  // 2) ueber den normalisierten Nayax-Alias.
+  if (aliasIndex && aliasIndex.has(key)) return aliasIndex.get(key);
+  // 3) Fallback: ueber den normalisierten Produktnamen (niedrigste Prioritaet).
+  if (nameIndex && nameIndex.has(key)) return nameIndex.get(key);
+  return null;
 }
 
 // ── Diff: das Herzstueck ─────────────────────────────────────────────────────
@@ -146,6 +168,7 @@ function matchNayaxProduct(nayaxItem, aliasIndex, idIndex) {
 function buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, opts = {}) {
   const productsById = opts.productsById || {};
   const idIndex = opts.idIndex || null;
+  const nameIndex = opts.nameIndex || null;
   const slotsByMdb = new Map();
   for (const s of pgSlots || []) slotsByMdb.set(toNum(s.mdb_code), s);
 
@@ -159,7 +182,7 @@ function buildAbgleichDiff(pgSlots, nayaxItems, aliasIndex, opts = {}) {
     const mdb = toNum(item.mdb_code);
     seenMdb.add(mdb);
     const slot = slotsByMdb.get(mdb);
-    const matchedId = matchNayaxProduct(item, aliasIndex, idIndex);
+    const matchedId = matchNayaxProduct(item, aliasIndex, idIndex, nameIndex);
     const onHand = toNum(item.on_hand);
 
     if (!slot) {
@@ -517,6 +540,7 @@ module.exports = {
   normalizeName,
   normalizeNayaxItems,
   buildAliasIndex,
+  buildNameIndex,
   buildNayaxIdIndex,
   matchNayaxProduct,
   buildAbgleichDiff,
