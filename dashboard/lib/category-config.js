@@ -53,10 +53,17 @@ const DEFAULT_CONFIG = {
   langsamFactor: 0.6,
   // Fallback-Marge für unbekannte/neue Kategorien (z. B. Spielzeug).
   defaultMarginPct: 50,
-  // Kategorie-Stammdaten: key (= produktart in products.category) → Label + Marge.
+  // Issue #56: Besteuerungsmodell. CODE-Default = regelbesteuert (false) → Netto-EK
+  // als Wareneinsatz. Ein neuer Mandant startet damit konservativ; der konkrete
+  // Betreiber setzt für sich Kleinunternehmer=true (per Override/Seed).
+  kleinunternehmerAktiv: false,
+  // Fallback-MwSt für unbekannte Kategorien (für die Brutto-Kostenbasis bei KU).
+  defaultMwstPct: 19,
+  // Kategorie-Stammdaten: key (= produktart in products.category) → Label + Marge
+  // + MwSt-Satz (Quelle der Brutto-EK-Aufrechnung bei Kleinunternehmer).
   categories: {
-    getraenk: { label: 'Getränke', marginPct: 43 },
-    snack: { label: 'Snacks', marginPct: 52 },
+    getraenk: { label: 'Getränke', marginPct: 43, mwstPct: 19 },
+    snack: { label: 'Snacks', marginPct: 52, mwstPct: 7 },
   },
 };
 
@@ -87,6 +94,10 @@ function mergeConfig(defaults = DEFAULT_CONFIG, override = {}) {
     rennerFactor: num(o.rennerFactor, defaults.rennerFactor),
     langsamFactor: num(o.langsamFactor, defaults.langsamFactor),
     defaultMarginPct: num(o.defaultMarginPct, defaults.defaultMarginPct),
+    kleinunternehmerAktiv: typeof o.kleinunternehmerAktiv === 'boolean'
+      ? o.kleinunternehmerAktiv
+      : defaults.kleinunternehmerAktiv,
+    defaultMwstPct: num(o.defaultMwstPct, defaults.defaultMwstPct),
     categories: {},
   };
   // Renner-Latte darf nie unter der Langsam-Latte liegen (Editier-Sicherung).
@@ -105,6 +116,7 @@ function mergeConfig(defaults = DEFAULT_CONFIG, override = {}) {
         ? String(ovr.label).trim()
         : (base.label || key),
       marginPct: num(ovr.marginPct, num(base.marginPct, merged.defaultMarginPct)),
+      mwstPct: num(ovr.mwstPct, num(base.mwstPct, merged.defaultMwstPct)),
     };
   }
   return merged;
@@ -123,8 +135,17 @@ function normalizeCategoryKey(key) {
 function resolveCategory(config, categoryKey) {
   const key = normalizeCategoryKey(categoryKey);
   const cat = config.categories[key];
-  if (cat) return { key, label: cat.label, marginPct: cat.marginPct, known: true };
-  return { key, label: key || 'Unbekannt', marginPct: config.defaultMarginPct, known: false };
+  const fallbackMwst = num(config.defaultMwstPct, 19);
+  if (cat) {
+    return {
+      key, label: cat.label, marginPct: cat.marginPct,
+      mwstPct: num(cat.mwstPct, fallbackMwst), known: true,
+    };
+  }
+  return {
+    key, label: key || 'Unbekannt', marginPct: config.defaultMarginPct,
+    mwstPct: fallbackMwst, known: false,
+  };
 }
 
 /**
@@ -214,9 +235,16 @@ function sanitizeOverride(input) {
   const o = isPlainObject(input) ? input : {};
   const out = {};
   const numKeys = ['umsatzNormMonth', 'slotsPerMachine', 'weeksPerMonth', 'graceDays',
-    'ladenhueterDays', 'rennerFactor', 'langsamFactor', 'defaultMarginPct'];
+    'ladenhueterDays', 'rennerFactor', 'langsamFactor', 'defaultMarginPct', 'defaultMwstPct'];
   for (const k of numKeys) {
     if (o[k] != null && Number.isFinite(Number(o[k]))) out[k] = Number(o[k]);
+  }
+  // Besteuerungsmodell (#56): boolean oder String 'true'/'false' akzeptieren.
+  if (typeof o.kleinunternehmerAktiv === 'boolean') {
+    out.kleinunternehmerAktiv = o.kleinunternehmerAktiv;
+  } else if (typeof o.kleinunternehmerAktiv === 'string') {
+    const s = o.kleinunternehmerAktiv.trim().toLowerCase();
+    if (s === 'true' || s === 'false') out.kleinunternehmerAktiv = s === 'true';
   }
   if (isPlainObject(o.categories)) {
     out.categories = {};
@@ -226,6 +254,7 @@ function sanitizeOverride(input) {
       const cat = {};
       if (val.label != null && String(val.label).trim()) cat.label = String(val.label).trim();
       if (val.marginPct != null && Number.isFinite(Number(val.marginPct))) cat.marginPct = Number(val.marginPct);
+      if (val.mwstPct != null && Number.isFinite(Number(val.mwstPct))) cat.mwstPct = Number(val.mwstPct);
       out.categories[key] = cat;
     }
   }

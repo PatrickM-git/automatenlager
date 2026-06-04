@@ -57,14 +57,25 @@ function wareneinsatzNet(qty, unitCostNet) {
 //     erstattete Kosten -> netto-EK × (1 + mwst/100).
 // `mwstSatz` in Prozent (z. B. 7 oder 19). Fehlt eine gültige MwSt, wird NICHT
 // erfunden -> Rückfall auf netto (kein geratener Aufschlag).
+// EINE Wahrheit für die Kostenbasis: Faktor, mit dem ein Netto-EK auf den
+// wirtschaftlichen Wareneinsatz gehoben wird. Kleinunternehmer mit gültiger MwSt
+// → (1 + mwst/100) (brutto); sonst 1 (netto). Wird von wareneinsatzCostBasis
+// (pro Posten, WF8) und von economics.js (auf den aggregierten Netto-FIFO-Wert)
+// gleichermaßen genutzt, damit Live und Nacht-GuV nie divergieren.
+function costBasisMultiplier(mwstSatz, opts = {}) {
+  const rate = toNum(mwstSatz);
+  const kleinunternehmer = !!(opts && opts.kleinunternehmer);
+  return kleinunternehmer && rate > 0 ? 1 + rate / 100 : 1;
+}
+
 function wareneinsatzCostBasis(qty, unitCostNet, mwstSatz, opts = {}) {
   const q = toNum(qty);
   const net = toNum(unitCostNet);
   if (q <= 0 || net <= 0) return 0;
-  const rate = toNum(mwstSatz);
-  const kleinunternehmer = !!(opts && opts.kleinunternehmer);
-  const unit = kleinunternehmer && rate > 0 ? net * (1 + rate / 100) : net;
-  return round2(q * unit);
+  return round2(q * net * costBasisMultiplier(mwstSatz, opts));
 }
 
-module.exports = { ekFromNet, wareneinsatzNet, wareneinsatzCostBasis, toNum, round2, round4 };
+module.exports = {
+  ekFromNet, wareneinsatzNet, wareneinsatzCostBasis, costBasisMultiplier,
+  toNum, round2, round4,
+};
