@@ -309,3 +309,15 @@ test('AC-T5: queryAssortmentSlotsPg reichert Drehzahl-Recency additiv an (last_s
   assert.match(src, /sales_transactions/, 'Recency stammt aus sales_transactions');
   assert.match(src, /settlement_at/, 'MAX(settlement_at) als Recency-Quelle');
 });
+
+// #34: MHD-Risiko-Fenster aus EINER Settings-Quelle (mhdRiskDays) steuert auch den
+// Anzeige-Indikator konsistent.
+const { buildEffectiveConfig: buildCfg34 } = require('../lib/category-config.js');
+test('#34: MHD-Indikator respektiert mhdRiskDays aus der Config', () => {
+  const future20 = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+  const row = { ...SLOT_ROWS[1], nearest_mhd_date: future20, mhd_risk_qty: '0', warning_types: [] };
+  const hasMhd = (cfg) => buildAssortmentSlotsData({ slots: [row], config: cfg }, {})
+    .slots[0].indicators.some((i) => i.code === 'mhd_risk');
+  assert.equal(hasMhd(buildCfg34({ mhdRiskDays: 30 })), true, '20 Tage <= 30 → Risiko-Badge');
+  assert.equal(hasMhd(buildCfg34({ mhdRiskDays: 14 })), false, '20 Tage > 14 → kein Risiko-Badge');
+});

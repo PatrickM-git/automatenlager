@@ -3934,6 +3934,7 @@
         '<h3 class="v3-set-subtitle">Schwellwerte</h3>' +
         '<div class="v3-set-grid">' +
           numField('Ladenhüter-Schwelle (Tage)', 'ladenhueterDays', cfg.ladenhueterDays, '1', '0 Verkäufe seit ≥ so vielen Tagen.') +
+          numField('MHD-Risiko-Fenster (Tage)', 'mhdRiskDays', cfg.mhdRiskDays, '1', 'Ab so vielen Tagen bis MHD gilt eine Charge als Risiko — eine Quelle für Cockpit, Bestand & Monitoring.') +
           numField('Schonfrist neue Produkte (Tage)', 'graceDays', cfg.graceDays, '1', 'Jünger gelistet → Klasse „Neu", nie Langsam.') +
           numField('Umsatz-Norm (€/Automat/Monat)', 'umsatzNormMonth', cfg.umsatzNormMonth, '10', 'Branchen-Anker, Quelle der Geld-Latte.') +
           numField('Slots je Automat', 'slotsPerMachine', cfg.slotsPerMachine, '1', 'Für die Umrechnung auf €/Slot/Woche.') +

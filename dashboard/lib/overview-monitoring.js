@@ -1,6 +1,7 @@
 'use strict';
 
 const { availableBatchStatusSqlList } = require('./stock-status.js');
+const { loadEffectiveConfig, DEFAULT_MANDANT } = require('./category-config.js'); // #34: MHD-Fenster aus Settings
 
 const PIPELINE_STALE_THRESHOLD_MINUTES = 24 * 60;
 
@@ -9,14 +10,17 @@ const PIPELINE_STALE_THRESHOLD_MINUTES = 24 * 60;
 // (MHD/Slot leer/Charge fast leer) werden daher gegen den AKTUELLEN PG-Stand
 // geprueft und nur gezeigt, wenn die Bedingung jetzt noch zutrifft. System-/
 // Betriebswarnungen (CONTAINER_DOWN, WORKFLOW_ERROR, …) bleiben unberuehrt.
-const LIVE_WARNING_RECONCILE_SQL = `
+// #34: MHD-Fenster (mhdDays) aus der Settings-Quelle parametrisiert — als Funktion,
+// damit der per-Request geladene Wert einfließt (vorher fixes Modul-Literal).
+function liveWarningReconcileSql(mhdDays) {
+  return `
   CASE
     WHEN w.warning_type IN ('MHD_NEAR', 'MHD_EXPIRED') THEN EXISTS (
       SELECT 1 FROM automatenlager.stock_batches sb
        WHERE sb.product_id = w.product_id
          AND sb.remaining_qty > 0
          AND sb.status IN (${availableBatchStatusSqlList()})
-         AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'
+         AND sb.mhd_date <= CURRENT_DATE + INTERVAL '${mhdDays} days'
     )
     WHEN w.warning_type = 'LOW_STOCK' THEN EXISTS (
       SELECT 1 FROM automatenlager.slot_assignments sa
@@ -30,6 +34,7 @@ const LIVE_WARNING_RECONCILE_SQL = `
     ) <= 5
     ELSE TRUE
   END`;
+}
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -226,6 +231,7 @@ async function queryOverviewMonitoringPg(pgUrl) {
   const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
   await client.connect();
   try {
+    const mhdDays = (await loadEffectiveConfig(client, DEFAULT_MANDANT)).mhdRiskDays; // #34: eine Quelle
     const [
       openWarningsResult,
       mhdItemsResult,
@@ -249,7 +255,7 @@ async function queryOverviewMonitoringPg(pgUrl) {
                AND w.product_id IS NOT NULL
                AND (SELECT COUNT(*) FROM automatenlager.slot_assignments sa WHERE sa.active = TRUE AND sa.product_id = w.product_id) > 1
              )
-             AND (${LIVE_WARNING_RECONCILE_SQL})
+             AND (${liveWarningReconcileSql(mhdDays)})
            ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
          ) d`,
       ),
@@ -265,7 +271,7 @@ async function queryOverviewMonitoringPg(pgUrl) {
           WHERE sb.status IN (${availableBatchStatusSqlList()})
             AND sb.remaining_qty > 0
             AND sb.mhd_date IS NOT NULL
-            AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'
+            AND sb.mhd_date <= CURRENT_DATE + INTERVAL '${mhdDays} days'
           ORDER BY sb.mhd_date`,
       ),
       // Cockpit-KPI "Leere Slots": nur wirklich leere Slots (= 0), deckungsgleich
@@ -339,7 +345,7 @@ async function queryOverviewMonitoringPg(pgUrl) {
                AND w.product_id IS NOT NULL
                AND (SELECT COUNT(*) FROM automatenlager.slot_assignments sa WHERE sa.active = TRUE AND sa.product_id = w.product_id) > 1
              )
-             AND (${LIVE_WARNING_RECONCILE_SQL})
+             AND (${liveWarningReconcileSql(mhdDays)})
            ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
          )
          SELECT f.warning_type, f.severity, f.resolved, f.created_at, f.warning_key,

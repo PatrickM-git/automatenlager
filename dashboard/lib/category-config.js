@@ -47,6 +47,9 @@ const DEFAULT_CONFIG = {
   graceDays: 14,
   // Ladenhüter: 0 Verkäufe seit ≥ so vielen Tagen (eigenes Zeitsignal).
   ladenhueterDays: 30,
+  // #34: MHD-Risiko-Fenster (Tage bis MHD, ab dem eine Charge als Risiko gilt) —
+  // EINE Quelle für Cockpit-KPI, Bestandsliste und Monitoring.
+  mhdRiskDays: 30,
   // Renner ab: Deckungsbeitrag/Slot/Woche ≥ Erwartungswert × rennerFactor.
   rennerFactor: 1.3,
   // Langsam-Dreher unter: Deckungsbeitrag/Slot/Woche < Erwartungswert × langsamFactor.
@@ -91,6 +94,7 @@ function mergeConfig(defaults = DEFAULT_CONFIG, override = {}) {
       ? num(o.weeksPerMonth, defaults.weeksPerMonth) : defaults.weeksPerMonth,
     graceDays: Math.max(0, num(o.graceDays, defaults.graceDays)),
     ladenhueterDays: Math.max(1, num(o.ladenhueterDays, defaults.ladenhueterDays)),
+    mhdRiskDays: Math.max(1, num(o.mhdRiskDays, defaults.mhdRiskDays)),
     rennerFactor: num(o.rennerFactor, defaults.rennerFactor),
     langsamFactor: num(o.langsamFactor, defaults.langsamFactor),
     defaultMarginPct: num(o.defaultMarginPct, defaults.defaultMarginPct),
@@ -235,7 +239,7 @@ function sanitizeOverride(input) {
   const o = isPlainObject(input) ? input : {};
   const out = {};
   const numKeys = ['umsatzNormMonth', 'slotsPerMachine', 'weeksPerMonth', 'graceDays',
-    'ladenhueterDays', 'rennerFactor', 'langsamFactor', 'defaultMarginPct', 'defaultMwstPct'];
+    'ladenhueterDays', 'mhdRiskDays', 'rennerFactor', 'langsamFactor', 'defaultMarginPct', 'defaultMwstPct'];
   for (const k of numKeys) {
     if (o[k] != null && Number.isFinite(Number(o[k]))) out[k] = Number(o[k]);
   }
