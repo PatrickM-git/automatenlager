@@ -47,7 +47,7 @@ function indicator(code, label, source, evidence) {
 // über `turnover_class` — die frühere, hier hartcodierte Zweitdefinition
 // (qty>=30 || turnover_count>=20 = „Renner") ist bewusst entfernt (Issue #65),
 // damit derselbe Slot nie in zwei Ansichten unterschiedlich etikettiert wird.
-function buildIndicators(slot) {
+function buildIndicators(slot, mhdRiskDays = 30) {
   const indicators = [];
   if (slot.db_net >= 20) {
     indicators.push(indicator('db_strong', 'DB-stark', 'kpi', `${slot.db_net.toLocaleString('de-DE')} EUR DB netto`));
@@ -55,7 +55,7 @@ function buildIndicators(slot) {
   if (slot.revenue_net > 0 && slot.margin_pct < 25) {
     indicators.push(indicator('margin_weak', 'Marge schwach', 'kpi', `${slot.margin_pct.toLocaleString('de-DE')} % Marge`));
   }
-  if (slot.mhd_risk_qty > 0 || (slot.nearest_mhd_days != null && slot.nearest_mhd_days <= 30) || slot.warning_types.some((type) => type.startsWith('MHD'))) {
+  if (slot.mhd_risk_qty > 0 || (slot.nearest_mhd_days != null && slot.nearest_mhd_days <= mhdRiskDays) || slot.warning_types.some((type) => type.startsWith('MHD'))) {
     indicators.push(indicator('mhd_risk', 'MHD-Risiko', 'stock', slot.nearest_mhd_date ? `naechstes MHD ${slot.nearest_mhd_date}` : 'offene MHD-Warnung'));
   }
   if (slot.value_per_product >= 75) {
@@ -80,7 +80,7 @@ function parseDaysSinceLastSale(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-function parseSlotRow(row) {
+function parseSlotRow(row, mhdRiskDays = 30) {
   const current = toNum(row.current_machine_qty);
   const target = toNum(row.target_stock);
   const capacity = toNum(row.machine_capacity);
@@ -124,7 +124,7 @@ function parseSlotRow(row) {
       label: `${current} / ${capacity || target || 0} im Slot`,
     },
   };
-  slot.indicators = buildIndicators(slot);
+  slot.indicators = buildIndicators(slot, mhdRiskDays);
   return slot;
 }
 
@@ -133,8 +133,10 @@ function buildAssortmentSlotsData(pgRows, query = {}) {
     location: clean(query.location),
     machine: clean(query.machine),
   };
+  // #34: MHD-Fenster aus der EINEN Settings-Quelle (auch für den Anzeige-Indikator).
+  const cfg = pgRows.config || buildEffectiveConfig({});
   const parsed = (pgRows.slots || [])
-    .map(parseSlotRow)
+    .map((row) => parseSlotRow(row, cfg.mhdRiskDays))
     .filter((slot) => matchesFilters(slot, filters))
     .sort((a, b) => a.location_name.localeCompare(b.location_name, 'de')
       || a.machine_name.localeCompare(b.machine_name, 'de')
@@ -144,8 +146,7 @@ function buildAssortmentSlotsData(pgRows, query = {}) {
   // Issue #64): Deckungsbeitrag/Slot/Woche gegen die Kategorie-Latten der
   // effektiven Config (#63). Fällt die Config (Unit-Tests) weg, greifen die
   // Branchen-Anker-Defaults. Jeder Slot trägt danach `turnover_class`.
-  const config = pgRows.config || buildEffectiveConfig({});
-  const slots = classifyTurnover(parsed, config);
+  const slots = classifyTurnover(parsed, cfg);
 
   return {
     slots,
@@ -172,6 +173,10 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
   const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
   await client.connect();
   try {
+    // #34: MHD-Risiko-Fenster aus der EINEN Settings-Quelle (vor der Query laden,
+    // damit es ins SQL fließt). mhdRiskDays ist via mergeConfig validierter Integer.
+    const config = await loadEffectiveConfig(client, DEFAULT_MANDANT);
+    const mhdDays = config.mhdRiskDays;
     const result = await client.query(
       `WITH sales AS (
          SELECT machine_id,
@@ -232,7 +237,7 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
        batch_status AS (
          SELECT product_id,
                 MIN(mhd_date) FILTER (WHERE mhd_date IS NOT NULL AND status NOT IN ('depleted', 'expired')) AS nearest_mhd_date,
-                SUM(remaining_qty) FILTER (WHERE mhd_date <= CURRENT_DATE + INTERVAL '30 days' AND status NOT IN ('depleted', 'expired'))::int AS mhd_risk_qty
+                SUM(remaining_qty) FILTER (WHERE mhd_date <= CURRENT_DATE + INTERVAL '${mhdDays} days' AND status NOT IN ('depleted', 'expired'))::int AS mhd_risk_qty
            FROM automatenlager.stock_batches
           GROUP BY product_id
        ),
@@ -302,9 +307,6 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
         ORDER BY l.name, m.name, sa.mdb_code`,
       [locationFilter, machineFilter, dateFrom, dateTo],
     );
-    // Effektive Kategorie-/Schwellwert-Config des Mandanten (#63) — derselbe
-    // Client, eine Definition für die geldbasierte Klassifikation.
-    const config = await loadEffectiveConfig(client, DEFAULT_MANDANT);
     return { slots: result.rows, config };
   } finally {
     await client.end();

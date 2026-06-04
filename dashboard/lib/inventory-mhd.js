@@ -2,6 +2,7 @@
 
 const { formatProductName } = require('./economics.js');
 const { availableBatchStatusSqlList } = require('./stock-status.js');
+const { loadEffectiveConfig, DEFAULT_MANDANT } = require('./category-config.js'); // #34: MHD-Fenster aus Settings
 
 const SEVERITY_RANK = {
   critical: 0,
@@ -165,6 +166,7 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
   const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
   await client.connect();
   try {
+    const mhdDays = (await loadEffectiveConfig(client, DEFAULT_MANDANT)).mhdRiskDays; // #34: eine Quelle
     const params = [locationFilter, machineFilter];
     const [mhdResult, lowStockResult] = await Promise.all([
       client.query(
@@ -203,7 +205,7 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
           WHERE sb.status IN (${availableBatchStatusSqlList()})
             AND sb.remaining_qty > 0
             AND sb.mhd_date IS NOT NULL
-            AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'
+            AND sb.mhd_date <= CURRENT_DATE + INTERVAL '${mhdDays} days'
             AND ($1 = '' OR l.location_key = $1 OR l.name ILIKE '%' || $1 || '%')
             AND ($2 = '' OR m.machine_key = $2 OR m.name ILIKE '%' || $2 || '%')
           ORDER BY sb.mhd_date ASC`,
