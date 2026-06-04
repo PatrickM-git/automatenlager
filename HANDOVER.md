@@ -2,6 +2,23 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
+## Stand: 2026-06-04 (WF2 leitet Produktkategorie automatisch ab · PR #74, live auf Mini-WF2)
+
+**Live auf dem Mini, verifiziert.**
+
+### Problem
+Jedes von WF2 neu angelegte Produkt bekam `category='snack'` (Hardcode im Code-Node „Prepare PGW"). Getränke (Hochwald Eiskaffee, Red Bull summer edition) landeten falsch → verfälscht Branchen-Anker/Margen-Klassifikation.
+
+### Behoben
+1. **Sofort-Datenfix:** `products 200/201` per SQL auf `category='getraenk'` gesetzt (kanonischer Token, lowercase).
+2. **WF2-Automatik (PR #74, `528788e`):** neue Lib `dashboard/lib/product-category.js` `inferProductCategory(...names)` (konservativ: Default `snack`, `getraenk` nur bei klarem Marken-/Wort-/Volumensignal). Test gegen **alle 47 realen Produkte** (12 getraenk/35 snack) → grün, Suite **762/762**. Dieselbe Logik **inline** im WF2-Node „Prepare PGW" gespiegelt (Inline == Lib verifiziert).
+3. **Mini-WF2 (`X2RU2cHm78rkIWMf`) live deployt** via REST: roher GET (auf 2.22.5 nicht lossy) → nur jsCode dieses Nodes durch den Repo-Stand ersetzt → `PUT` (settings auf Whitelist `{executionOrder}`) → `activate`. Verifiziert: active, 31 Nodes, `jsCode==Repo`. Mini-Repo per `git pull` nachgezogen → Drift-Check aligned. Backup: `C:\tmp\wf2_mini_backup.json`.
+
+### Bekannte Altdaten-Notiz
+„Capri Sun Zero Monster Alarm" ist in den Altdaten fälschlich `snack` (ist Getränk); der neue Klassifizierer würde es korrekt als `getraenk` führen. Bei Bedarf per SQL nachziehen.
+
+---
+
 ## Stand: 2026-06-04 (Nayax-Abgleich erkennt neue Produkte über Produktnamen · PR #72)
 
 **Live auf dem Mini, verifiziert.**
