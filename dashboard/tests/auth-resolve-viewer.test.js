@@ -142,3 +142,25 @@ test('ipInCidr: Basisfälle inkl. ::ffff:-Präfix und Mehrfach-CIDR', () => {
   assert.equal(ipInCidr('10.0.0.1', '172.20.0.0/16'), false);
   assert.equal(ipInCidr('10.0.0.1', '172.20.0.0/16, 10.0.0.0/8'), true);
 });
+
+// ── #33 IDOR / Objekt-Ebene ─────────────────────────────────────────────────
+
+const { objectAccessAllowed } = require('../lib/auth.js');
+
+test('#33 objectAccessAllowed: eigener Mandant darf, fremder nicht', () => {
+  const owner = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env: adminEnv });
+  assert.equal(owner.tenantId, 'eigentuemer');
+  assert.equal(objectAccessAllowed(owner, 'eigentuemer'), true);
+  assert.equal(objectAccessAllowed(owner, 'fremder-mandant'), false, 'Fremd-Mandant-Objekt verweigert (IDOR)');
+});
+
+test('#33 objectAccessAllowed: fehlender Objekt-Mandant = Eigentümer (Single-Tenant durchlassen)', () => {
+  const owner = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env: adminEnv });
+  assert.equal(objectAccessAllowed(owner, null), true);
+  assert.equal(objectAccessAllowed(owner, ''), true);
+});
+
+test('#33 objectAccessAllowed: kein/ungültiger Viewer = verweigert', () => {
+  assert.equal(objectAccessAllowed(null, 'eigentuemer'), false);
+  assert.equal(objectAccessAllowed({}, 'eigentuemer'), false);
+});

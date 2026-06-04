@@ -25,7 +25,7 @@ const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buil
 const { buildProductCatalog } = require('./lib/product-catalog.js');
 const { queryEconomicsScopePg } = require('./lib/automaten-view.js');
 const { queryEconomicsLivePg } = require('./lib/economics-live.js');
-const { resolveViewer } = require('./lib/auth.js');
+const { resolveViewer, objectAccessAllowed, TENANT_OWNER } = require('./lib/auth.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
 const { runStockCostCheck } = require('./lib/stock-cost-invariant.js');
@@ -223,6 +223,22 @@ function requireCapability(viewer, capability, res) {
     ok: false,
     error: { code: 'CAPABILITY_REQUIRED', message: `Fehlende Berechtigung: ${capability}.` },
   });
+  return false;
+}
+
+// Issue #33 (IDOR / Objekt-Ebene): VERBINDLICHES PATTERN für jeden Endpunkt, der
+// eine Objekt-ID (machine_id, Standort, Charge …) entgegennimmt — zweite Hälfte der
+// Zugriffskontrolle neben requireCapability (Verb-Ebene). Prüft, dass das Objekt zum
+// Mandanten des Viewers gehört; fremd → 404 (kein Existenz-Leak) + Audit.
+// Single-Tenant: machineTenant() liefert TENANT_OWNER → der Eigentümer kommt durch.
+// Bei echter Tenancy hier die Mandanten-Zuordnung aus der DB lesen (machines.tenant_id).
+function machineTenant(/* machineId */) {
+  return TENANT_OWNER; // Single-Tenant; später: SELECT tenant_id FROM machines WHERE machine_key = …
+}
+function requireObjectAccess(viewer, objectTenantId, res, event) {
+  if (objectAccessAllowed(viewer, objectTenantId)) return true;
+  auditDenied(viewer, event || 'object_access_denied', { objectTenantId });
+  sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: 'Objekt nicht gefunden.' } });
   return false;
 }
 
@@ -2267,6 +2283,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const { slot_assignment_id, machine_id, mdb_code, new_product_id, new_qty, start_date } = body || {};
+      // #33 (IDOR): Automat muss zum Mandanten des Viewers gehören (Single-Tenant: No-Op-Guard).
+      if (machine_id && !requireObjectAccess(viewer, machineTenant(machine_id), res, 'idor:slot-change')) return;
       if (!machine_id || !mdb_code || !new_product_id || !start_date) {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: 'machine_id, mdb_code, new_product_id, start_date erforderlich.' } });
         return;
@@ -3286,6 +3304,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const machineKey = clean((body && (body.machine || body.machine_id)) || '');
+      // #33 (IDOR): Automat muss zum Mandanten des Viewers gehören (Single-Tenant: No-Op-Guard).
+      if (machineKey && !requireObjectAccess(viewer, machineTenant(machineKey), res, 'idor:nayax-apply')) return;
       if (!machineKey) {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: 'machine (Nayax-Nummer) erforderlich.' } });
         return;
