@@ -29,19 +29,34 @@
   };
 
   /* ---- Routen-Definition (einzige Quelle der Wahrheit) ----------------- */
+  // #29: `cap` = Fähigkeit, die der Reiter mindestens braucht (Komfort-Sichtbarkeit;
+  // die Autorität liegt serverseitig in #28). Heute/Bestand/Sortiment/Monitoring/
+  // Automaten = betrieb.lesen; GuV = finanzen.lesen; Onboarding = bestand.schreiben;
+  // Einstellungen = system.verwalten.
   var ROUTES = [
-    { path: '/',              key: 'heute',         nav: 'Heute',        eyebrow: 'Cockpit',          title: 'Heute',                lead: 'Der Gesamtzustand auf einen Blick – die wichtigsten Kennzahlen und die dringendsten Handlungsbedarfe.' },
-    { path: '/guv',           key: 'guv',           nav: 'GuV',          eyebrow: 'Wirtschaftlichkeit', title: 'GuV & KPI',          lead: 'Umsatz, Deckungsbeitrag und Marge über frei wählbare Zeiträume – Monat, Quartal, Jahr oder eigener Zeitraum.' },
-    { path: '/lager',         key: 'lager',         nav: 'Bestand',      eyebrow: 'Lager',            title: 'Bestand & MHD',        lead: 'Alle aktiven Lagerchargen mit Mindesthaltbarkeit und Menge – sortierbar nach MHD und Bestand.' },
-    { path: '/slots',         key: 'slots',         nav: 'Sortiment',    eyebrow: 'Bestückung',       title: 'Sortiment & Slots',    lead: 'Sortiment je Automat und der grafische Etagen-Slot-Editor zum Platzieren der Produkte.' },
-    { path: '/monitoring',    key: 'monitoring',    nav: 'Monitoring',   eyebrow: 'Betrieb',          title: 'Monitoring',           lead: 'Betriebs- und Zustandsüberwachung – Auffälligkeiten über alle Automaten hinweg früh bemerken.' },
-    { path: '/onboarding',    key: 'onboarding',    nav: 'Onboarding',   eyebrow: 'Neuprodukte',      title: 'Produkt-Onboarding',   lead: 'Neue Produkte geführt aufnehmen und direkt einem Slot zuordnen.' },
-    { path: '/automaten',     key: 'automaten',     nav: 'Automaten',    eyebrow: 'Stammdaten',       title: 'Automaten',            lead: 'Automaten- und Standortprofile im Blick – von hier direkt in die Slot-Ansicht springen.' },
-    { path: '/einstellungen', key: 'einstellungen', nav: 'Einstellungen',eyebrow: 'System',           title: 'Einstellungen',        lead: 'Anzeige, Schwellenwerte und Stammdaten des Cockpits verwalten.' },
+    { path: '/',              key: 'heute',         nav: 'Heute',        cap: 'betrieb.lesen',     eyebrow: 'Cockpit',          title: 'Heute',                lead: 'Der Gesamtzustand auf einen Blick – die wichtigsten Kennzahlen und die dringendsten Handlungsbedarfe.' },
+    { path: '/guv',           key: 'guv',           nav: 'GuV',          cap: 'finanzen.lesen',    eyebrow: 'Wirtschaftlichkeit', title: 'GuV & KPI',          lead: 'Umsatz, Deckungsbeitrag und Marge über frei wählbare Zeiträume – Monat, Quartal, Jahr oder eigener Zeitraum.' },
+    { path: '/lager',         key: 'lager',         nav: 'Bestand',      cap: 'betrieb.lesen',     eyebrow: 'Lager',            title: 'Bestand & MHD',        lead: 'Alle aktiven Lagerchargen mit Mindesthaltbarkeit und Menge – sortierbar nach MHD und Bestand.' },
+    { path: '/slots',         key: 'slots',         nav: 'Sortiment',    cap: 'betrieb.lesen',     eyebrow: 'Bestückung',       title: 'Sortiment & Slots',    lead: 'Sortiment je Automat und der grafische Etagen-Slot-Editor zum Platzieren der Produkte.' },
+    { path: '/monitoring',    key: 'monitoring',    nav: 'Monitoring',   cap: 'betrieb.lesen',     eyebrow: 'Betrieb',          title: 'Monitoring',           lead: 'Betriebs- und Zustandsüberwachung – Auffälligkeiten über alle Automaten hinweg früh bemerken.' },
+    { path: '/onboarding',    key: 'onboarding',    nav: 'Onboarding',   cap: 'bestand.schreiben', eyebrow: 'Neuprodukte',      title: 'Produkt-Onboarding',   lead: 'Neue Produkte geführt aufnehmen und direkt einem Slot zuordnen.' },
+    { path: '/automaten',     key: 'automaten',     nav: 'Automaten',    cap: 'betrieb.lesen',     eyebrow: 'Stammdaten',       title: 'Automaten',            lead: 'Automaten- und Standortprofile im Blick – von hier direkt in die Slot-Ansicht springen.' },
+    { path: '/einstellungen', key: 'einstellungen', nav: 'Einstellungen',cap: 'system.verwalten',  eyebrow: 'System',           title: 'Einstellungen',        lead: 'Anzeige, Schwellenwerte und Stammdaten des Cockpits verwalten.' },
   ];
 
   var ROUTE_BY_PATH = {};
   ROUTES.forEach(function (r) { ROUTE_BY_PATH[r.path] = r; });
+
+  /* ---- #29 Fähigkeits-Sichtbarkeit ------------------------------------- */
+  // Vom Server (/api/dashboard → viewer.capabilities) gelieferte Fähigkeiten.
+  // null = noch unbekannt (Lade-/Fehlerfall) → fail-open: alles sichtbar, denn die
+  // Sicherheitsgrenze ist serverseitig (#28). Sichtbarkeit ist nur Komfort.
+  var _viewerCaps = null;
+  function setViewerCaps(caps) { _viewerCaps = Array.isArray(caps) ? caps.slice() : null; }
+  function viewerCan(cap) {
+    if (_viewerCaps == null || !cap) { return true; }
+    return _viewerCaps.indexOf(cap) !== -1;
+  }
 
   /* ---- DOM-Referenzen -------------------------------------------------- */
   var viewEl, titleEl, navSide, navBottom;
@@ -3415,7 +3430,8 @@
     fetchJson('/api/v2/nayax-abgleich/preview?machine=' + encodeURIComponent(machineKey)).then(function (data) {
       if (data && data.ok) {
         if (btn) { btn.disabled = false; btn.textContent = label; }
-        nayaxAbgleichRenderPreview(panel, machine, data, machineKey, _slotsState.canEdit);
+        // #29: Nayax-Übernehmen erfordert nayax.schreiben (nicht nur Slot-Edit).
+        nayaxAbgleichRenderPreview(panel, machine, data, machineKey, viewerCan('nayax.schreiben'));
         return;
       }
       var reason = (data && data.error && (data.error.message || data.error.code)) || 'unerwartete Antwort';
@@ -4103,7 +4119,8 @@
   }
 
   function buildNav() {
-    var html = ROUTES.map(navItemHtml).join('');
+    // #29: nur Reiter zeigen, für die der Viewer die nötige Fähigkeit hat.
+    var html = ROUTES.filter(function (r) { return viewerCan(r.cap); }).map(navItemHtml).join('');
     if (navSide) { navSide.innerHTML = html; }
     if (navBottom) { navBottom.innerHTML = html; }
   }
@@ -4187,12 +4204,26 @@
     navBottom = document.querySelector('[data-nav="bottom"]');
     if (!viewEl) { return; }
 
-    buildNav();
     document.addEventListener('click', onNavClick);
     window.addEventListener('popstate', dispatch);
     window.addEventListener('hashchange', dispatch);
 
+    // #29: Erst die Fähigkeiten laden, dann die Nav nach Fähigkeit bauen. Bei
+    // Fehler bleiben die Caps null (fail-open) — die Sicherheit liegt am Server.
+    buildNav(); // sofort (fail-open), damit die Shell nie leer wirkt
+    fetchJson('/api/dashboard').catch(function () { return {}; }).then(function (res) {
+      var v = (res && res.viewer) || {};
+      if (v.capabilities) { setViewerCaps(v.capabilities); buildNav(); setActiveNav(activePath()); }
+    });
+
     dispatch();
+  }
+
+  // Aktiver Pfad relativ zur BASE (für setActiveNav nach Nav-Neuaufbau).
+  function activePath() {
+    var p = window.location.pathname;
+    if (BASE && p.indexOf(BASE) === 0) { p = p.slice(BASE.length) || '/'; }
+    return ROUTE_BY_PATH[p] ? p : '/';
   }
 
   if (document.readyState === 'loading') {

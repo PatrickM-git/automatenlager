@@ -335,3 +335,31 @@ test('guest dashboard access is written to the audit log', async (t) => {
   assert.equal(entry.role, 'guest');
   assert.equal(entry.event, 'dashboard_view');
 });
+
+// ── #29 Frontend-Gating: /api/dashboard liefert Fähigkeiten je Rolle ────────
+
+test('#29 /api/dashboard liefert capabilities[] + roleKey (Eigentümer)', async (t) => {
+  const port = await startWithOperator(t);
+  const res = await fetch(`http://127.0.0.1:${port}/api/dashboard`, { headers: { 'Tailscale-User-Login': 'patrick@example.test' } });
+  const body = await res.json();
+  assert.equal(body.viewer.roleKey, 'eigentuemer');
+  assert.ok(Array.isArray(body.viewer.capabilities));
+  assert.ok(body.viewer.capabilities.includes('finanzen.lesen'));
+  assert.ok(body.viewer.capabilities.includes('system.verwalten'));
+});
+
+test('#29 /api/dashboard: Auffüller hat bestand.schreiben, NICHT finanzen/system', async (t) => {
+  const port = await startWithOperator(t);
+  const res = await fetch(`http://127.0.0.1:${port}/api/dashboard`, { headers: { 'Tailscale-User-Login': 'operator@example.test' } });
+  const caps = (await res.json()).viewer.capabilities;
+  assert.ok(caps.includes('bestand.schreiben'));
+  assert.ok(!caps.includes('finanzen.lesen'));
+  assert.ok(!caps.includes('system.verwalten'));
+});
+
+test('#29 /api/dashboard: Gast hat nur betrieb.lesen', async (t) => {
+  const port = await startWithOperator(t);
+  const res = await fetch(`http://127.0.0.1:${port}/api/dashboard`, { headers: { 'Tailscale-User-Login': 'gast@example.test' } });
+  const caps = (await res.json()).viewer.capabilities;
+  assert.deepEqual(caps, ['betrieb.lesen']);
+});
