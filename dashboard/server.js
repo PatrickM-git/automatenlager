@@ -2727,9 +2727,11 @@ const server = http.createServer(async (req, res) => {
     // Kategorien editieren. Admin-only, persistiert je Mandant (classification_settings).
     if (parsed.pathname === '/api/v2/settings/definitions' && req.method === 'POST') {
       const viewer = getViewer(req);
-      if (!viewer.canTriggerActions) {
+      // #31 (US22): Schwellwerte sind System-Einstellungen → nur system.verwalten.
+      // Vorher canTriggerActions (= workflows.starten), das ein Auffüller hat — Lücke.
+      if (!viewer.can('system.verwalten')) {
         auditGuestAccess(viewer, 'settings_write_denied', {});
-        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer dürfen die Einstellungen nicht ändern.' } });
+        sendJson(res, 403, { ok: false, error: { code: 'CAPABILITY_REQUIRED', message: 'Nur system.verwalten darf die Einstellungen ändern.' } });
         return;
       }
       let body;
