@@ -136,9 +136,23 @@ function viewerCan(viewer, capability) {
   return !!(viewer && typeof viewer.can === 'function' && viewer.can(capability));
 }
 
+// Issue #33 (IDOR / Objekt-Ebene): Darf dieser Viewer auf ein Objekt zugreifen,
+// das dem Mandanten `objectTenantId` gehört? Zweite Hälfte der Zugriffskontrolle
+// neben RBAC (requireCapability prüft die VERB-Ebene, das hier die OBJEKT-Ebene).
+// Single-Tenant: alle Objekte gehören dem Eigentümer; fehlt der Objekt-Mandant,
+// wird TENANT_OWNER angenommen → der Eigentümer kommt durch, Fremd-Mandanten nicht.
+// Sobald echte Tenancy existiert, wird objectTenantId aus der DB-Zeile gelesen
+// (z. B. machines.tenant_id) — das bildet später Supabase-RLS ab.
+function objectAccessAllowed(viewer, objectTenantId) {
+  if (!viewer || !viewer.tenantId) return false;
+  const owner = objectTenantId == null || objectTenantId === '' ? TENANT_OWNER : objectTenantId;
+  return viewer.tenantId === owner;
+}
+
 module.exports = {
   resolveViewer,
   viewerCan,
+  objectAccessAllowed,
   isTrustedIdentityPath,
   isLoopback,
   ipInCidr,
