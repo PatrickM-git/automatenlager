@@ -2,6 +2,30 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
+## Stand: 2026-06-04 (Dashboard-Kachel „Rechnungen freigeben (WF2)" — Formular-URL-Fix · PR #70)
+
+Kurze Fix-Session. **Live auf dem Mini, verifiziert.**
+
+### Symptom
+Dashboard-Kachel „Rechnungen freigeben (WF2)" zeigte **„WF2-Formular-URL nicht konfiguriert"** (kein Freigabe-Button), obwohl ein offener Rechnungsposten anlag (METRO `INV_04_06_2026_109_0_0_0031_005032`).
+
+### Wurzelursache
+Das Dashboard liest den Workflow-Zustand aus der **committeten `WF*.json`** (nicht live aus n8n) und baut die Formular-URL nur für aktive Workflows (`server.js` → `firstFormUrl`: `if (!form || !workflow.active) return ''`). Die **WF2-JSON war als EINZIGE** ohne top-level `"active"` exportiert (alle anderen 14 WFs, inkl. des ebenfalls formularbasierten WF4, hatten `active:true`).
+
+### Fix (PR #70, gemergt, `cc1eef9`)
+- `"active": true` im WF2-Export ergänzt (Spiegel des Produktionszustands; Mini-WF2 `X2RU2cHm78rkIWMf` ist live active, Form-Trigger `webhookId e16cb652-…`).
+- Guard `dashboard/tests/dashboard-wf-form-url-contract.test.js`: jeder Form-Trigger-WF muss in seiner JSON `active:true` + auflösbaren Form-Pfad haben.
+- Deployt: Mini `git pull --ff-only` + `docker restart homelab-dashboard`. Live-API liefert jetzt `wf2_form_url = https://hp-mini-server.tail573a13.ts.net/form/e16cb652-…` → Kachel rendert „Im WF2-Formular freigeben". Tests: Onboarding 11/11, Guard 2/2.
+
+### Wichtig fürs nächste Mal (verifiziert 2026-06-04)
+- **SQL-Dual-Write von WF2 läuft bereits** (Sheets **und** `automatenlager.pgw_write` via `WF-PGW` → product/alias/stock_batch). Rollback-sicher live getestet. War NICHT das Problem.
+- **Mini-Zugang:** Mini-n8n-Key = `N8N_API_KEY` in `C:\Users\patri\Documents\homelab\.env.local` (Tailscale-REST, HTTP 200). `C:\Users\patri\.n8n-api-key` + `ELITEBOOK_N8N_API_KEY` = **lokale** Elitebook-Instanz (Mini → 401). Die **n8n-MCP zeigt auf die lokale Instanz** — für Mini-Arbeit REST-API (homelab-Key) oder SSH→Mini-n8n-DB nutzen. Echte Mini-WF2-ID `X2RU2cHm78rkIWMf` (≠ lokale MCP-ID).
+
+### Offene Beobachtung (nicht angefasst)
+- Bei `SKU_CAPRI_SUN_ZERO_MONSTER_ALARM` landeten Produkt + Charge in PG, aber **kein Alias** (`Prepare PGW`: `if (item.alias_name)`). Aliase fließen sonst (88 in DB). Ggf. eigenes Quick-Issue, falls reproduzierbar.
+
+---
+
 ## Stand: 2026-06-03 (WF8 EK-Netto live auf Mini + v2-Frontend abgeschaltet · Issues #51/#9)
 
 Kurze Folge-Session zu zwei Aufräum-Punkten. Beides **live**.
