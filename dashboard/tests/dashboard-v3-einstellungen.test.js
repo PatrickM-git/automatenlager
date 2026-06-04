@@ -59,7 +59,7 @@ function resolvePgUrlForTest() {
 function startDashboard(port, envOverrides = {}) {
   const child = spawn(process.execPath, ['server.js'], {
     cwd: process.cwd(),
-    env: { ...process.env, PORT: String(port), N8N_BASE_URL: 'http://127.0.0.1:9', N8N_API_KEY: 'test-key', ...envOverrides },
+    env: { ...process.env, DASHBOARD_DEV_LOCAL_ADMIN: '1', PORT: String(port), N8N_BASE_URL: 'http://127.0.0.1:9', N8N_API_KEY: 'test-key', ...envOverrides },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return new Promise((resolve, reject) => {

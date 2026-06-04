@@ -186,6 +186,7 @@ function startDashboard(port, envOverrides = {}) {
     cwd: require('path').join(__dirname, '..'),
     env: {
       ...process.env,
+      DASHBOARD_DEV_LOCAL_ADMIN: '1', // #27: lokaler Test = Admin-Notausgang
       PORT: String(port),
       N8N_BASE_URL: 'http://127.0.0.1:9',
       N8N_API_KEY: 'test-key',
@@ -363,6 +364,7 @@ function startDashboardFull(port, envOverrides = {}) {
     cwd: require('path').join(__dirname, '..'),
     env: {
       ...process.env,
+      DASHBOARD_DEV_LOCAL_ADMIN: '1', // #27: lokaler Test = Admin-Notausgang
       PORT: String(port),
       N8N_BASE_URL: 'http://127.0.0.1:9',
       N8N_API_KEY: 'test-key',
