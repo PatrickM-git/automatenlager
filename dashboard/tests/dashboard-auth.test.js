@@ -269,6 +269,43 @@ test('dashboard response exposes guest permissions from Tailscale login', async 
   assert.equal(body.viewer.canTriggerActions, false);
 });
 
+// ── #28 RBAC: serverseitige Fähigkeits-Durchsetzung (403) ───────────────────
+
+async function startWithOperator(t) {
+  const mockN8n = startMockN8n();
+  const n8nPort = await listen(mockN8n.server);
+  const port = await getFreePort();
+  const dashboard = await startDashboard(port, n8nPort, { DASHBOARD_OPERATOR_LOGIN: 'operator@example.test' });
+  t.after(() => { dashboard.kill(); mockN8n.server.close(); });
+  return port;
+}
+const OP_HDR = { 'Content-Type': 'application/json', 'Tailscale-User-Login': 'operator@example.test' };
+const GUEST_HDR = { 'Content-Type': 'application/json', 'Tailscale-User-Login': 'gast@example.test' };
+
+test('#28 Auffüller DARF Bestand schreiben (kein 403 am bestand.schreiben-Endpunkt)', async (t) => {
+  const port = await startWithOperator(t);
+  const res = await fetch(`http://127.0.0.1:${port}/api/v2/inventory/write-off`, { method: 'POST', headers: OP_HDR, body: '{}' });
+  assert.notEqual(res.status, 403, 'Auffüller hat bestand.schreiben → Auth passiert (Folgefehler 400/503 ok)');
+});
+
+test('#28 Auffüller NICHT Nayax (nayax.schreiben) → 403', async (t) => {
+  const port = await startWithOperator(t);
+  const res = await fetch(`http://127.0.0.1:${port}/api/v2/nayax-abgleich/apply`, { method: 'POST', headers: OP_HDR, body: '{}' });
+  assert.equal(res.status, 403);
+});
+
+test('#28 Auffüller NICHT GuV (finanzen.lesen) → 403', async (t) => {
+  const port = await startWithOperator(t);
+  const res = await fetch(`http://127.0.0.1:${port}/api/v2/economics/scope`, { headers: OP_HDR });
+  assert.equal(res.status, 403);
+});
+
+test('#28 Gast NICHT Bestand schreiben → 403', async (t) => {
+  const port = await startWithOperator(t);
+  const res = await fetch(`http://127.0.0.1:${port}/api/v2/inventory/write-off`, { method: 'POST', headers: GUEST_HDR, body: '{}' });
+  assert.equal(res.status, 403);
+});
+
 test('guest dashboard access is written to the audit log', async (t) => {
   const auditLogPath = path.join(os.tmpdir(), `dashboard-audit-${Date.now()}.jsonl`);
   const mockN8n = startMockN8n();
