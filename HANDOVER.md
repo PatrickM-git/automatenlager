@@ -2,53 +2,43 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-06-05 — Session abgeschlossen: #31 + #78 + #87 + #91 + #92 + #93
+## Stand: 2026-06-05 — Session abgeschlossen: WF3-PGW-Bugfix + Chargensuche
 
-Suite **847/847**. Alle 6 Issues abgearbeitet und geschlossen.
+Suite **847/847**. Alle offenen Punkte der Session abgearbeitet.
 
 ---
 
 ### Heute erledigt
 
-#### #31 Feature: Editierbare Schwellwerte
-- `settings_thresholds`-Relation, Migration 0002, API + Frontend live. Issue geschlossen.
+#### WF3 Phantom-Sale-Fix (Commit `0c8203d`)
+- **Ursache:** `Google Sheets - Transaktionen anhängen` war disabled → n8n passthrough → Items flossen zu `Prepare PGW - sale`.
+- Phantom-Rows mit `transaction_id=undefined` → `String(undefined)="undefined"` → pgw_write schlägt alle 5 Min fehl.
+- **Fix:** `.filter()` vor `.map()` in `Prepare PGW - sale`: Items mit null/undefined/leerer `transaction_id` oder `machine_id` werden herausgefiltert.
+- WF3 auf Mini aktualisiert (ID: `wbOhFKXQqBpJWB1w`), exportiert + committed. Fehler-E-Mails stoppen ab nächstem WF3-Lauf.
 
-#### #78: F1 scharfschalten
-- `DASHBOARD_TRUSTED_SERVE_IP=172.18.0.1` + `DASHBOARD_INTERNAL_PEER_CIDR=172.18.0.0/16`.
-- Live: `:8443` → role=admin. Issue geschlossen.
+#### Red Bull Spring — manuell ausgesondert
+- `batch_id=29`, `status='leer'`, `remaining_qty=0` → direkt per SQL auf `status='ausgesondert'` gesetzt.
+- Alle Slots (326, 33, 234, 388) bereits `active=f`.
 
-#### #87: Bestandsdrift-Analyse + fehlgeschlagene Reconciliation
-- Erkenntnis: Nayax sieht NUR Automateninhalt, NIE Backstock.
-- `remaining_qty` = Automat + Backstock (Gesamt) — NIE auf `current_machine_qty` setzen.
-- Fehlgeschlagener Reconciliation-Versuch vollständig rückgängig gemacht (33 Chargen auf Backup-Werte zurückgesetzt).
-- Backup: `C:/tmp/backup_remaining_qty_pre_reconciliation_2026-06-05.txt`.
-- Issue geschlossen.
+#### Feature: Chargensuche auf /lager (Commit `02acc53`)
+- **User-Anfrage:** Produkte suchen und aussortieren auch ohne aktiven Slot.
+- `GET /api/v2/inventory/batch-search?q=<search>` — ILIKE auf Produktname, max. 50 Treffer, `status ≠ ausgesondert`.
+- Neue Sektion auf `/lager` unterhalb der normalen Bestandstabelle: Freitext-Suche (Debounce 320ms), Ergebnistabelle mit Aussortieren-Button (reuse `openWriteOffDialog`).
+- CSS: `v3-lager-search-section` mit Trenner-Border.
+- Deploy: Mini via `git pull --ff-only + docker restart`, live verifiziert (Endpunkt + 847 Tests grün).
 
-#### #93: Echtzeit-remaining_qty — DB-Trigger (Commit `e6f41d0`)
-- `trg_deduct_stock_on_machine_sale` auf `slot_assignments.current_machine_qty`.
-- Wenn WF3 (alle 5 Min) Nayax-Daten aktualisiert und Wert sinkt → FIFO-Abzug von `stock_batches.remaining_qty`.
-- Steigung (Nachfüllung Backstock→Automat) → kein Abzug ✓.
-- Produktwechsel am Slot → WHEN-Guard.
-- 100 % Nayax-Verkäufe erfasst. Migration `0003-stock-deduct-trigger.sql`. Issue geschlossen.
+---
 
-**WF3 Sheet-Write-Nodes deaktiviert (Commit `4db3d81`):**
-- 6 Google-Sheets-Write-Nodes disabled: Lagerchargen aktualisieren, Transaktionen anhängen, Hinweise anhängen, Append row in sheet, letzter Verkaufsworkflow aktualisieren, Produktbestand Update.
-- 3 Read-Nodes bleiben aktiv (WF3 liest noch aus Sheets für FIFO-Logik).
-- Google Sheets ist keine Schreib-Wahrheitsquelle mehr für Bestand.
+### Technische Architektur-Notiz: MCP vs. Mini-n8n
 
-#### #92: purchase_date in stock_batches (Commit `15e7e9e`)
-- Backfill: 59 Chargen `purchase_date = received_at` ✓.
-- `trg_default_purchase_date` (BEFORE INSERT): Fallback für pgw_write.
-- WF2 (Mini, `X2RU2cHm78rkIWMf`): sendet `purchase_date` explizit im data-Payload.
-- Migration `0004-purchase-date-trigger.sql`. Issue geschlossen.
+Die MCP-n8n-Verbindung (im Claude-Interface) zeigt die **lokale** n8n-Instanz (localhost:5678, Workflow-IDs abweichend, alle inactive). Für Produktionsarbeit immer direkt die Mini-API verwenden:
 
-#### #91: prices-Tabelle befüllt (Commit `15e7e9e`)
-- **36 Preise** aus `sales_transactions` Mode-Preis (source=`sales_transactions_mode`).
-- **4 Preisschätzungen** für neue Produkte ohne Transaktionen (source=`estimated`):
-  - Red Bull Summer Edition: 2.00, Hochwald Eiskaffee: 1.50, Pick Up: 1.00, Milka Oreo: 1.20.
-- Alle 40 aktiven Slots haben jetzt Preise → Dashboard zeigt sale_price_gross korrekt.
-- WF4/wf4-product-reads.js liest `prices` via LATERAL-Subquery (war schon implementiert).
-- Issue geschlossen.
+```
+BASE: https://hp-mini-server.tail573a13.ts.net/api/v1/...
+HEADER: X-N8N-API-KEY: <aus C:\Users\patri\.n8n-api-key>
+```
+
+Oder via Bash curl, nicht via MCP-n8n-Tool.
 
 ---
 
@@ -63,10 +53,11 @@ Suite **847/847**. Alle 6 Issues abgearbeitet und geschlossen.
 
 ### Bekannte Lücken / Folge-Issues
 
-- **WF3 liest noch Lagerchargen-remaining_qty aus Sheets** (Read-Nodes aktiv). Sheets-remaining_qty wird jetzt stale (nicht mehr durch WF3 aktualisiert). WF3's FIFO-Logik basiert auf Sheet-Daten — langfristig auf PG umstellen (eigenes Issue wenn relevant).
-- **WF2 schreibt Preise noch nicht bei Neuanlage** (pgw_write kennt kein `price`-Event). Neue Produkte brauchen manuellen Preis-Insert oder Folge-Issue.
-- **5 Preisschätzungen** (Milka Oreo, Pick Up, Red Bull Summer, Hochwald Eiskaffee) — sollten nach erstem echten Verkauf korrigiert werden (UPDATE prices SET sale_price_gross = ... WHERE source='estimated' AND slot_assignment_id = ...).
-- **pgw_write liest purchase_date nicht** aus dem Payload — Trigger (`trg_default_purchase_date`) übernimmt das als Fallback. pgw_write-Update bleibt optional.
+- **WF3 liest noch Lagerchargen-remaining_qty aus Sheets** (Read-Nodes aktiv). Sheets-remaining_qty wird jetzt stale. WF3's FIFO-Logik basiert noch auf Sheet-Daten — langfristig auf PG umstellen.
+- **WF2 schreibt Preise noch nicht bei Neuanlage** (pgw_write kennt kein `price`-Event). Neue Produkte brauchen manuellen Preis-Insert.
+- **4 Preisschätzungen** (source=`estimated`): Red Bull Summer Edition, Hochwald Eiskaffee, Pick Up, Milka Oreo — nach erstem echten Verkauf korrigieren.
+- **pgw_write liest `purchase_date` nicht** aus dem Payload — Trigger als Fallback aktiv.
+- **Chargensuche zeigt nur status ≠ ausgesondert** — 'leer'-Chargen sind sichtbar + aussortierbar, korrekt so.
 
 ---
 
@@ -82,16 +73,22 @@ DASHBOARD_TRUSTED_SERVE_IP=172.18.0.1
 |---------|---------|----------|
 | `trg_deduct_stock_on_machine_sale` | `slot_assignments` (AFTER UPDATE) | FIFO-Abzug remaining_qty bei Nayax-Absenkung |
 | `trg_default_purchase_date` | `stock_batches` (BEFORE INSERT) | purchase_date = received_at als Fallback |
-| *(kein Name, war vorher)* | — | — |
 
 ### Deploy-Weg (Referenz)
-SSH via `ssh -F ~/.ssh/config miniserver` (User=patri, Host=100.68.148.46, WSL Ubuntu-24.04).
-`wsl -d Ubuntu-24.04 -- bash -c "cd /mnt/c/homelab/projekte/automatenlager && git pull --ff-only && docker restart homelab-dashboard"`.
-DB-Zugriff: `docker exec -i homelab-postgres psql -U homelab -d homelab < /tmp/file.sql`
+SSH: `ssh -i "C:\Users\patri\.ssh\miniserver_key" -o StrictHostKeyChecking=no patri@100.68.148.46`
+Deploy: `wsl -d Ubuntu-24.04 -- bash -c "cd /mnt/c/homelab/projekte/automatenlager && git pull --ff-only && docker restart homelab-dashboard"`
+DB-Zugriff: `wsl -d Ubuntu-24.04 -- docker exec homelab-postgres psql -U homelab -d homelab -c "..."`
+
+### Mini n8n API
+```
+BASE: https://hp-mini-server.tail573a13.ts.net/api/v1/
+HEADER: X-N8N-API-KEY: $(cat C:\Users\patri\.n8n-api-key)
+```
+Wichtig: MCP-n8n-Tool zeigt NICHT die Mini-Instanz, sondern localhost:5678 (lokal, veraltet).
 
 ### Nützliche Diagnose-Queries
 ```sql
--- Vollständige Bestands-Übersicht (remaining = Automat + Backstock)
+-- Vollständige Bestands-Übersicht
 SELECT p.name,
   SUM(sb.initial_qty)    AS initial,
   SUM(sb.remaining_qty)  AS db_gesamt,
@@ -113,10 +110,9 @@ ORDER BY p.name;
 ```
 
 ### Lehren dieser Session
-- **Nayax sieht NUR Automateninhalt, NIE Backstock.** `remaining_qty` = Automat+Backstock. NIE auf `current_machine_qty` setzen.
-- **Preise aus Mode-Preis** (häufigster Stückpreis) der sales_transactions sind zuverlässiger als Average (Ausreißer durch Qty>1).
-- **SSH-Quoting-Falle:** Befehle mit Anführungszeichen immer als `.sql`-Datei via SCP + `psql < /tmp/file.sql`.
-- **n8n PUT-API:** nur `name`, `nodes`, `connections`, `settings:{executionOrder}` — keine anderen top-level-Felder.
-- **Encoding-Artefakte in WF3:** `anhängen` → `anh?ngen` (U+FFFD). Node-Matching via Operation-Typ (append/update) statt Namens-String.
+- **MCP-n8n zeigt lokale Instanz:** Immer direkt `curl -H "X-N8N-API-KEY: ..." https://hp-mini-server.../api/v1/` für Produktionsarbeit.
+- **n8n Passthrough-Falle:** Disabled Nodes leiten alle Input-Items unverändert weiter — nachgelagerte Nodes müssen selbst filtern.
+- **Nayax sieht NUR Automateninhalt, NIE Backstock.** `remaining_qty` = Automat+Backstock.
+- **SSH-Quoting:** Für bash `-c` mit einfachen Anführungszeichen intern immer doppelte Anführungszeichen für den äußeren SSH-String verwenden.
 
 ---
