@@ -9,6 +9,7 @@ const {
   buildOverviewData,
   buildMonitoringData,
   buildWarningDrilldown,
+  liveWarningReconcileSql,
 } = require('../lib/overview-monitoring.js');
 
 function getFreePort() {
@@ -381,6 +382,25 @@ test('AC-LIVEMSG: LOW_BATCH/LOW_STOCK warning text is rebuilt from live PG backs
   // … und für LOW_BATCH/LOW_STOCK den Meldungstext überschreiben (CASE in der Liste).
   assert.match(src, /WHEN f\.warning_type = 'LOW_BATCH'[\s\S]{0,200}Lager leer/, 'LOW_BATCH message must be rebuilt live (Lager leer / Backstock)');
   assert.match(src, /WHEN f\.warning_type = 'LOW_STOCK'[\s\S]{0,120}im Automaten/, 'LOW_STOCK message must be rebuilt from live machine qty');
+});
+
+test('AC-SELFHEAL: LOW_BATCH-Reconcile blendet Warnungen aussortierter Produkte aus (Self-Healing, Red Bull Spring 2026-06-05)', () => {
+  // Ein vollständig aussortiertes Produkt hat 0 aktiven Bestand → "0 <= 5" wäre
+  // sonst TRUE und die LOW_BATCH-Warnung bliebe als Dauer-"leer" hängen. Die
+  // Live-Reconcile-Bedingung muss daher einen aktiven-Slot-EXISTS-Check verlangen.
+  const sql = liveWarningReconcileSql(30);
+  const lowBatch = sql.slice(sql.indexOf("'LOW_BATCH'"), sql.indexOf('ELSE TRUE'));
+  assert.ok(lowBatch.length > 0, 'LOW_BATCH-Zweig muss existieren');
+  assert.match(
+    lowBatch,
+    /EXISTS[\s\S]*slot_assignments[\s\S]*active\s*=\s*TRUE/,
+    'LOW_BATCH muss einen aktiven Slot voraussetzen (sonst bleiben aussortierte Produkte als "leer" hängen)',
+  );
+  assert.match(lowBatch, /<=\s*5/, 'LOW_BATCH-Schwellwert (<= 5) muss erhalten bleiben');
+
+  // Die bereits korrekten Typen bleiben self-healing (Gegenprobe):
+  assert.match(sql, /'LOW_STOCK'[\s\S]*current_machine_qty\s*=\s*0/, 'LOW_STOCK prüft aktiven Slot');
+  assert.match(sql, /'MHD_NEAR'[\s\S]*remaining_qty\s*>\s*0/, 'MHD_NEAR prüft vorhandenen Bestand');
 });
 
 test('AC-BO2: queryOverviewMonitoringPg sources hasBackupOk from a dedicated query, not the filtered warnings list', () => {

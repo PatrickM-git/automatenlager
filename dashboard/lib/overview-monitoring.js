@@ -28,10 +28,19 @@ function liveWarningReconcileSql(mhdDays) {
          AND sa.current_machine_qty = 0
     )
     WHEN w.warning_type = 'LOW_BATCH' THEN (
-      SELECT COALESCE(SUM(sb.remaining_qty), 0) FROM automatenlager.stock_batches sb
-       WHERE sb.product_id = w.product_id
-         AND sb.status IN (${availableBatchStatusSqlList()})
-    ) <= 5
+      -- Nur wenn das Produkt noch im Sortiment ist (aktiver Slot). Sonst wäre
+      -- bei einem vollständig aussortierten Produkt der aktive Bestand 0 und
+      -- "0 <= 5" liefe als Dauer-"leer"-Warnung weiter (Red Bull Spring, 2026-06-05).
+      EXISTS (
+        SELECT 1 FROM automatenlager.slot_assignments sa
+         WHERE sa.product_id = w.product_id AND sa.active = TRUE
+      )
+      AND (
+        SELECT COALESCE(SUM(sb.remaining_qty), 0) FROM automatenlager.stock_batches sb
+         WHERE sb.product_id = w.product_id
+           AND sb.status IN (${availableBatchStatusSqlList()})
+      ) <= 5
+    )
     ELSE TRUE
   END`;
 }
@@ -439,4 +448,5 @@ module.exports = {
   buildMonitoringData,
   buildWarningDrilldown,
   queryOverviewMonitoringPg,
+  liveWarningReconcileSql,
 };
