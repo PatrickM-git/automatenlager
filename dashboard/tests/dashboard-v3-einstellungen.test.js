@@ -221,5 +221,5 @@ test('AC-W4: v3.js rendert editierbares Settings-Formular + speichert über den 
   assert.match(js, /data-set-key=/, 'editierbare Schwellwert-Felder vorhanden');
   assert.match(js, /data-set-cat=/, 'editierbare Kategorie-Margen vorhanden');
   assert.match(js, /postJson\('\/api\/v2\/settings\/definitions'/, 'Speichern über den Schreibpfad');
-  assert.match(js, /renderSettingsPage\(result\.settings,\s*result\.canEdit\)/, 'canEdit steuert die Editierbarkeit');
+  assert.match(js, /renderSettingsPage\(result\.settings,\s*result\.canEdit/, 'canEdit steuert die Editierbarkeit');
 });

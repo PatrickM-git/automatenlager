@@ -3,6 +3,7 @@
 const { resolvePeriod, formatProductName } = require('./economics.js');
 const { classifyTurnover } = require('./slow-mover.js');
 const { buildEffectiveConfig, normalizeCategoryKey, loadEffectiveConfig, DEFAULT_MANDANT } = require('./category-config.js');
+const { getThresholds } = require('./settings-thresholds.js');
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -175,7 +176,12 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
   try {
     // #34: MHD-Risiko-Fenster aus der EINEN Settings-Quelle (vor der Query laden,
     // damit es ins SQL fließt). mhdRiskDays ist via mergeConfig validierter Integer.
-    const config = await loadEffectiveConfig(client, DEFAULT_MANDANT);
+    // #31: ladenhueterDays aus settings_thresholds (global), Fallback = classification_settings.
+    let config = await loadEffectiveConfig(client, DEFAULT_MANDANT);
+    const thresholds = await getThresholds(client, DEFAULT_MANDANT, null);
+    if (thresholds.ladenhueterDays.source !== 'default') {
+      config = { ...config, ladenhueterDays: Number(thresholds.ladenhueterDays.value) };
+    }
     const mhdDays = config.mhdRiskDays;
     const result = await client.query(
       `WITH sales AS (

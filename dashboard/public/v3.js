@@ -967,6 +967,22 @@
     });
   }
 
+  function putJson(url, body) {
+    return fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      return r.json().then(function (json) { return { ok: r.ok, status: r.status, json: json }; });
+    });
+  }
+
+  function deleteJson(url) {
+    return fetch(url, { method: 'DELETE' }).then(function (r) {
+      return r.json().then(function (json) { return { ok: r.ok, status: r.status, json: json }; });
+    });
+  }
+
   function loadPage(route) {
     if (route.path === '/') {
       return Promise.all([
@@ -1090,10 +1106,20 @@
       }).catch(function () { return { status: 'error' }; });
     }
     if (route.path === '/einstellungen') {
-      return fetchJson('/api/v2/settings/definitions').then(function (res) {
-        var defs = res && res.definitions ? res.definitions : null;
+      return Promise.all([
+        fetchJson('/api/v2/settings/definitions'),
+        fetchJson('/api/v2/settings/thresholds'),
+      ]).then(function (results) {
+        var defsRes = results[0]; var thrRes = results[1];
+        var defs = defsRes && defsRes.definitions ? defsRes.definitions : null;
         if (!defs) { return { status: 'error' }; }
-        return { status: 'ok', settings: defs, canEdit: !!(res && res.canEdit) };
+        return {
+          status: 'ok',
+          settings: defs,
+          canEdit: !!(defsRes && defsRes.canEdit),
+          thresholds: (thrRes && thrRes.thresholds) || {},
+          thrCanEdit: !!(thrRes && thrRes.canEdit),
+        };
       }).catch(function () { return { status: 'error' }; });
     }
     return new Promise(function (resolve) {
@@ -3896,7 +3922,7 @@
     '</label>';
   }
 
-  function renderSettingsPage(settings, canEdit) {
+  function renderSettingsPage(settings, canEdit, thresholds, thrCanEdit) {
     var sm = (settings && settings.slowMover) || { classes: [], ladenhueterDays: 30, graceDays: 14 };
     var cfg = (settings && settings.config) || {};
     var cats = cfg.categories || {};
@@ -3973,7 +3999,105 @@
           '<tbody>' + catRows + '</tbody></table>' +
         addCat +
         saveBar +
+      '</section>' +
+      renderThresholdsCard(thresholds, thrCanEdit);
+  }
+
+  /* ---- Schwellwerte-Karte (#31, settings_thresholds) ---------------------- */
+  function renderThresholdsCard(thresholds, canEdit) {
+    var thr = thresholds || {};
+    var lh = thr.ladenhueterDays || {};
+    var val = lh.value != null ? lh.value : 30;
+    var src = lh.source || 'default';
+    var meta = lh.meta || {};
+    var srcLabel = src === 'machine' ? 'Automat-Override' : src === 'global' ? 'Globaler Override' : 'Standard';
+    var ro = canEdit ? '' : ' disabled';
+    var hint = esc(meta.description || '');
+
+    var globalRow = '' +
+      '<div class="v3-set-thr-row" data-thr-scope="global">' +
+        '<div class="v3-set-thr-label">' +
+          '<span>' + esc(meta.label || 'Ladenhüter-Schwelle (Tage)') + '</span>' +
+          '<span class="v3-set-thr-src" id="v3-thr-src-ladenhueterDays">' + esc(srcLabel) + '</span>' +
+        '</div>' +
+        '<div class="v3-set-thr-controls">' +
+          '<input class="v3-set-input v3-set-thr-input" type="number" step="1" min="' + esc(meta.min || 1) + '" max="' + esc(meta.max || 365) + '"' +
+            ' id="v3-thr-ladenhueterDays" value="' + esc(val) + '"' + ro + '>' +
+          '<span class="v3-set-field__hint">' + hint + '</span>' +
+          (canEdit
+            ? '<button type="button" class="v3-btn v3-btn--ghost v3-set-thr-reset" data-thr-key="ladenhueterDays" title="Auf Standard zurücksetzen">↺</button>'
+            : '') +
+        '</div>' +
+        (canEdit
+          ? '<button type="button" class="v3-btn v3-btn--primary v3-set-thr-save" data-thr-key="ladenhueterDays">Speichern</button>'
+          : '') +
+        '<span class="v3-set-status v3-set-thr-status" id="v3-thr-status-ladenhueterDays" role="status"></span>' +
+      '</div>';
+
+    var readOnlyNote = canEdit ? '' : '<p class="v3-state__msg">Nur Admins können diese Werte ändern.</p>';
+
+    return '' +
+      '<section class="v3-card" id="v3-thr-card" aria-label="Ladenhüter-Schwelle (automaten-parametrisch)">' +
+        '<h3 class="v3-set-subtitle">Ladenhüter-Schwelle (Automaten-parametrisch)</h3>' +
+        '<p class="v3-state__msg" style="margin:0 0 12px">Globaler Wert gilt für alle Automaten. ' +
+          'Automat-Override überschreibt den globalen Wert für einen einzelnen Automaten. ' +
+          '<strong>Vorrang:</strong> Automat &gt; Global &gt; Standard (' + esc(meta.defaultValue || 30) + ' Tage).</p>' +
+        readOnlyNote +
+        globalRow +
       '</section>';
+  }
+
+  /* ---- Schwellwerte-Steuerung (Speichern + Reset) ------------------------- */
+  function bindThresholdControls() {
+    document.querySelectorAll('.v3-set-thr-save').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var key = btn.getAttribute('data-thr-key');
+        var inp = document.getElementById('v3-thr-' + key);
+        var statusEl = document.getElementById('v3-thr-status-' + key);
+        if (!inp || !statusEl) return;
+        var val = Number(inp.value);
+        if (!Number.isFinite(val) || val < 1) {
+          statusEl.textContent = 'Ungültiger Wert.';
+          return;
+        }
+        statusEl.textContent = 'Speichere …';
+        btn.disabled = true;
+        putJson('/api/v2/settings/thresholds/' + encodeURIComponent(key), { value: val }).then(function (res) {
+          btn.disabled = false;
+          if (res.ok && res.json && res.json.ok) {
+            statusEl.textContent = 'Gespeichert ✓';
+            var srcEl = document.getElementById('v3-thr-src-' + key);
+            if (srcEl) srcEl.textContent = 'Globaler Override';
+          } else {
+            var msg = res.json && res.json.error ? res.json.error.message : ('Fehler ' + res.status);
+            statusEl.textContent = 'Fehler: ' + msg;
+          }
+        }).catch(function () { btn.disabled = false; statusEl.textContent = 'Netzwerkfehler.'; });
+      });
+    });
+
+    document.querySelectorAll('.v3-set-thr-reset').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var key = btn.getAttribute('data-thr-key');
+        var statusEl = document.getElementById('v3-thr-status-' + key);
+        if (!statusEl) return;
+        statusEl.textContent = 'Zurücksetzen …';
+        btn.disabled = true;
+        deleteJson('/api/v2/settings/thresholds/' + encodeURIComponent(key)).then(function (res) {
+          btn.disabled = false;
+          if (res.ok && res.json && res.json.ok) {
+            statusEl.textContent = 'Zurückgesetzt ✓';
+            var srcEl = document.getElementById('v3-thr-src-' + key);
+            if (srcEl) srcEl.textContent = 'Standard';
+            var inp = document.getElementById('v3-thr-' + key);
+            var thrRes = res.json && res.json.thresholds;
+            if (inp && thrRes && thrRes[key]) inp.value = thrRes[key].value;
+          } else {
+            statusEl.textContent = 'Fehler ' + (res.status || '');
+          }
+        }).catch(function () { btn.disabled = false; statusEl.textContent = 'Netzwerkfehler.'; });
+      });
+    });
   }
 
   // Sammelt die editierten Werte und speichert sie (Admin) über den Schreibpfad.
@@ -4109,8 +4233,9 @@
         viewEl.innerHTML = pageHead(route) + renderMonitoringPage(result.monitoring);
         bindMonitoringControls();
       } else if (route.path === '/einstellungen' && result.settings) {
-        viewEl.innerHTML = pageHead(route) + renderSettingsPage(result.settings, result.canEdit);
+        viewEl.innerHTML = pageHead(route) + renderSettingsPage(result.settings, result.canEdit, result.thresholds, result.thrCanEdit);
         bindSettingsControls();
+        bindThresholdControls();
       } else {
         viewEl.innerHTML = pageHead(route) + placeholderContent(route);
       }

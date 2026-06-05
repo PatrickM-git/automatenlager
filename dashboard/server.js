@@ -40,6 +40,13 @@ const {
   DEFAULT_MANDANT,
 } = require('./lib/category-config.js');
 const {
+  THRESHOLD_DEFS,
+  getThresholds,
+  setThreshold,
+  resetThreshold,
+  resetAllThresholds,
+} = require('./lib/settings-thresholds.js');
+const {
   normalizeNayaxItems,
   buildAliasIndex,
   buildNameIndex,
@@ -2881,6 +2888,111 @@ const server = http.createServer(async (req, res) => {
         // halten den Trail bewusst schlank + secret-frei).
         auditAction(viewer, 'settings_write', { changedKeys: Object.keys(incoming || {}) }, 'ok');
         sendJson(res, 200, { ok: true, definitions: { slowMover: SLOW_MOVER, config } });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      } finally {
+        await client.end();
+      }
+      return;
+    }
+
+    // ── Einstellungen: Schwellwerte (#31, settings_thresholds) ─────────────────
+
+    if (parsed.pathname === '/api/v2/settings/thresholds' && req.method === 'GET') {
+      const viewer = getViewer(req);
+      const machineId = parsed.searchParams.get('machineId');
+      const mid = machineId != null && machineId !== '' ? Number(machineId) : null;
+      const { Client } = require('pg');
+      const client = new Client({ connectionString: DASHBOARD_V2_PG_URL, connectionTimeoutMillis: 6000 });
+      await client.connect();
+      try {
+        const thresholds = await getThresholds(client, DEFAULT_MANDANT, mid);
+        const result = {};
+        for (const [key, t] of Object.entries(thresholds)) {
+          result[key] = { value: t.value, source: t.source, meta: t.meta };
+        }
+        sendJson(res, 200, {
+          ok: true,
+          canEdit: viewer.can('system.verwalten'),
+          machineId: mid,
+          thresholds: result,
+        });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      } finally {
+        await client.end();
+      }
+      return;
+    }
+
+    if (parsed.pathname.startsWith('/api/v2/settings/thresholds/') && req.method === 'PUT') {
+      const viewer = getViewer(req);
+      if (!viewer.can('system.verwalten')) {
+        auditDenied(viewer, 'threshold_write_denied', {});
+        sendJson(res, 403, { ok: false, error: { code: 'CAPABILITY_REQUIRED', message: 'Nur system.verwalten darf Schwellwerte ändern.' } });
+        return;
+      }
+      const key = parsed.pathname.slice('/api/v2/settings/thresholds/'.length);
+      if (!key || !Object.prototype.hasOwnProperty.call(THRESHOLD_DEFS, key)) {
+        sendJson(res, 400, { ok: false, error: { code: 'UNKNOWN_KEY', message: `Unbekannter Schlüssel: "${key}"` } });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await new Promise((resolve, reject) => {
+          let data = '';
+          req.on('data', (chunk) => { data += chunk; });
+          req.on('end', () => resolve(data));
+          req.on('error', reject);
+        }) || '{}');
+      } catch {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON im Request-Body.' } });
+        return;
+      }
+      const machineId = body && body.machineId != null && body.machineId !== '' ? Number(body.machineId) : null;
+      const value = body && body.value !== undefined ? body.value : null;
+      const { Client } = require('pg');
+      const client = new Client({ connectionString: DASHBOARD_V2_PG_URL, connectionTimeoutMillis: 6000 });
+      await client.connect();
+      try {
+        await setThreshold(client, DEFAULT_MANDANT, machineId, key, value);
+        auditAction(viewer, 'threshold_write', { key, machineId: machineId ?? null }, 'ok');
+        const thresholds = await getThresholds(client, DEFAULT_MANDANT, machineId);
+        sendJson(res, 200, { ok: true, thresholds });
+      } catch (err) {
+        const isValidation = err.message.startsWith('Unbekannter') || err.message.includes('muss eine Zahl');
+        sendJson(res, isValidation ? 400 : 503, { ok: false, error: { code: isValidation ? 'INVALID_VALUE' : 'PG_ERROR', message: err.message } });
+      } finally {
+        await client.end();
+      }
+      return;
+    }
+
+    if (parsed.pathname.startsWith('/api/v2/settings/thresholds') && req.method === 'DELETE') {
+      const viewer = getViewer(req);
+      if (!viewer.can('system.verwalten')) {
+        auditDenied(viewer, 'threshold_reset_denied', {});
+        sendJson(res, 403, { ok: false, error: { code: 'CAPABILITY_REQUIRED', message: 'Nur system.verwalten darf Schwellwerte zurücksetzen.' } });
+        return;
+      }
+      const key = parsed.pathname.startsWith('/api/v2/settings/thresholds/')
+        ? parsed.pathname.slice('/api/v2/settings/thresholds/'.length)
+        : null;
+      const machineId = parsed.searchParams.get('machineId');
+      const mid = machineId != null && machineId !== '' ? Number(machineId) : null;
+      const { Client } = require('pg');
+      const client = new Client({ connectionString: DASHBOARD_V2_PG_URL, connectionTimeoutMillis: 6000 });
+      await client.connect();
+      try {
+        if (key) {
+          await resetThreshold(client, DEFAULT_MANDANT, mid, key);
+          auditAction(viewer, 'threshold_reset', { key, machineId: mid ?? null }, 'ok');
+        } else {
+          await resetAllThresholds(client, DEFAULT_MANDANT, mid);
+          auditAction(viewer, 'threshold_reset_all', { machineId: mid ?? null }, 'ok');
+        }
+        const thresholds = await getThresholds(client, DEFAULT_MANDANT, mid);
+        sendJson(res, 200, { ok: true, thresholds });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
       } finally {
