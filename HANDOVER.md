@@ -2,7 +2,7 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-06-05 — #31 Feature + #78 F1 live; Bestandsdrift-Analyse
+## Stand: 2026-06-05 — #31 Feature + #78 F1 + #87 Drift-Reconciliation live
 
 Suite **↑** (Tests für #31+#78 hinzugekommen). Alle vorherigen Ergebnisse intakt.
 
@@ -32,14 +32,22 @@ Suite **↑** (Tests für #31+#78 hinzugekommen). Alle vorherigen Ergebnisse int
 - `stock_batches.remaining_qty` ist flächendeckend veraltet (wurde nie durch Verkäufe aktualisiert).
 - Empfehlung: Reconciliation via `remaining_qty → current_machine_qty` (Nayax als Quelle) — braucht User-Freigabe.
 
+#### #87: Bestandsdrift Reconciliation (User-Freigabe erteilt, ausgeführt)
+- FIFO-Distribution: älteste Chargen zuerst aufgebraucht, `remaining_qty` = Nayax-`current_machine_qty` verteilt auf neueste Chargen.
+- 38 Chargen aktualisiert (alle Deltas negativ — DB war überall zu hoch).
+- Verifikation: 0 Produkte mit Abweichung > 1 nach Update.
+- Backup: `C:/tmp/backup_remaining_qty_pre_reconciliation_2026-06-05.txt` (63 Zeilen).
+- **Skittles 7→5** ✓ · **Red Bull** 3 Chargen: 2/0, 15/0, 48/5 · **Haribo** 28→6 (war > initial!)
+- Root-Cause-Fix (Echtzeit-remaining_qty) NICHT Teil dieser Maßnahme → #93 bleibt offen.
+- Issue #87 geschlossen.
+
 ### OFFEN — brauchen User-Entscheidung / Freigabe
 
 | # | Inhalt | Blockiert durch |
 |---|--------|----------------|
-| **#87** | Bestandsdrift: remaining_qty-Reconciliation via Nayax | User-Freigabe für Datenänderung |
-| **#91** | prices-Tabelle befüllen (VK-Preise Sheet → PG) | User-Freigabe; prices hat slot_assignment_id FK (nicht trivial) |
-| **#92** | stock_batches purchase_date/machine_id (Schema ✅ bereits vorhanden) | WF2-n8n-Update + Backfill-Freigabe |
-| **#93** | WF3 Sheet-Write-Nodes deaktivieren | Abhängig von #87-Lösung |
+| **#91** | prices-Tabelle befüllen (VK-Preise Sheet → PG) | User-Freigabe; prices hat `slot_assignment_id` FK (nicht trivial) |
+| **#92** | stock_batches: Schema ✅, WF2-n8n-Update + Backfill | WF2-n8n-Arbeit + Freigabe |
+| **#93** | WF3 Sheet-Write-Nodes deaktivieren | Braucht Echtzeit-remaining_qty (DB-Trigger/WF3-PG-Write); #87 war Einmal-Fix |
 | **#9** | v2-Abschaltung | Strategische Entscheidung |
 | homelab #48 | Rückwirkende Umbuchung betroffener Verkäufe | Komplex, braucht User-Input |
 
