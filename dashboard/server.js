@@ -2903,7 +2903,7 @@ const server = http.createServer(async (req, res) => {
       const machineId = parsed.searchParams.get('machineId');
       const mid = machineId != null && machineId !== '' ? Number(machineId) : null;
       const { Client } = require('pg');
-      const client = new Client({ connectionString: DASHBOARD_V2_PG_URL, connectionTimeoutMillis: 6000 });
+      const client = new Client({ connectionString: dashboardV2PgUrl(), connectionTimeoutMillis: 6000 });
       await client.connect();
       try {
         const thresholds = await getThresholds(client, DEFAULT_MANDANT, mid);
@@ -2952,7 +2952,7 @@ const server = http.createServer(async (req, res) => {
       const machineId = body && body.machineId != null && body.machineId !== '' ? Number(body.machineId) : null;
       const value = body && body.value !== undefined ? body.value : null;
       const { Client } = require('pg');
-      const client = new Client({ connectionString: DASHBOARD_V2_PG_URL, connectionTimeoutMillis: 6000 });
+      const client = new Client({ connectionString: dashboardV2PgUrl(), connectionTimeoutMillis: 6000 });
       await client.connect();
       try {
         await setThreshold(client, DEFAULT_MANDANT, machineId, key, value);
@@ -2981,7 +2981,7 @@ const server = http.createServer(async (req, res) => {
       const machineId = parsed.searchParams.get('machineId');
       const mid = machineId != null && machineId !== '' ? Number(machineId) : null;
       const { Client } = require('pg');
-      const client = new Client({ connectionString: DASHBOARD_V2_PG_URL, connectionTimeoutMillis: 6000 });
+      const client = new Client({ connectionString: dashboardV2PgUrl(), connectionTimeoutMillis: 6000 });
       await client.connect();
       try {
         if (key) {
