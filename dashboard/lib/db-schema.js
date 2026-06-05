@@ -70,6 +70,21 @@ const EXPECTED_RELATIONS = [
   { name: 'mv_inventory_value_daily', kind: 'matview', note: 'Inventarwert (Materialized View)' },
 ];
 
+// Tenant-Pflicht-Liste (#96): operative Tabellen, die eine `tenant_id`-Spalte
+// tragen MÜSSEN (die EINE Regel der Multi-Tenant-SPEC). Der Guard schlägt fehl,
+// sobald eine gelistete Tabelle existiert, aber keine `tenant_id` hat — so kann
+// keine neue operative Tabelle still ohne Mandanten-Dimension hinzukommen.
+// AUSGENOMMEN: `tenants` (tenant_id ist dort der PK selbst) und `platform_admins`
+// (mandantenübergreifender Break-Glass-Schlüssel, bewusst ohne tenant_id).
+const TENANT_REQUIRED_TABLES = [
+  'machines', 'locations', 'machine_profiles', 'slot_assignments',
+  'products', 'product_aliases', 'product_change_proposals',
+  'stock_batches', 'stock_movements', 'sales_transactions', 'guv_daily',
+  'warnings', 'invoices', 'invoice_items', 'suppliers',
+  'nayax_devices', 'workflow_state', 'prices',
+  'settings_thresholds', 'classification_settings', 'warehouses',
+];
+
 // pg_catalog statt information_schema, DAMIT materialized views (relkind 'm')
 // und partitionierte Tabellen mitgezählt werden. $1 = Schema-Name.
 const INTROSPECT_SQL = `
@@ -230,6 +245,16 @@ function findColumnViolations(refs, columnsByRelation) {
     `${a.relation}.${a.column}`.localeCompare(`${b.relation}.${b.column}`));
 }
 
+// Tenant-Pflicht-Tabellen, die in der DB existieren, aber keine tenant_id tragen.
+// Fehlt die Tabelle ganz, wird sie separat als missingRelation gemeldet — hier
+// also nur Tabellen, die da sind, aber die Mandanten-Dimension nicht haben.
+function tablesMissingTenantId(columnsByRelation) {
+  return TENANT_REQUIRED_TABLES.filter((t) => {
+    const cols = columnsByRelation[t];
+    return cols && !cols.includes('tenant_id');
+  }).sort();
+}
+
 function buildSchemaReport(live, sqlRefs) {
   const liveRelations = Object.keys(live.columnsByRelation);
   const missingRelations = diffExpectedRelations(liveRelations);
@@ -240,10 +265,12 @@ function buildSchemaReport(live, sqlRefs) {
     .sort();
 
   const missingColumns = findColumnViolations(sqlRefs, live.columnsByRelation);
+  const missingTenantColumns = tablesMissingTenantId(live.columnsByRelation);
 
   const healthy = missingRelations.length === 0
     && missingReferencedRelations.length === 0
-    && missingColumns.length === 0;
+    && missingColumns.length === 0
+    && missingTenantColumns.length === 0;
 
   return {
     schema: SCHEMA,
@@ -254,6 +281,7 @@ function buildSchemaReport(live, sqlRefs) {
     missingRelations,              // deklariert (EXPECTED_RELATIONS), aber nicht in DB
     missingReferencedRelations,    // im SQL benutzt, aber nicht in DB
     missingColumns,                // im SQL benutzte Spalte fehlt in DB (die "locations.status"-Klasse)
+    missingTenantColumns,          // Tenant-Pflicht-Tabelle ohne tenant_id (#96)
   };
 }
 
@@ -268,6 +296,8 @@ async function runSchemaCheck(client, rootDir) {
 module.exports = {
   SCHEMA,
   EXPECTED_RELATIONS,
+  TENANT_REQUIRED_TABLES,
+  tablesMissingTenantId,
   INTROSPECT_SQL,
   RESERVED_ALIASES,
   introspectRows,

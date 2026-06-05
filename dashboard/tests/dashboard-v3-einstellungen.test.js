@@ -177,9 +177,13 @@ test('AC-W3 LIVE: Admin-POST persistiert, GET spiegelt es (Snapshot/Restore)', a
   const snap = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 3000 });
   try { await snap.connect(); } catch (e) { t.skip(`PG nicht erreichbar (${e.code || e.message}).`); return; }
   // Originalzustand sichern, um die Produktions-Default-Zeile danach zu restaurieren.
+  // Spaltenname über die Übergangsbrücke (#96): tenant_id nach Migration 0009,
+  // mandant_id davor — der Test bleibt gegen beide Schema-Zustände korrekt.
+  const { tenantColumn } = require('../lib/category-config.js');
+  const tcol = await tenantColumn(snap);
   let original;
   try {
-    const r = await snap.query(`SELECT config FROM automatenlager.classification_settings WHERE mandant_id='__default__'`);
+    const r = await snap.query(`SELECT config FROM automatenlager.classification_settings WHERE ${tcol}='__default__'`);
     original = r.rows.length ? r.rows[0].config : {};
   } finally { /* keep snap open for restore */ }
 
@@ -189,9 +193,9 @@ test('AC-W3 LIVE: Admin-POST persistiert, GET spiegelt es (Snapshot/Restore)', a
     dashboard.kill();
     try {
       await snap.query(
-        `INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
+        `INSERT INTO automatenlager.classification_settings (${tcol}, config, updated_at)
          VALUES ('__default__', $1::jsonb, now())
-         ON CONFLICT (mandant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+         ON CONFLICT (${tcol}) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
         [JSON.stringify(original)],
       );
     } finally { await snap.end(); }
