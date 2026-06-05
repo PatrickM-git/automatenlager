@@ -30,7 +30,12 @@ WF-Monitor (`EdgUfv1lMcE25Z3K`, alle 5 Min) war **komplett blind** für Workflow
 ### 5. WF4-Mojibake gefixt (beim Suite-Lauf entdeckt, auf User-Freigabe behoben)
 **WF4 (`6tOZnWsxBNzHaVqA`) hatte Mojibake** in `normalize()`-Regexes UND Node-Namen — `Ã¼` statt `ü` (analog ä/ö/Ä/Ö/Ü/ß), 126 Vorkommen, Live + Repo (seit Migration c5579c0/f7d8a6b). Effekt: normalize mappte Umlaute nicht (`Müller`→`müller` statt `mueller`) — mildere Variante von Issue #15 (dort verschwand der Umlaut ganz). **Fix:** Roundtrip-Umkehrung `raw.encode('cp1252').decode('utf-8')` (Mojibake = UTF-8-Bytes als CP1252 fehlinterpretiert). Strenge Validierung vor Deploy: JSON valide, Node-Anzahl unverändert, 0 `Ã`-Marker, normalize-Test grün (`mueller groesse spass oel`), alle jsCode-Nodes `node --check`. Live deployt + Repo aktualisiert. Skript: `C:\tmp\fix_wf4_mojibake.py`, Backup: `C:\tmp\backup_WF4_pre_mojibake.json`. Suite jetzt **852/852**.
 
-**Folge-Idee (nicht umgesetzt):** Der `wf-encoding-guard.js`-Hook prüft nur U+FFFD, nicht die Mojibake-Variante (`Ã`-Marker). Ein erweiterter Guard + Suite-Test gegen `Ã`+Umlaut-Sequenzen in WF-JSON wäre konsequent — bei Bedarf bauen.
+### 6. Mojibake-Guard gebaut + WF2/5/7/9 mit-saniert
+Der erweiterte Guard deckte sofort auf, dass das Mojibake nicht nur WF4 betraf:
+- **Hook** `wf-encoding-guard.js` erweitert: prüft jetzt zusätzlich zur U+FFFD-Variante den Mojibake-Marker `U+00C3` (Ã). ASCII-Escape `Ã` in der Regex (kein literales Mojibake im Hook selbst). Funktional getestet (Mojibake→exit 2, U+FFFD→exit 2, sauber→exit 0).
+- **Suite-Test** `encoding-umlaut-fix.test.js` erweitert: „Kein WF-Export enthält Mojibake (U+00C3)" via `String.fromCharCode(0xC3)`.
+- **Aufgedeckt + gefixt:** WF2/WF5/WF7/WF9 hatten dasselbe Mojibake (Live+Repo), teils in funktionalem Code (normalize-Regexes!). Alle per cp1252-Roundtrip saniert, Live-Vollscan jetzt 0 betroffen. **WF2 hatte DOPPELTES Mojibake** (zweimal cp1252-fehlinterpretiert, codepoints `Ã ƒ Â`) → 2 Roundtrip-Iterationen nötig (Logik: wiederholen bis Inhalt stabil/0, mit Validierung pro Schritt). normalize-Test bei WF2+WF4 grün (`mueller groesse spass`). Batch-Skript `C:\tmp\fix_mojibake_batch.py`, WF2 `C:\tmp\backup_WF2_pre_mojibake2.json`, Backups je `C:\tmp\backup_WF{2,5,7,9}_pre_mojibake*.json`.
+- Suite **853/853** (config-secret-Test bei Volllast gelegentlich flaky mit ECONNRESET — isoliert grün).
 
 ---
 

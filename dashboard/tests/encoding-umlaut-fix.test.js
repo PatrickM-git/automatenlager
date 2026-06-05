@@ -108,3 +108,23 @@ test('Kein produktiver Workflow-Export enthält U+FFFD (0xEFBFBD)', () => {
     `U+FFFD noch vorhanden in:\n  ${offenders.join('\n  ')}`,
   );
 });
+
+test('Kein produktiver Workflow-Export enthält Mojibake (U+00C3 / Ã)', () => {
+  // Mojibake-Variante (WF4-Vorfall 2026-06-05): UTF-8 als CP1252 fehlinterpretiert,
+  // deutsche Umlaute werden zu 'Ã¤'/'Ã¼'/'ÃŸ'. Gemeinsamer Marker U+00C3, der in
+  // korrektem deutschem/englischem UTF-8 praktisch nie vorkommt.
+  // String.fromCharCode statt Literal, damit dieser Test selbst kein Mojibake trägt.
+  const MOJIBAKE_MARKER = String.fromCharCode(0xc3); // Ã
+  const offenders = [];
+  for (const name of listWorkflowFiles()) {
+    const raw = readRaw(name);
+    const count = raw.split(MOJIBAKE_MARKER).length - 1;
+    if (count > 0) offenders.push(`${name}: ${count}×`);
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `Mojibake (U+00C3) noch vorhanden in:\n  ${offenders.join('\n  ')}\n` +
+      `  Reparatur: raw.encode('cp1252').decode('utf-8'), dann neu speichern.`,
+  );
+});
