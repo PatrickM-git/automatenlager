@@ -1437,7 +1437,7 @@
         '<span class="v3-cockpit-kpi__value">' + totalQty + '</span></div>' +
     '</div>';
 
-    return kpis + renderLagerTable(batches);
+    return kpis + renderLagerTable(batches) + renderBatchSearchSection();
   }
 
   function rerenderLagerTable() {
@@ -1538,6 +1538,96 @@
         errEl.hidden = false;
         confirmBtn.disabled = false;
         confirmBtn.textContent = 'Ausbuchen bestätigen';
+      });
+    });
+  }
+
+  /* ---- Chargensuche (Aussortieren aus Produktliste) ---------------------- */
+
+  var _batchSearchTimer = null;
+
+  function renderBatchSearchSection() {
+    return '<section class="v3-lager-search-section" data-batch-search-section>' +
+      '<h2 class="v3-lager-search-section__title">Chargensuche</h2>' +
+      '<p class="v3-lager-search-section__lead">Produkte suchen und Chargen aussortieren — auch ohne aktiven Slot.</p>' +
+      '<div class="v3-lager-bar__group" style="margin-bottom:12px">' +
+        '<label class="v3-lager-bar__label" for="batch-search-input">Produkt</label>' +
+        '<input type="search" id="batch-search-input" class="v3-writeoff__note" data-batch-search-input' +
+          ' placeholder="Mindestens 2 Zeichen …" style="width:260px" autocomplete="off" />' +
+      '</div>' +
+      '<div data-batch-search-results></div>' +
+    '</section>';
+  }
+
+  function renderBatchSearchResults(batches) {
+    var el = viewEl.querySelector('[data-batch-search-results]');
+    if (!el) { return; }
+    if (!batches || batches.length === 0) {
+      el.innerHTML = '<p style="color:var(--ink-soft);font-size:13px;margin-top:6px">Keine Chargen gefunden.</p>';
+      return;
+    }
+    var STATUS_LABELS = { aktiv: 'aktiv', active: 'aktiv', leer: 'leer', reserve: 'Reserve',
+      wartet_nachkauf: 'wartet Nachkauf' };
+    var rows = batches.map(function (b) {
+      var mhd = b.mhd_date ? b.mhd_date.slice(0, 10) : '—';
+      var statusLabel = STATUS_LABELS[b.status] || b.status;
+      var writeoffBtn = (_lagerCanEdit && b.batch_key)
+        ? '<button type="button" class="v3-lager-row__writeoff" title="Aussortieren" data-writeoff-btn' +
+            ' data-batch-key="' + esc(b.batch_key) + '"' +
+            ' data-product-name="' + esc(b.product_name) + '"' +
+            ' data-remaining="' + Number(b.remaining_qty) + '"' +
+            ' data-batch-count="1">×</button>'
+        : '';
+      return '<tr class="v3-lager-row">' +
+        '<td class="v3-lager-td v3-lager-td--name">' + esc(b.product_name) + '</td>' +
+        '<td class="v3-lager-td">' + esc(statusLabel) + '</td>' +
+        '<td class="v3-lager-td v3-lager-td--qty">' + Number(b.remaining_qty) + ' Stk.</td>' +
+        '<td class="v3-lager-td v3-lager-td--mhd">' + esc(mhd) + '</td>' +
+        '<td class="v3-lager-td v3-lager-td--action">' + writeoffBtn + '</td>' +
+      '</tr>';
+    }).join('');
+    el.innerHTML = '<table class="v3-lager-table" style="margin-top:8px">' +
+      '<thead><tr>' +
+        '<th class="v3-lager-th">Produkt</th>' +
+        '<th class="v3-lager-th">Status</th>' +
+        '<th class="v3-lager-th">Bestand</th>' +
+        '<th class="v3-lager-th">MHD</th>' +
+        '<th class="v3-lager-th"></th>' +
+      '</tr></thead>' +
+      '<tbody>' + rows + '</tbody>' +
+    '</table>';
+    bindBatchSearchWriteOff();
+  }
+
+  function initBatchSearch() {
+    var input = viewEl.querySelector('[data-batch-search-input]');
+    var resultsEl = viewEl.querySelector('[data-batch-search-results]');
+    if (!input || !resultsEl) { return; }
+    input.addEventListener('input', function () {
+      clearTimeout(_batchSearchTimer);
+      var q = input.value.trim();
+      if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+      _batchSearchTimer = setTimeout(function () {
+        fetchJson('/api/v2/inventory/batch-search?q=' + encodeURIComponent(q))
+          .then(function (data) { renderBatchSearchResults((data && data.batches) || []); })
+          .catch(function () {
+            resultsEl.innerHTML = '<p style="color:var(--crit);font-size:13px;margin-top:6px">Fehler beim Laden.</p>';
+          });
+      }, 320);
+    });
+  }
+
+  function bindBatchSearchWriteOff() {
+    var section = viewEl.querySelector('[data-batch-search-section]');
+    if (!section || !_lagerCanEdit) { return; }
+    section.querySelectorAll('[data-writeoff-btn]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        openWriteOffDialog({
+          batch_key:    btn.getAttribute('data-batch-key') || '',
+          product_name: btn.getAttribute('data-product-name') || '',
+          remaining:    Number(btn.getAttribute('data-remaining')) || 0,
+          batch_count:  Number(btn.getAttribute('data-batch-count')) || 1,
+        });
       });
     });
   }
@@ -4214,6 +4304,7 @@
         viewEl.innerHTML = pageHead(route) + renderLagerPage(result.lager);
         bindLagerFilters();
         bindLagerWriteOff();
+        initBatchSearch();
       } else if (route.path === '/guv') {
         viewEl.innerHTML = pageHead(route) + renderGuvPage(result.guv);
         bindGuvControls();

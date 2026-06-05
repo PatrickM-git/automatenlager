@@ -2189,6 +2189,54 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // ── Inventory batch search (Chargensuche nach Produktname) ───────────────
+
+    if (parsed.pathname === '/api/v2/inventory/batch-search' && req.method === 'GET') {
+      const viewer = getViewer(req);
+      if (!viewer.can('betrieb.lesen')) {
+        sendJson(res, 403, { ok: false, error: { code: 'FORBIDDEN', message: 'Kein Zugriff.' } });
+        return;
+      }
+      const q = clean(parsed.query.q || '');
+      if (q.length < 2) {
+        sendJson(res, 200, { ok: true, batches: [] });
+        return;
+      }
+      const pgUrl = dashboardV2PgUrl();
+      if (!pgUrl) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      try {
+        const { Client } = require('pg');
+        const client = new Client({ connectionString: pgUrl });
+        await client.connect();
+        const result = await client.query(
+          `SELECT
+             sb.batch_key,
+             sb.batch_id,
+             sb.remaining_qty,
+             sb.status,
+             sb.mhd_date::text    AS mhd_date,
+             sb.received_at::text AS received_at,
+             p.name               AS product_name,
+             p.product_id
+           FROM automatenlager.stock_batches sb
+           JOIN automatenlager.products p ON p.product_id = sb.product_id
+           WHERE p.name ILIKE $1
+             AND sb.status <> 'ausgesondert'
+           ORDER BY p.name, sb.received_at ASC
+           LIMIT 50`,
+          [`%${q}%`],
+        );
+        await client.end();
+        sendJson(res, 200, { ok: true, batches: result.rows });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
     // ── Onboarding route ──────────────────────────────────────────────────────
 
     if (parsed.pathname === '/api/v2/onboarding' && req.method === 'GET') {

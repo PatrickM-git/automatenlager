@@ -2873,6 +2873,19 @@ a.v3-chip:focus-visible {
 .v3-lager-row__writeoff:hover { color: var(--crit); background: rgba(185,28,28,.08); }
 .v3-badge--ok { background: rgba(21,128,61,.08); color: var(--ok); border-color: rgba(21,128,61,.2); }
 
+/* ---- Chargensuche-Sektion (/lager) ------------------------------------- */
+.v3-lager-search-section {
+  margin-top: 40px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.v3-lager-search-section__title {
+  font-size: 16px; font-weight: 700; color: var(--ink); margin: 0 0 4px;
+}
+.v3-lager-search-section__lead {
+  font-size: 13px; color: var(--ink-soft); margin: 0 0 16px;
+}
+
 /* ---- Live-Umsatz-Kachel (quasi-live, GuV-Seite) ------------------------ */
 .v3-live { padding: 18px 20px; }
 .v3-live__head {
