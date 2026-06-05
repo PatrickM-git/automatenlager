@@ -92,6 +92,17 @@ async function applyMigrationsFrom(client, fromNum = 7) {
   }
 }
 
+// Erwartet, dass ein Query mit einem Constraint-/FK-Fehler abgelehnt wird, OHNE
+// die umgebende Sandbox-Transaktion zu zerstoeren. Ein Fehler abortet in PG die
+// ganze Transaktion (25P02) — ein SAVEPOINT isoliert den erwarteten Fehler, sodass
+// der Test danach weiter asserten kann.
+async function expectReject(client, queryText, re, message) {
+  const assert = require('node:assert/strict');
+  await client.query('SAVEPOINT mt_expect');
+  await assert.rejects(() => client.query(queryText), re, message);
+  await client.query('ROLLBACK TO SAVEPOINT mt_expect');
+}
+
 // BEGIN -> fn -> ROLLBACK. ROLLBACK ist die harte Grenze: nichts wird committet.
 async function withRollback(client, fn) {
   await client.query('BEGIN');
@@ -126,4 +137,5 @@ module.exports = {
   applyMigrationsFrom,
   withRollback,
   inSandbox,
+  expectReject,
 };

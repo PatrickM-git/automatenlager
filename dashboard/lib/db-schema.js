@@ -48,6 +48,7 @@ const EXPECTED_RELATIONS = [
   { name: 'tenants',                  kind: 'table',   note: 'Mandanten-Verzeichnis (#94)' },
   { name: 'tenant_users',             kind: 'table',   note: 'Mandanten-Mitgliedschaften (#94)' },
   { name: 'platform_admins',          kind: 'table',   note: 'Break-Glass-Support (#94), ohne tenant_id' },
+  { name: 'warehouses',               kind: 'table',   note: 'Lager je Mandant (#95)' },
   { name: 'locations',                kind: 'table',   note: 'Standorte (location-profiles)' },
   { name: 'machines',                 kind: 'table',   note: 'Automaten' },
   { name: 'machine_profiles',         kind: 'table',   note: 'Automaten-Metadaten' },
