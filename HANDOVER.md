@@ -2,7 +2,37 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-06-05 Mittag — Session abgeschlossen: WF3-Crash-Fix + WF8 Live-GuV + WF-Val-Restart-Fix
+## Stand: 2026-06-05 Nachmittag — Prävention/Robustheit (4 Maßnahmen) + WF-Monitor-Reparatur
+
+Suite **852 Tests, 851 grün** — der EINE rote Test (`encoding-umlaut-fix.test.js`) ist **pre-existing** (WF4-Mojibake, NICHT in dieser Session verursacht, WF4.json unverändert). Siehe „OFFEN — WF4-Encoding" unten.
+
+Nach dem WF3-Crash-Fix vom Mittag: vier Präventionsmaßnahmen umgesetzt, dabei die **eigentliche Wurzel** des unbemerkten Crashes gefunden.
+
+### 1. Akut: restliche `to_char`-DDTHH-Bugs gefixt
+Derselbe PostgreSQL-Ordinal-Suffix-Bug (`'YYYY-MM-DDTHH24:MI:SS'`) steckte noch in **WF2, WF5, WF7, WF9** (24 Vorkommen). Alle auf `'YYYY-MM-DD"T"HH24:MI:SS'` umgestellt (T als Literal escaped). Live + Repo gefixt. Besonders kritisch: die `WHERE to_char(...) = '{{ $json.created_at }}'`-Vergleiche (Warnungen auflösen in WF5/7/9) matchten nur, weil der Bug auf beiden Seiten identisch war — der globale Replace fixt beide Seiten konsistent. Backups: `C:\tmp\backup_WF{2,5,7,9}_pre_ddthh_fix.json`.
+
+### 2. Früher alarmieren: WF-Monitor repariert + gehärtet — **DIE WURZEL DES VORFALLS**
+WF-Monitor (`EdgUfv1lMcE25Z3K`, alle 5 Min) war **komplett blind** für Workflow-Fehler — deshalb blieb der WF3-Crash 3 h unbemerkt. Drei verkettete Defekte:
+- **(a) Schema-Bruch durch n8n 2.22.5:** Die `Postgres - n8n Execution Check`-Query nutzte `e.data::text` (auth-Erkennung). In 2.22.5 liegt die Spalte nicht mehr in `execution_entity`, sondern in der Tabelle `execution_data`. → ganze Query failte (`column e.data does not exist`), Node fing den Fehler still ab, Report bekam leere Daten → meldete „alles ok". **Fix:** `LEFT JOIN execution_data ed ON ed."executionId" = e.id`, `e.data` → `ed.data`.
+- **(b) Henne-Ei-Blockade:** `Postgres - Existing Today Warnings` liefert an einem sauberen Tag 0 Zeilen → der nachgelagerte `Code - Build Monitoring Report` wurde von n8n übersprungen (0 Input-Items). Der Monitor konnte eine erste Warnung nur erzeugen, wenn schon eine existierte. **Fix:** `alwaysOutputData: true` auf allen 4 Lese-Postgres-Nodes.
+- **(c) WF3 nicht überwacht:** WF3 fehlte in der `critical_workflow_last_runs`-Liste (letzter-Lauf-Check). **Fix:** WF3-ID ergänzt.
+- **Zusätzlich:** Crash-/Ausfall-Alarme (WORKFLOW_ERROR, WORKFLOW_DAILY_FAIL, ERROR_RATE_SPIKE, AUTH_ERROR, CONTAINER_DOWN, PG_UNREACHABLE) deduplizieren jetzt **stündlich** statt täglich (`dedupBucket`/`isoHour`) → ein Dauer-Crash erinnert 1×/h statt 1×/Tag (ging vorher unter). Bestandsthemen weiter täglich.
+- **Feintuning:** auth-Pattern `%401%` (zu breit, matchte jede Zahl mit „401" → falsche AUTH_ERROR-Klassifikation) → `%httpCode":401%`.
+- **Verifiziert:** Nächster Lauf erkennt die WF3-Fehler (`status=alert, shouldSendMail=True`, Build Report läuft, 13 statt 8 Nodes).
+
+### 3. Bug-Klasse verhindern: SQL-Date-Guard
+- **Suite-Test** `dashboard/tests/sql-date-format-guard.test.js`: scannt alle `WF*.json` nach ungeschütztem `DDTHH` in `to_char`. Grün.
+- **Projekt-Hook** `.claude/hooks/wf-sql-date-guard.js` (PostToolUse, registriert in `.claude/settings.json`): blockt das Schreiben von WF-JSON mit ungeschütztem `DDTHH` — analog zu `wf-encoding-guard.js`. Funktional getestet (exit 2 bei Bug, exit 0 bei korrekt).
+
+### 4. Code robuster: `safeDate`-Helper in WF3
+`Code - FIFO berechnen` hat einen `safeDate(value, fallback)`-Helper: kaputte/ungültige Datumswerte (Watermark, Cutover, Verkaufsdatum) fallen jetzt auf einen Fallback zurück statt `RangeError` zu werfen — ein einzelner kaputter Datensatz killt nicht mehr den ganzen Lauf. Syntax via `node --check` validiert, live verifiziert (WF3 läuft success).
+
+### OFFEN — WF4-Encoding (separates, pre-existing Thema)
+Beim Suite-Lauf entdeckt: **WF4 (`6tOZnWsxBNzHaVqA`) hat Mojibake** in den `normalize()`-Regexes — `Ã¼` statt `ü` (`/Ã¼/g` statt `/ü/g`), analog für ä/ö/ß. Betrifft **Live UND Repo** (WF4.json unverändert von dieser Session, git-History: seit Migration c5579c0/f7d8a6b). Effekt: WF4 mappt Umlaute nicht (`Müller`→`müller` statt `mueller`). Mildere Variante von Issue #15 (dort verschwand der Umlaut ganz). Praktischer Impact begrenzt (Matching intern konsistent, solange beide Seiten dieselbe normalize nutzen), aber real bei ue/oe/ae-Aliassen. **Braucht User-Entscheidung:** jetzt fixen (Live+Repo) oder separates Issue. Macht aktuell den `encoding-umlaut-fix.test.js` rot.
+
+---
+
+## Stand: 2026-06-05 Mittag — WF3-Crash-Fix + WF8 Live-GuV + WF-Val-Restart-Fix
 
 Suite **847/847** (keine neuen Tests; Änderungen sind rein n8n-seitig).
 

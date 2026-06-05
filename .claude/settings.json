@@ -25,6 +25,13 @@
             "args": [".claude/hooks/wf-encoding-guard.js"],
             "timeout": 10,
             "statusMessage": "Encoding-Guard prueft…"
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/hooks/wf-sql-date-guard.js"],
+            "timeout": 10,
+            "statusMessage": "SQL-Date-Guard prueft…"
           }
         ]
       }
