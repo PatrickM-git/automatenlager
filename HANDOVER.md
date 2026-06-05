@@ -2,54 +2,90 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-06-05 — Session abgeschlossen: Vollständige Google-Sheets→PostgreSQL-Migration
+## Stand: 2026-06-05 — Session abgeschlossen: WF3 Auto-Restart + Claude-Proposals
 
-Suite **847/847** (keine neuen Tests; Migration ist rein n8n-seitig).
+Suite **847/847** (keine neuen Tests; Änderungen sind rein n8n-seitig).
 
 ---
 
 ### Heute erledigt
 
-#### Vollständige Sheets→PG-Migration aller n8n-Workflows (WF1–WF9 + WF-Val)
+#### WF-Val v3: WF3 Auto-Restart (Fan-out-Architektur)
 
-**Ziel:** Google Sheets vollständig aus dem Datenpfad entfernen — SQL als einzige Source of Truth.
+**WF-Val** (`pdIjiyIfVIIPuJIt`) wurde von v2 auf v3 upgegradet:
 
-**Durchgeführt:**
+**Neue Architektur (Fan-out):**
+```
+Schedule (04:15 UTC)
+  → PG: DB-Konsistenzcheck (5 UNION ALL)
+  → Code: Aggregieren + restart_flag setzen
+    ↓ Fan-out: BEIDE IFs parallel
+  IF: WF3 Neustart nötig?          IF: Probleme gefunden?
+    JA → HTTP: WF3 starten            JA → Gmail: Alert
+    NEIN → NoOp WF3 OK                NEIN → NoOp Alles OK
+```
 
-| WF | Was geändert | Status |
-|----|-------------|--------|
-| WF3 | Lagerchargen-Read + Transaktionen-Dedup + Workflow-State (Read+Write) → PG | aktiv |
-| WF5 | Produkte, Hinweise, Transaktionen, Hinweise-Auflösen → PG; Hinweise-Append disabled | aktiv |
-| WF7 | Produkte, Hinweise, Lagerchargen, Slot-Update, Hinweise-Auflösen → PG; Audit-Append disabled | aktiv |
-| WF8 | Alle 5 Read-Nodes (Transaktionen, Lagerchargen, Produkte, GuV-Konfig, Tagesposten) → PG; Tagesposten-Append disabled | aktiv |
-| WF9 | Hinweise, Produkte, Lagerchargen, Slot-Update, Hinweise-Auflösen → PG; Audit-Append disabled | aktiv |
-| WF4 | Alle 5 Sheets-Write-Nodes disabled (DB-Writes laufen bereits via PGW) | aktiv |
-| WF1 | Produkte, Lagerchargen, Aliase, Prüfung-Dedup, Prüfung-Insert → PG | aktiv |
-| WF2 | Prüfung-Queue (Lesen/Approve/Reject) + Produkte/Aliase/Produkt-Check → PG; Redundante Sheets-Writes disabled | aktiv |
-| WF-Val | Alle Sheets-Nodes disabled; Workflow deaktiviert (nach Migration obsolet) | deaktiviert |
+**Key-Entscheidung:** Code-Node sendet seinen Output an BEIDE IF-Nodes gleichzeitig (n8n-Fan-out über ein Output-Port, zwei Ziel-Nodes). Kein Merge-Node nötig.
 
-**Technische Details:**
-- PG-Credential-ID: `Jept3990Uq8aN3Tr` (Name: "PostgreSQL")
-- Neue DB-Tabelle: `automatenlager.workflow_state` (DDL: `dashboard/db-migrations/0006-workflow-state.sql`) — ersetzt Sheets-Tab "letzter Verkaufsworkflow"
-- Mojibake-Problem gelöst: WF4/WF5/WF7 hatten Latin-1/UTF-8-Doppelencoding in Node-Namen (ä→Ã¤, ö→Ã¶, ü→Ã¼, ß→ÃŸ); WF4 über Type-Iteration gepatcht, WF5/WF7 über Substring-Match
-- WF1 hatte `?`-Zeichen statt Umlaute im Node-Namen → exaktes Literal im Patch verwendet
-- n8n PUT-API: nur `name/nodes/connections/settings.executionOrder` erlaubt (kein `binaryMode`)
-- Tool: `C:\tmp\patch_wfs.py` (Patch-Generator) + `C:\tmp\upload_wfs.py` (Upload)
+**WF3 Restart-Mechanismus:**
+- HTTP Request POST `https://hp-mini-server.tail573a13.ts.net/api/v1/workflows/wbOhFKXQqBpJWB1w/execute`
+- Auth via n8n-Credential "n8n Mini API" (httpHeaderAuth, ID: `sk4oJ1b15NNHkyK3`, X-N8N-API-KEY)
+- Feuer-und-vergiss: kein Re-Check im selben Lauf (WF3 läuft sowieso alle 5 Min)
+- Email zeigt "WF3 haengt — Auto-Neustart ausgeloest" als orangene Sektion
 
-**Betroffene SQL-Endpunkte (neu, direkt in WFs):**
-- `SQL_PRODUKTE` — slot_assignments + products + machines + prices (LATERAL)
-- `SQL_LAGERCHARGEN` — stock_batches + products, status IN ('aktiv','active','reserve')
-- `SQL_ALIASE` — product_aliases + products
-- `SQL_TRANSAKTIONEN_DEDUP` — sales_transactions, 120-Tage-Fenster
-- `SQL_TRANSAKTIONEN_WF5` — sales_transactions mit machine/product/slot join, 90 Tage
-- `SQL_TRANSAKTIONEN_WF8` — sales_transactions mit LATERAL batch_key für EK-Schätzung
-- `SQL_HINWEISE` — warnings + products + machines, 500 aktuellste
-- `SQL_HINWEISE_RESOLVE` — UPDATE warnings SET resolved=TRUE by created_at
-- `SQL_WORKFLOW_STATE_READ/WRITE` — workflow_state UPSERT für WF3 Lauf-Tracking
-- `SQL_GUV_KONFIG` — classification_settings (JSONB, mandant __default__)
-- `SQL_GUV_TAGESPOSTEN` — guv_daily + machines + products, 90 Tage
-- `SQL_SLOT_UPDATE` — UPDATE slot_assignments.current_machine_qty by product_slot_key
-- `SQL_PRUEFUNG_DEDUP/LESEN/APPROVE/REJECT/INSERT` — product_change_proposals
+**SQL-Logik (unverändert ggü. v2):**
+- `wf3_stale`: `updated_at < NOW() - 30 Min` (nicht `last_inventory_review_at`)
+- `alte_warnungen`: `severity != 'info'` (schliesst BACKUP_OK aus)
+
+**Neue Datei:** `C:\tmp\fix_wfval_v3.py`
+**JSON im Repo:** `WF-Val - DB Konsistenz-Check.json` (9 Nodes)
+
+---
+
+#### WF-Claude-Proposals: Stale Proposals automatisch bearbeiten
+
+**Neuer Workflow** (`hU7Aev7G4MaMv2yR`, Name: "WF-Claude-Proposals") — **aktuell DEAKTIVIERT**:
+
+**Flow:**
+```
+Schedule (04:30 UTC täglich)
+  → PG: pending proposals > 14 Tage lesen (max 20)
+  → Code: für Claude formatieren (skip=true wenn leer)
+  → IF: Proposals vorhanden?
+    JA → HTTP: Claude Haiku (claude-haiku-4-5-20251001) bewerten
+         → Code: JSON parsen + Batch-UPDATE-SQL + Email bauen
+         → PG: Status UPDATE (approve/reject per CASE WHEN)
+         → IF: Eskalationen?
+           JA → Gmail: Bericht mit approve/reject/escalate
+           NEIN → NoOp
+    NEIN → NoOp
+```
+
+**Claude-Entscheidungslogik:**
+- `approve`: Produkt existiert im Katalog + aktiv + klarer Grund
+- `reject`: Produkt NICHT im Katalog + >21 Tage alt + unklarer Grund
+- `escalate`: Neue Produkte, große Änderungen, Unsicherheit → Email an User
+
+**Sicherheit:** Nur proposal_keys aus der DB-Antwort werden akzeptiert (Whitelist-Filter im Code-Node). SQL via CASE WHEN mit escaped Keys.
+
+**Claude-Credential:** `HykwFghdDuUDa2lu` (Name: "Claude API Key", httpHeaderAuth) — selbe wie WF1
+
+**Aktivieren (nach Prüfung in n8n UI):**
+```
+POST /api/v1/workflows/hU7Aev7G4MaMv2yR/activate
+```
+
+**Neue Dateien:**
+- `C:\tmp\create_wf_claude_proposals.py`
+- `WF-Claude-Proposals.json` (11 Nodes) — im Repo
+
+---
+
+### Vorherige Session (2026-06-05): Vollständige Google-Sheets→PostgreSQL-Migration
+
+(Archiv: `HANDOVER_ARCHIVE/HANDOVER_2026-06-05.md`)
+
+Alle WF1–WF9 + WF-Val vollständig auf PostgreSQL migriert. WF4/WF7/WF9 Audit-Nodes aktiviert und auf `warnings`-Tabelle umgestellt. WF-Val v2 als DB-Konsistenz-Checker neu gebaut (5 UNION ALL Checks, BACKUP_OK-Fix, updated_at für WF3-Stale-Check).
 
 ---
 
@@ -59,16 +95,26 @@ Suite **847/847** (keine neuen Tests; Migration ist rein n8n-seitig).
 |---|--------|-------------|
 | **#9** | v2-Abschaltung | Strategische Entscheidung (wann/wie) |
 | homelab **#48** | Rückwirkende Umbuchung betroffener Verkäufe | Komplex, braucht User-Input |
-| **WF-Val** | Drift-Check Sheets vs. DB — nach Migration neu schreiben oder archivieren? | Workflow derzeit deaktiviert |
+| **WF-Claude-Proposals** | Workflow prüfen + aktivieren | Erstmal deaktiviert — User soll in n8n UI reviewen |
 
 ---
 
 ### Bekannte Lücken / Folge-Issues
 
-- **WF5 Hinweise-Append deaktiviert:** Warnungs-Schreib-Pfad war bereits via WF-PGW-WF5 in der DB; der Sheets-Append ist jetzt disabled.
-- **WF7/WF9 Audit-Append deaktiviert:** Kein DB-Äquivalent vorhanden; Audit-Schreibpfad für Nachfüllung/Pickliste fehlt noch.
+- **WF-Claude-Proposals deaktiviert:** Muss manuell in n8n UI geprüft und dann aktiviert werden. Zum Testen: "Test workflow" Button in n8n nutzen.
+- **WF3 Restart-URL intern:** Die HTTP-Request-URL `https://hp-mini-server.tail573a13.ts.net/api/v1/...` wird von WF-Val FROM Mini heraus aufgerufen. Falls das Routing nicht funktioniert (Docker→Tailscale), Fallback auf `http://host.docker.internal:5678/api/v1/...`.
 - **WF2 schreibt Preise noch nicht bei Neuanlage** (pgw_write kennt kein `price`-Event). Neue Produkte brauchen manuellen Preis-Insert.
-- **4 Preisschätzungen** (source=`estimated`): Red Bull Summer Edition, Hochwald Eiskaffee, Pick Up, Milka Oreo — nach erstem echten Verkauf korrigieren.
+
+---
+
+### Credentials auf Mini
+
+| Name | ID | Typ | Zweck |
+|------|----|-----|-------|
+| PostgreSQL | `Jept3990Uq8aN3Tr` | postgres | DB-Verbindung |
+| Gmail account | `8zhryCRhHAc2OnKA` | gmailOAuth2 | Alert-Mails |
+| Claude API Key | `HykwFghdDuUDa2lu` | httpHeaderAuth | Claude-API (WF1 + WF-Claude-Proposals) |
+| n8n Mini API | `sk4oJ1b15NNHkyK3` | httpHeaderAuth | WF3-Restart per n8n-API (WF-Val v3) |
 
 ---
 
@@ -86,11 +132,25 @@ DASHBOARD_TRUSTED_SERVE_IP=172.18.0.1
 | `trg_default_purchase_date` | `stock_batches` (BEFORE INSERT) | purchase_date = received_at als Fallback |
 | `trg_apply_stock_movement` | `stock_movements` (AFTER INSERT) | wendet stock_movement auf stock_batches.remaining_qty an |
 
+### n8n-Workflow-IDs (Mini)
+
+| WF | ID | Status |
+|----|----|--------|
+| WF1 Rechnungseingang | `wnGAwHhgfXq2ATM8` | aktiv |
+| WF2 Produktauswahl | `DPVPtNiByNhpFHzj` | aktiv |
+| WF3 Nayax FIFO | `wbOhFKXQqBpJWB1w` | aktiv, alle 5 Min |
+| WF4 MDB-Mapping | `6tOZnWsxBNzHaVqA` | aktiv |
+| WF5 MHD-Monitor | `9NJlEHCH3JJXHKOH` | aktiv |
+| WF7 Nachfüllung | `0oRIiVFr5Q7FF6ow` | aktiv |
+| WF8 GuV-Aggregator | `WJ4VkGSgPbZZniG4` | aktiv |
+| WF9 Pickliste | `nh8Tmg7klwGVjKui` | aktiv |
+| WF-Val DB-Check | `pdIjiyIfVIIPuJIt` | aktiv, 04:15 UTC |
+| WF-Claude-Proposals | `hU7Aev7G4MaMv2yR` | **DEAKTIVIERT** |
+
 ### Deploy-Weg (Referenz)
 SSH: `ssh -i "C:\Users\patri\.ssh\miniserver_key" -o StrictHostKeyChecking=no patri@100.68.148.46`
 Deploy: `wsl -d Ubuntu-24.04 -- bash -c "cd /mnt/c/homelab/projekte/automatenlager && git pull --ff-only && docker restart homelab-dashboard"`
 DB-Zugriff: `wsl -d Ubuntu-24.04 -- docker exec homelab-postgres psql -U homelab -d homelab -c "..."`
-DDL-Migration (0006): `wsl -d Ubuntu-24.04 -- docker exec homelab-postgres psql -U homelab -d homelab -f /repo/dashboard/db-migrations/0006-workflow-state.sql`
 
 ### Mini n8n API
 ```
@@ -101,33 +161,31 @@ Wichtig: MCP-n8n-Tool zeigt NICHT die Mini-Instanz, sondern localhost:5678 (loka
 
 ### Nützliche Diagnose-Queries
 ```sql
--- Vollständige Bestands-Übersicht
-SELECT p.name,
-  SUM(sb.initial_qty)    AS initial,
-  SUM(sb.remaining_qty)  AS db_gesamt,
-  COALESCE(SUM(sa.current_machine_qty),0) AS nayax_automat,
-  SUM(sb.remaining_qty) - COALESCE(SUM(sa.current_machine_qty),0) AS backstock_errechnet
-FROM automatenlager.stock_batches sb
-JOIN automatenlager.products p ON p.product_id=sb.product_id
-LEFT JOIN automatenlager.slot_assignments sa ON sa.product_id=sb.product_id AND sa.active=TRUE
-WHERE sb.status NOT IN ('ausgesondert','leer','ausgebaut')
-GROUP BY p.name ORDER BY p.name;
+-- WF-Val manuell testen
+SELECT check_type, key, message
+FROM (
+  SELECT 'wf3_stale' AS check_type, workflow_key AS key,
+    'WF3 seit ' || ROUND(EXTRACT(EPOCH FROM (NOW()-updated_at))/60,1) || ' Min' AS message
+  FROM automatenlager.workflow_state
+  WHERE workflow_key = 'WF3_NAYAX_FIFO'
+    AND (updated_at IS NULL OR updated_at < NOW() - INTERVAL '30 minutes')
+) x;
 
--- Preise aller aktiven Slots
-SELECT p.name, pr.sale_price_gross, pr.source
-FROM automatenlager.prices pr
-JOIN automatenlager.slot_assignments sa ON sa.slot_assignment_id = pr.slot_assignment_id
-JOIN automatenlager.products p ON p.product_id = sa.product_id
-WHERE sa.active = TRUE AND pr.valid_to IS NULL
-ORDER BY p.name;
+-- Pending Proposals (fuer Claude-Proposals)
+SELECT proposal_key, status, reason, created_at,
+  EXTRACT(DAY FROM NOW()-created_at)::int AS days_pending
+FROM automatenlager.product_change_proposals
+WHERE status = 'pending'
+ORDER BY created_at;
 
--- Workflow-State lesen
+-- Workflow-State
 SELECT * FROM automatenlager.workflow_state;
 ```
 
 ### Lehren dieser Session
-- **Mojibake in n8n-JSON:** WF4/5/7 hatten doppelt-encodierte Umlaute (Latin-1→UTF-8-Fehler); Node-Namen per Type-Iteration oder Substring-Match patchen, nicht per exaktem Unicode-String.
-- **n8n PUT-API erlaubt nur 4 Felder:** `name`, `nodes`, `connections`, `settings.executionOrder` — kein `binaryMode` oder andere `settings`-Keys.
-- **WF-Val deaktiviert:** Nach vollständiger Sheets-Migration ist der Drift-Check obsolet.
+- **n8n Fan-out:** Ein Output-Port kann zu mehreren Nodes verbinden — in `connections` einfach mehrere Einträge im Array: `[[{node:A},{node:B}]]`. Kein Merge-Node nötig.
+- **n8n Credential-API:** POST /credentials braucht `allowedDomains` im `data`-Objekt (auch als leerer String `''`).
+- **n8n POST /workflows body:** `active`-Feld ist read-only und darf nicht im Body sein.
+- **WF3-Restart:** HTTP POST /api/v1/workflows/{id}/execute startet WF3 direkt ohne ExecuteWorkflow-Trigger in WF3 zu benötigen.
 
 ---

@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-05T08:16:01.067Z",
+  "updatedAt": "2026-06-05T08:58:48.250Z",
   "createdAt": "2026-05-25T14:36:35.576Z",
   "id": "pdIjiyIfVIIPuJIt",
   "name": "WF-Val - DB Konsistenz-Check",
@@ -8,7 +8,7 @@
   "isArchived": false,
   "nodes": [
     {
-      "id": "1256D609",
+      "id": "82262E16",
       "name": "Schedule Trigger",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
@@ -28,7 +28,7 @@
       }
     },
     {
-      "id": "83844716",
+      "id": "AED5A4FA",
       "name": "DB - Konsistenzcheck",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
@@ -44,12 +44,12 @@
       },
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT 'keine_preise' AS check_type, sa.product_slot_key AS key, p.name || ' (' || m.machine_key || ')' AS name, 'Aktiver Slot ohne Preis: ' || p.name AS message FROM automatenlager.slot_assignments sa JOIN automatenlager.products p ON p.product_id = sa.product_id JOIN automatenlager.machines m ON m.machine_id = sa.machine_id LEFT JOIN automatenlager.prices pr ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL WHERE sa.active = TRUE AND pr.price_id IS NULL UNION ALL SELECT 'negative_qty', sb.batch_key, p.name, 'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name FROM automatenlager.stock_batches sb JOIN automatenlager.products p ON p.product_id = sb.product_id WHERE sb.remaining_qty < 0 AND sb.status IN ('aktiv','active','reserve') UNION ALL SELECT 'wf3_stale', workflow_key, workflow_key, 'WF3 seit ' || ROUND(EXTRACT(EPOCH FROM (NOW()-updated_at))/60,1) || ' Min nicht gelaufen' FROM automatenlager.workflow_state WHERE workflow_key = 'WF3_NAYAX_FIFO'   AND (updated_at IS NULL OR updated_at < NOW() - INTERVAL '30 minutes') UNION ALL SELECT 'alte_warnungen', warning_type || '_count', warning_type, COUNT(*) || ' ungeloeste Warnungen (Typ: ' || warning_type || ') aelter 7 Tage' FROM automatenlager.warnings WHERE resolved = FALSE AND severity != 'info'   AND created_at < NOW() - INTERVAL '7 days' GROUP BY warning_type HAVING COUNT(*) > 0 UNION ALL SELECT 'pending_proposals', proposal_key, COALESCE(reason,'?'), 'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?') FROM automatenlager.product_change_proposals WHERE status = 'pending' AND created_at < NOW() - INTERVAL '14 days' ORDER BY check_type, key",
+        "query": "SELECT 'keine_preise' AS check_type, sa.product_slot_key AS key, p.name || ' (' || m.machine_key || ')' AS name, 'Aktiver Slot ohne Preis: ' || p.name AS message FROM automatenlager.slot_assignments sa JOIN automatenlager.products p ON p.product_id = sa.product_id JOIN automatenlager.machines m ON m.machine_id = sa.machine_id LEFT JOIN automatenlager.prices pr   ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL WHERE sa.active = TRUE AND pr.price_id IS NULL UNION ALL SELECT 'negative_qty', sb.batch_key, p.name, 'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name FROM automatenlager.stock_batches sb JOIN automatenlager.products p ON p.product_id = sb.product_id WHERE sb.remaining_qty < 0 AND sb.status IN ('aktiv','active','reserve') UNION ALL SELECT 'wf3_stale', workflow_key, workflow_key, 'WF3 seit ' || ROUND(EXTRACT(EPOCH FROM (NOW()-updated_at))/60,1) || ' Min nicht gelaufen' FROM automatenlager.workflow_state WHERE workflow_key = 'WF3_NAYAX_FIFO'   AND (updated_at IS NULL OR updated_at < NOW() - INTERVAL '30 minutes') UNION ALL SELECT 'alte_warnungen', warning_type || '_count', warning_type, COUNT(*) || ' ungeloeste Warnungen (Typ: ' || warning_type || ') aelter 7 Tage' FROM automatenlager.warnings WHERE resolved = FALSE AND severity != 'info'   AND created_at < NOW() - INTERVAL '7 days' GROUP BY warning_type HAVING COUNT(*) > 0 UNION ALL SELECT 'pending_proposals', proposal_key, COALESCE(reason,'?'), 'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?') FROM automatenlager.product_change_proposals WHERE status = 'pending' AND created_at < NOW() - INTERVAL '14 days' ORDER BY check_type, key",
         "options": {}
       }
     },
     {
-      "id": "84016DC0",
+      "id": "B2DA9D4B",
       "name": "Code - Ergebnisse aggregieren",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -58,18 +58,85 @@
         0
       ],
       "parameters": {
-        "jsCode": "const items = $input.all();\nif (!items.length) {\n  return [{ json: {\n    status: 'OK', count: 0,\n    email_subject: null, email_body: null,\n    summary: 'Alle DB-Konsistenzpruefungen bestanden.'\n  }}];\n}\nconst CHECK_LABELS = {\n  keine_preise:     'Aktive Slots ohne Preis',\n  negative_qty:     'Negative Lagermengen',\n  wf3_stale:        'WF3 Verkaufsworkflow haengt',\n  alte_warnungen:   'Alte ungeloeste Warnungen (>7 Tage)',\n  pending_proposals:'Offene Rechnungsvorschlaege (>14 Tage)',\n};\nconst grouped = {};\nfor (const { json: row } of items) {\n  if (!grouped[row.check_type]) grouped[row.check_type] = [];\n  grouped[row.check_type].push(row.message);\n}\nconst lines = Object.entries(grouped).map(([type, msgs]) => {\n  const label = CHECK_LABELS[type] || type;\n  return '<h3 style=\"color:#c0392b\">' + label + ' (' + msgs.length + ')</h3><ul>' +\n    msgs.map(m => '<li>' + m + '</li>').join('') + '</ul>';\n}).join('');\nconst count = items.length;\nconst ts = new Date().toISOString();\nreturn [{ json: {\n  status: 'FEHLER', count, grouped,\n  email_subject: '[DB-Check] ' + count + ' Problem' + (count !== 1 ? 'e' : '') + ' — Automatenlager',\n  email_body: '<h2 style=\"color:#c0392b\">DB-Konsistenzpruefung: ' + count +\n    ' Problem' + (count !== 1 ? 'e' : '') + '</h2>' + lines +\n    '<hr><p style=\"color:#888;font-size:12px\">WF-Val Check: ' + ts + '</p>'\n}}];",
+        "jsCode": "const items = $input.all();\n\nconst CHECK_LABELS = {\n  keine_preise:     'Aktive Slots ohne Preis',\n  negative_qty:     'Negative Lagermengen',\n  wf3_stale:        'WF3 Verkaufsworkflow haengt',\n  alte_warnungen:   'Alte ungeloeste Warnungen (>7 Tage)',\n  pending_proposals:'Offene Rechnungsvorschlaege (>14 Tage)',\n};\n\nconst wf3Items   = items.filter(i => i.json.check_type === 'wf3_stale');\nconst otherItems = items.filter(i => i.json.check_type !== 'wf3_stale');\nconst hasWf3Stale    = wf3Items.length > 0;\nconst hasOtherIssues = otherItems.length > 0;\nconst hasIssues      = hasWf3Stale || hasOtherIssues;\n\nif (!hasIssues) {\n  return [{ json: {\n    status: 'OK', count: 0, has_issues: false,\n    restart_flag: 'NEIN',\n    email_subject: null, email_body: null,\n    summary: 'Alle DB-Konsistenzpruefungen bestanden.'\n  }}];\n}\n\nconst grouped = {};\nfor (const { json: row } of otherItems) {\n  if (!grouped[row.check_type]) grouped[row.check_type] = [];\n  grouped[row.check_type].push(row.message);\n}\n\nconst otherLines = Object.entries(grouped).map(([type, msgs]) => {\n  const label = CHECK_LABELS[type] || type;\n  return '<h3 style=\"color:#c0392b\">' + label + ' (' + msgs.length + ')</h3><ul>' +\n    msgs.map(m => '<li>' + m + '</li>').join('') + '</ul>';\n}).join('');\n\nconst wf3Section = hasWf3Stale\n  ? '<h3 style=\"color:#e67e22\">WF3 Verkaufsworkflow haengt — Auto-Neustart ausgeloest</h3><ul>' +\n    wf3Items.map(i => '<li>' + i.json.message + '</li>').join('') + '</ul>'\n  : '';\n\nconst ts = new Date().toISOString();\nconst totalCount = otherItems.length + (hasWf3Stale ? 1 : 0);\n\nreturn [{ json: {\n  status: 'FEHLER',\n  count: totalCount,\n  has_issues: hasIssues,\n  restart_flag: hasWf3Stale ? 'JA' : 'NEIN',\n  email_subject: '[DB-Check] ' + totalCount + ' Problem' + (totalCount !== 1 ? 'e' : '') + ' — Automatenlager',\n  email_body: '<h2 style=\"color:#c0392b\">DB-Konsistenzpruefung: ' + totalCount + ' Problem' +\n    (totalCount !== 1 ? 'e' : '') + '</h2>' + wf3Section + otherLines +\n    '<hr><p style=\"color:#888;font-size:12px\">WF-Val Check: ' + ts + '</p>'\n}}];",
         "mode": "runOnceForAllItems"
       }
     },
     {
-      "id": "B1F9ADCA",
-      "name": "IF - Probleme gefunden",
+      "id": "E512AE8E",
+      "name": "IF - WF3 Neustart noetig?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
         720,
-        0
+        -200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.restart_flag }}",
+              "rightValue": "JA",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3BA27DB1",
+      "name": "HTTP - WF3 starten",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        980,
+        -320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "sk4oJ1b15NNHkyK3",
+          "name": "n8n Mini API"
+        }
+      },
+      "parameters": {
+        "method": "POST",
+        "url": "https://hp-mini-server.tail573a13.ts.net/api/v1/workflows/wbOhFKXQqBpJWB1w/execute",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "01161202",
+      "name": "NoOp - WF3 laeuft",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        980,
+        -120
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "F8168B3A",
+      "name": "IF - Probleme gefunden?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        200
       ],
       "parameters": {
         "conditions": {
@@ -96,13 +163,13 @@
       }
     },
     {
-      "id": "3D2C60B3",
+      "id": "F39168CB",
       "name": "Gmail - Alert senden",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        960,
-        -120
+        980,
+        80
       ],
       "credentials": {
         "gmailOAuth2": {
@@ -120,16 +187,16 @@
         "message": "={{ $json.email_body }}",
         "options": {}
       },
-      "webhookId": "ec2f70d4-bc84-4336-a874-82d29caf2d49"
+      "webhookId": "9c271be8-33b1-46e0-a9e2-3764fb6ea122"
     },
     {
-      "id": "BD9D75CB",
+      "id": "132F414E",
       "name": "Alles OK",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        960,
-        80
+        980,
+        300
       ],
       "parameters": {}
     }
@@ -161,14 +228,37 @@
       "main": [
         [
           {
-            "node": "IF - Probleme gefunden",
+            "node": "IF - WF3 Neustart noetig?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF - Probleme gefunden?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "IF - Probleme gefunden": {
+    "IF - WF3 Neustart noetig?": {
+      "main": [
+        [
+          {
+            "node": "HTTP - WF3 starten",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NoOp - WF3 laeuft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Probleme gefunden?": {
       "main": [
         [
           {
@@ -201,9 +291,9 @@
   },
   "meta": null,
   "pinData": null,
-  "versionId": "50bc7e33-4501-4134-a417-395ad4ff358f",
-  "activeVersionId": "50bc7e33-4501-4134-a417-395ad4ff358f",
-  "versionCounter": 9,
+  "versionId": "0fa4ad35-fa63-4307-b3a6-8f8eac58d9cf",
+  "activeVersionId": "0fa4ad35-fa63-4307-b3a6-8f8eac58d9cf",
+  "versionCounter": 10,
   "triggerCount": 1,
   "shared": [
     {
@@ -226,13 +316,13 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-06-05T08:16:01.069Z",
-    "createdAt": "2026-06-05T08:16:01.069Z",
-    "versionId": "50bc7e33-4501-4134-a417-395ad4ff358f",
+    "updatedAt": "2026-06-05T08:58:48.251Z",
+    "createdAt": "2026-06-05T08:58:48.251Z",
+    "versionId": "0fa4ad35-fa63-4307-b3a6-8f8eac58d9cf",
     "workflowId": "pdIjiyIfVIIPuJIt",
     "nodes": [
       {
-        "id": "1256D609",
+        "id": "82262E16",
         "name": "Schedule Trigger",
         "type": "n8n-nodes-base.scheduleTrigger",
         "typeVersion": 1.2,
@@ -252,7 +342,7 @@
         }
       },
       {
-        "id": "83844716",
+        "id": "AED5A4FA",
         "name": "DB - Konsistenzcheck",
         "type": "n8n-nodes-base.postgres",
         "typeVersion": 2.5,
@@ -268,12 +358,12 @@
         },
         "parameters": {
           "operation": "executeQuery",
-          "query": "SELECT 'keine_preise' AS check_type, sa.product_slot_key AS key, p.name || ' (' || m.machine_key || ')' AS name, 'Aktiver Slot ohne Preis: ' || p.name AS message FROM automatenlager.slot_assignments sa JOIN automatenlager.products p ON p.product_id = sa.product_id JOIN automatenlager.machines m ON m.machine_id = sa.machine_id LEFT JOIN automatenlager.prices pr ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL WHERE sa.active = TRUE AND pr.price_id IS NULL UNION ALL SELECT 'negative_qty', sb.batch_key, p.name, 'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name FROM automatenlager.stock_batches sb JOIN automatenlager.products p ON p.product_id = sb.product_id WHERE sb.remaining_qty < 0 AND sb.status IN ('aktiv','active','reserve') UNION ALL SELECT 'wf3_stale', workflow_key, workflow_key, 'WF3 seit ' || ROUND(EXTRACT(EPOCH FROM (NOW()-updated_at))/60,1) || ' Min nicht gelaufen' FROM automatenlager.workflow_state WHERE workflow_key = 'WF3_NAYAX_FIFO'   AND (updated_at IS NULL OR updated_at < NOW() - INTERVAL '30 minutes') UNION ALL SELECT 'alte_warnungen', warning_type || '_count', warning_type, COUNT(*) || ' ungeloeste Warnungen (Typ: ' || warning_type || ') aelter 7 Tage' FROM automatenlager.warnings WHERE resolved = FALSE AND severity != 'info'   AND created_at < NOW() - INTERVAL '7 days' GROUP BY warning_type HAVING COUNT(*) > 0 UNION ALL SELECT 'pending_proposals', proposal_key, COALESCE(reason,'?'), 'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?') FROM automatenlager.product_change_proposals WHERE status = 'pending' AND created_at < NOW() - INTERVAL '14 days' ORDER BY check_type, key",
+          "query": "SELECT 'keine_preise' AS check_type, sa.product_slot_key AS key, p.name || ' (' || m.machine_key || ')' AS name, 'Aktiver Slot ohne Preis: ' || p.name AS message FROM automatenlager.slot_assignments sa JOIN automatenlager.products p ON p.product_id = sa.product_id JOIN automatenlager.machines m ON m.machine_id = sa.machine_id LEFT JOIN automatenlager.prices pr   ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL WHERE sa.active = TRUE AND pr.price_id IS NULL UNION ALL SELECT 'negative_qty', sb.batch_key, p.name, 'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name FROM automatenlager.stock_batches sb JOIN automatenlager.products p ON p.product_id = sb.product_id WHERE sb.remaining_qty < 0 AND sb.status IN ('aktiv','active','reserve') UNION ALL SELECT 'wf3_stale', workflow_key, workflow_key, 'WF3 seit ' || ROUND(EXTRACT(EPOCH FROM (NOW()-updated_at))/60,1) || ' Min nicht gelaufen' FROM automatenlager.workflow_state WHERE workflow_key = 'WF3_NAYAX_FIFO'   AND (updated_at IS NULL OR updated_at < NOW() - INTERVAL '30 minutes') UNION ALL SELECT 'alte_warnungen', warning_type || '_count', warning_type, COUNT(*) || ' ungeloeste Warnungen (Typ: ' || warning_type || ') aelter 7 Tage' FROM automatenlager.warnings WHERE resolved = FALSE AND severity != 'info'   AND created_at < NOW() - INTERVAL '7 days' GROUP BY warning_type HAVING COUNT(*) > 0 UNION ALL SELECT 'pending_proposals', proposal_key, COALESCE(reason,'?'), 'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?') FROM automatenlager.product_change_proposals WHERE status = 'pending' AND created_at < NOW() - INTERVAL '14 days' ORDER BY check_type, key",
           "options": {}
         }
       },
       {
-        "id": "84016DC0",
+        "id": "B2DA9D4B",
         "name": "Code - Ergebnisse aggregieren",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -282,18 +372,85 @@
           0
         ],
         "parameters": {
-          "jsCode": "const items = $input.all();\nif (!items.length) {\n  return [{ json: {\n    status: 'OK', count: 0,\n    email_subject: null, email_body: null,\n    summary: 'Alle DB-Konsistenzpruefungen bestanden.'\n  }}];\n}\nconst CHECK_LABELS = {\n  keine_preise:     'Aktive Slots ohne Preis',\n  negative_qty:     'Negative Lagermengen',\n  wf3_stale:        'WF3 Verkaufsworkflow haengt',\n  alte_warnungen:   'Alte ungeloeste Warnungen (>7 Tage)',\n  pending_proposals:'Offene Rechnungsvorschlaege (>14 Tage)',\n};\nconst grouped = {};\nfor (const { json: row } of items) {\n  if (!grouped[row.check_type]) grouped[row.check_type] = [];\n  grouped[row.check_type].push(row.message);\n}\nconst lines = Object.entries(grouped).map(([type, msgs]) => {\n  const label = CHECK_LABELS[type] || type;\n  return '<h3 style=\"color:#c0392b\">' + label + ' (' + msgs.length + ')</h3><ul>' +\n    msgs.map(m => '<li>' + m + '</li>').join('') + '</ul>';\n}).join('');\nconst count = items.length;\nconst ts = new Date().toISOString();\nreturn [{ json: {\n  status: 'FEHLER', count, grouped,\n  email_subject: '[DB-Check] ' + count + ' Problem' + (count !== 1 ? 'e' : '') + ' — Automatenlager',\n  email_body: '<h2 style=\"color:#c0392b\">DB-Konsistenzpruefung: ' + count +\n    ' Problem' + (count !== 1 ? 'e' : '') + '</h2>' + lines +\n    '<hr><p style=\"color:#888;font-size:12px\">WF-Val Check: ' + ts + '</p>'\n}}];",
+          "jsCode": "const items = $input.all();\n\nconst CHECK_LABELS = {\n  keine_preise:     'Aktive Slots ohne Preis',\n  negative_qty:     'Negative Lagermengen',\n  wf3_stale:        'WF3 Verkaufsworkflow haengt',\n  alte_warnungen:   'Alte ungeloeste Warnungen (>7 Tage)',\n  pending_proposals:'Offene Rechnungsvorschlaege (>14 Tage)',\n};\n\nconst wf3Items   = items.filter(i => i.json.check_type === 'wf3_stale');\nconst otherItems = items.filter(i => i.json.check_type !== 'wf3_stale');\nconst hasWf3Stale    = wf3Items.length > 0;\nconst hasOtherIssues = otherItems.length > 0;\nconst hasIssues      = hasWf3Stale || hasOtherIssues;\n\nif (!hasIssues) {\n  return [{ json: {\n    status: 'OK', count: 0, has_issues: false,\n    restart_flag: 'NEIN',\n    email_subject: null, email_body: null,\n    summary: 'Alle DB-Konsistenzpruefungen bestanden.'\n  }}];\n}\n\nconst grouped = {};\nfor (const { json: row } of otherItems) {\n  if (!grouped[row.check_type]) grouped[row.check_type] = [];\n  grouped[row.check_type].push(row.message);\n}\n\nconst otherLines = Object.entries(grouped).map(([type, msgs]) => {\n  const label = CHECK_LABELS[type] || type;\n  return '<h3 style=\"color:#c0392b\">' + label + ' (' + msgs.length + ')</h3><ul>' +\n    msgs.map(m => '<li>' + m + '</li>').join('') + '</ul>';\n}).join('');\n\nconst wf3Section = hasWf3Stale\n  ? '<h3 style=\"color:#e67e22\">WF3 Verkaufsworkflow haengt — Auto-Neustart ausgeloest</h3><ul>' +\n    wf3Items.map(i => '<li>' + i.json.message + '</li>').join('') + '</ul>'\n  : '';\n\nconst ts = new Date().toISOString();\nconst totalCount = otherItems.length + (hasWf3Stale ? 1 : 0);\n\nreturn [{ json: {\n  status: 'FEHLER',\n  count: totalCount,\n  has_issues: hasIssues,\n  restart_flag: hasWf3Stale ? 'JA' : 'NEIN',\n  email_subject: '[DB-Check] ' + totalCount + ' Problem' + (totalCount !== 1 ? 'e' : '') + ' — Automatenlager',\n  email_body: '<h2 style=\"color:#c0392b\">DB-Konsistenzpruefung: ' + totalCount + ' Problem' +\n    (totalCount !== 1 ? 'e' : '') + '</h2>' + wf3Section + otherLines +\n    '<hr><p style=\"color:#888;font-size:12px\">WF-Val Check: ' + ts + '</p>'\n}}];",
           "mode": "runOnceForAllItems"
         }
       },
       {
-        "id": "B1F9ADCA",
-        "name": "IF - Probleme gefunden",
+        "id": "E512AE8E",
+        "name": "IF - WF3 Neustart noetig?",
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.2,
         "position": [
           720,
-          0
+          -200
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "1",
+                "leftValue": "={{ $json.restart_flag }}",
+                "rightValue": "JA",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "3BA27DB1",
+        "name": "HTTP - WF3 starten",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          980,
+          -320
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "sk4oJ1b15NNHkyK3",
+            "name": "n8n Mini API"
+          }
+        },
+        "parameters": {
+          "method": "POST",
+          "url": "https://hp-mini-server.tail573a13.ts.net/api/v1/workflows/wbOhFKXQqBpJWB1w/execute",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "options": {}
+        }
+      },
+      {
+        "id": "01161202",
+        "name": "NoOp - WF3 laeuft",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          980,
+          -120
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "F8168B3A",
+        "name": "IF - Probleme gefunden?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          720,
+          200
         ],
         "parameters": {
           "conditions": {
@@ -320,13 +477,13 @@
         }
       },
       {
-        "id": "3D2C60B3",
+        "id": "F39168CB",
         "name": "Gmail - Alert senden",
         "type": "n8n-nodes-base.gmail",
         "typeVersion": 2.1,
         "position": [
-          960,
-          -120
+          980,
+          80
         ],
         "credentials": {
           "gmailOAuth2": {
@@ -344,16 +501,16 @@
           "message": "={{ $json.email_body }}",
           "options": {}
         },
-        "webhookId": "ec2f70d4-bc84-4336-a874-82d29caf2d49"
+        "webhookId": "9c271be8-33b1-46e0-a9e2-3764fb6ea122"
       },
       {
-        "id": "BD9D75CB",
+        "id": "132F414E",
         "name": "Alles OK",
         "type": "n8n-nodes-base.noOp",
         "typeVersion": 1,
         "position": [
-          960,
-          80
+          980,
+          300
         ],
         "parameters": {}
       }
@@ -385,14 +542,37 @@
         "main": [
           [
             {
-              "node": "IF - Probleme gefunden",
+              "node": "IF - WF3 Neustart noetig?",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "IF - Probleme gefunden?",
               "type": "main",
               "index": 0
             }
           ]
         ]
       },
-      "IF - Probleme gefunden": {
+      "IF - WF3 Neustart noetig?": {
+        "main": [
+          [
+            {
+              "node": "HTTP - WF3 starten",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "NoOp - WF3 laeuft",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF - Probleme gefunden?": {
         "main": [
           [
             {
@@ -417,10 +597,10 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-06-05T08:16:01.131Z",
-        "id": 293,
+        "createdAt": "2026-06-05T08:58:48.322Z",
+        "id": 295,
         "workflowId": "pdIjiyIfVIIPuJIt",
-        "versionId": "50bc7e33-4501-4134-a417-395ad4ff358f",
+        "versionId": "0fa4ad35-fa63-4307-b3a6-8f8eac58d9cf",
         "event": "activated",
         "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }

@@ -1,0 +1,390 @@
+{
+  "updatedAt": "2026-06-05T08:59:00.466Z",
+  "createdAt": "2026-06-05T08:59:00.466Z",
+  "id": "hU7Aev7G4MaMv2yR",
+  "name": "WF-Claude-Proposals",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "232F1704",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 30 4 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AB480E86",
+      "name": "PG - Proposals lesen",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT pcp.proposal_key, pcp.status, pcp.reason, pcp.product_key,       EXTRACT(DAY FROM NOW()-pcp.created_at)::int AS days_pending,       p.name AS product_name, p.active AS product_active, p.category FROM automatenlager.product_change_proposals pcp LEFT JOIN automatenlager.products p ON p.product_key = pcp.product_key WHERE pcp.status = 'pending'   AND pcp.created_at < NOW() - INTERVAL '14 days' ORDER BY pcp.created_at ASC LIMIT 20",
+        "options": {}
+      }
+    },
+    {
+      "id": "E9C9E336",
+      "name": "Code - Proposals formatieren",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nif (!items.length) {\n  return [{ json: { skip: true, count: 0 } }];\n}\n\nconst proposals = items.map(i => i.json);\n\nconst proposalText = proposals.map(p =>\n  'Proposal: ' + p.proposal_key + '\\n' +\n  'Produkt-Key: ' + p.product_key + '\\n' +\n  (p.product_name\n    ? 'Produkt gefunden: ' + p.product_name + ' (aktiv: ' + p.product_active + ', Kategorie: ' + (p.category || '?') + ')'\n    : 'PRODUKT NICHT IM KATALOG') + '\\n' +\n  'Grund: ' + (p.reason || '(kein Grund angegeben)') + '\\n' +\n  'Wartezeit: ' + p.days_pending + ' Tage'\n).join('\\n\\n---\\n\\n');\n\nconst SYSTEM = `Du bist Assistent fuer ein Verkaufsautomaten-Unternehmen.\nBearbeite offene Rechnungsvorschlaege nach diesen Regeln:\n- approve: Produkt existiert im Katalog (product_name vorhanden) UND ist aktiv UND der Grund ist klar\n- reject: Produkt NICHT im Katalog UND Wartezeit > 21 Tage ODER Grund ist voellig unklar\n- escalate: Alle anderen Faelle (neue Produkte, grosse Aenderungen, unsicher)\nAntworte AUSSCHLIESSLICH als gueltiges JSON-Objekt:\n{\"decisions\":[{\"proposal_key\":\"...\",\"action\":\"approve|reject|escalate\",\"reason\":\"...\"}]}`;\n\nreturn [{ json: {\n  skip: false,\n  count: proposals.length,\n  input_keys: proposals.map(p => p.proposal_key),\n  claude_request_body: {\n    model: 'claude-haiku-4-5-20251001',\n    max_tokens: 1024,\n    system: SYSTEM,\n    messages: [{\n      role: 'user',\n      content: proposals.length + ' offene Proposals (aelter als 14 Tage):\\n\\n' + proposalText +\n        '\\n\\nBitte entscheide fuer jeden Proposal.'\n    }]\n  }\n}}];",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "6950E4A8",
+      "name": "IF - Proposals vorhanden?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": "false",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3061473C",
+      "name": "NoOp - Keine Proposals",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        960,
+        120
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "6166A2D8",
+      "name": "Claude - Proposals bewerten",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        -100
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "HykwFghdDuUDa2lu",
+          "name": "Claude API Key"
+        }
+      },
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.claude_request_body }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "DA874FE7",
+      "name": "Code - Entscheidungen verarbeiten",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "const claudeResp  = $input.first().json;\nconst prevData    = $('Code - Proposals formatieren').first().json;\nconst inputKeys   = prevData.input_keys || [];\n\n// Claude-Antwort parsen\nlet decisions = [];\ntry {\n  const raw  = claudeResp.content?.[0]?.text || '{}';\n  const parsed = JSON.parse(raw.match(/\\{[\\s\\S]*\\}/)?.[0] || '{}');\n  decisions = parsed.decisions || [];\n} catch(e) {\n  decisions = [];\n}\n\n// Nur Schluesseln vertrauen die wirklich aus der DB kamen\nconst safeDecisions = decisions.filter(d => inputKeys.includes(d.proposal_key));\n\nconst approvals   = safeDecisions.filter(d => d.action === 'approve');\nconst rejections  = safeDecisions.filter(d => d.action === 'reject');\nconst escalations = safeDecisions.filter(d => d.action === 'escalate');\n\n// Batch-UPDATE SQL bauen\nlet updateSql = '';\nif (approvals.length + rejections.length > 0) {\n  const cases = [\n    ...approvals.map(d =>  \"  WHEN proposal_key = '\" + d.proposal_key.replace(/'/g,\"''\") + \"' THEN 'approved'\"),\n    ...rejections.map(d => \"  WHEN proposal_key = '\" + d.proposal_key.replace(/'/g,\"''\") + \"' THEN 'rejected'\"),\n  ].join('\\n');\n  const keys = [...approvals, ...rejections]\n    .map(d => \"'\" + d.proposal_key.replace(/'/g,\"''\") + \"'\").join(',');\n  updateSql = 'UPDATE automatenlager.product_change_proposals SET status = CASE\\n' + cases +\n    '\\n  ELSE status END WHERE proposal_key IN (' + keys + \") AND status = 'pending'\";\n} else {\n  updateSql = 'SELECT 1';  // Nichts zu tun\n}\n\n// E-Mail nur bei Eskalationen\nconst hasEscalations = escalations.length > 0;\nconst ts = new Date().toISOString();\n\nconst makeList = arr => arr.map(d =>\n  '<li><strong>' + d.proposal_key + '</strong>: ' + (d.reason || '—') + '</li>'\n).join('');\n\nconst emailBody = '<h2>Claude-Proposals Bericht</h2>' +\n  (approvals.length   ? '<h3 style=\"color:green\">Auto-Genehmigt (' + approvals.length + ')</h3><ul>' + makeList(approvals) + '</ul>' : '') +\n  (rejections.length  ? '<h3 style=\"color:#c0392b\">Auto-Abgelehnt (' + rejections.length + ')</h3><ul>' + makeList(rejections) + '</ul>' : '') +\n  (escalations.length ? '<h3 style=\"color:#e67e22\">Eskaliert — manuell pruefen (' + escalations.length + ')</h3><ul>' + makeList(escalations) + '</ul>' : '') +\n  '<hr><p style=\"color:#888;font-size:12px\">Claude-Proposals: ' + ts + '</p>';\n\nreturn [{ json: {\n  update_sql: updateSql,\n  has_escalations: hasEscalations ? 'JA' : 'NEIN',\n  approved_count:  approvals.length,\n  rejected_count:  rejections.length,\n  escalated_count: escalations.length,\n  email_subject: '[Proposals] ' + escalations.length + ' offen — ' + approvals.length + ' ok, ' + rejections.length + ' abgelehnt',\n  email_body: emailBody\n}}];",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "7F8CF201",
+      "name": "PG - Status aktualisieren",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1440,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.update_sql }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "ABECD11D",
+      "name": "IF - Eskalationen vorhanden?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.has_escalations }}",
+              "rightValue": "JA",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "F90B26CC",
+      "name": "Gmail - Eskalations-Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1920,
+        -200
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8zhryCRhHAc2OnKA",
+          "name": "Gmail account"
+        }
+      },
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "patrickzinke@gmx.net",
+        "subject": "={{ $json.email_subject }}",
+        "emailType": "html",
+        "message": "={{ $json.email_body }}",
+        "options": {}
+      },
+      "webhookId": "dc13bdaf-de14-483e-bd55-65ab419552fc"
+    },
+    {
+      "id": "DA56B70B",
+      "name": "Alles verarbeitet",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "PG - Proposals lesen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG - Proposals lesen": {
+      "main": [
+        [
+          {
+            "node": "Code - Proposals formatieren",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Proposals formatieren": {
+      "main": [
+        [
+          {
+            "node": "IF - Proposals vorhanden?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Proposals vorhanden?": {
+      "main": [
+        [
+          {
+            "node": "Claude - Proposals bewerten",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NoOp - Keine Proposals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude - Proposals bewerten": {
+      "main": [
+        [
+          {
+            "node": "Code - Entscheidungen verarbeiten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Entscheidungen verarbeiten": {
+      "main": [
+        [
+          {
+            "node": "PG - Status aktualisieren",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG - Status aktualisieren": {
+      "main": [
+        [
+          {
+            "node": "IF - Eskalationen vorhanden?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Eskalationen vorhanden?": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Eskalations-Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alles verarbeitet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": null,
+  "versionId": "578f178e-fd17-48f2-996f-18915f371043",
+  "activeVersionId": null,
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-06-05T08:59:00.466Z",
+      "createdAt": "2026-06-05T08:59:00.466Z",
+      "role": "workflow:owner",
+      "workflowId": "hU7Aev7G4MaMv2yR",
+      "projectId": "68wR1Q9zBUk0Gxhv",
+      "project": {
+        "updatedAt": "2026-05-19T17:59:53.408Z",
+        "createdAt": "2026-05-19T16:50:04.773Z",
+        "id": "68wR1Q9zBUk0Gxhv",
+        "name": "Patrick Matthes <patrickmatthes2609@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": null
+}
