@@ -42,6 +42,12 @@ const SCHEMA = 'automatenlager';
 // Relationen, auf die das Dashboard zugreift. kind nur zur Doku.
 // relkind in der DB: r=table, v=view, m=materialized view, p=partitioned, f=foreign.
 const EXPECTED_RELATIONS = [
+  // Multi-Tenant-Fundament (Stufe 1, Issues #94/#95). Strukturtabellen ohne
+  // operativen Inhalt; tenants.tenant_id ist PK, platform_admins traegt bewusst
+  // KEINE tenant_id (mandantenuebergreifend).
+  { name: 'tenants',                  kind: 'table',   note: 'Mandanten-Verzeichnis (#94)' },
+  { name: 'tenant_users',             kind: 'table',   note: 'Mandanten-Mitgliedschaften (#94)' },
+  { name: 'platform_admins',          kind: 'table',   note: 'Break-Glass-Support (#94), ohne tenant_id' },
   { name: 'locations',                kind: 'table',   note: 'Standorte (location-profiles)' },
   { name: 'machines',                 kind: 'table',   note: 'Automaten' },
   { name: 'machine_profiles',         kind: 'table',   note: 'Automaten-Metadaten' },
