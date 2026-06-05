@@ -2900,7 +2900,7 @@ const server = http.createServer(async (req, res) => {
 
     if (parsed.pathname === '/api/v2/settings/thresholds' && req.method === 'GET') {
       const viewer = getViewer(req);
-      const machineId = parsed.searchParams.get('machineId');
+      const machineId = parsed.query.machineId;
       const mid = machineId != null && machineId !== '' ? Number(machineId) : null;
       const { Client } = require('pg');
       const client = new Client({ connectionString: dashboardV2PgUrl(), connectionTimeoutMillis: 6000 });
@@ -2978,7 +2978,7 @@ const server = http.createServer(async (req, res) => {
       const key = parsed.pathname.startsWith('/api/v2/settings/thresholds/')
         ? parsed.pathname.slice('/api/v2/settings/thresholds/'.length)
         : null;
-      const machineId = parsed.searchParams.get('machineId');
+      const machineId = parsed.query.machineId;
       const mid = machineId != null && machineId !== '' ? Number(machineId) : null;
       const { Client } = require('pg');
       const client = new Client({ connectionString: dashboardV2PgUrl(), connectionTimeoutMillis: 6000 });
