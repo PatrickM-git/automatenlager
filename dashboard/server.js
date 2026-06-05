@@ -3063,23 +3063,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // ── Diagnostics: Peer-Adresse (F1-Analyse, temporär #78) ─────────────────
-
-    if (parsed.pathname === '/api/v2/_diagnostics/peer' && req.method === 'GET') {
-      const viewer = getViewer(req);
-      if (!viewer.can('system.verwalten')) { sendJson(res, 403, { ok: false, error: { code: 'CAPABILITY_REQUIRED' } }); return; }
-      sendJson(res, 200, {
-        ok: true,
-        remoteAddress: req.socket.remoteAddress,
-        remoteFamily: req.socket.remoteFamily,
-        localAddress: req.socket.localAddress,
-        tailscaleLogin: req.headers['tailscale-user-login'] || null,
-        tailscaleNode: req.headers['tailscale-user-name'] || null,
-        env_cidr: process.env.DASHBOARD_INTERNAL_PEER_CIDR || '',
-      });
-      return;
-    }
-
     // ── GuV-Filter: Auswahlbaum Standorte + Automaten ─────────────────────────
 
     if (parsed.pathname === '/api/v2/economics/scope' && req.method === 'GET') {

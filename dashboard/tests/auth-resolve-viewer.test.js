@@ -136,6 +136,21 @@ test('isTrustedIdentityPath: Defaults + CIDR-Logik', () => {
   assert.equal(isTrustedIdentityPath('127.0.0.1', { DASHBOARD_INTERNAL_PEER_CIDR: '172.20.0.0/16' }), true);
 });
 
+test('#78 TRUSTED_SERVE_IP: Gateway-IP im CIDR bleibt trusted (kein Lockout)', () => {
+  const env = { DASHBOARD_INTERNAL_PEER_CIDR: '172.18.0.0/16', DASHBOARD_TRUSTED_SERVE_IP: '172.18.0.1' };
+  assert.equal(isTrustedIdentityPath('172.18.0.1', env), true, 'Gateway plain IPv4 = trusted');
+  assert.equal(isTrustedIdentityPath('::ffff:172.18.0.1', env), true, 'Gateway IPv6-mapped = trusted');
+  assert.equal(isTrustedIdentityPath('172.18.0.3', env), false, 'interner Peer .3 = untrusted');
+});
+
+test('#78 F1 live-Szenario: Serve-Pfad via Gateway-IP behält Admin-Rolle', () => {
+  const env = { ...adminEnv, DASHBOARD_INTERNAL_PEER_CIDR: '172.18.0.0/16', DASHBOARD_TRUSTED_SERVE_IP: '172.18.0.1' };
+  const v = resolveViewer({ login: ADMIN, remoteAddress: '::ffff:172.18.0.1', env });
+  assert.equal(v.role, 'admin', 'Serve-Pfad über Gateway behält Admin');
+  const vPeer = resolveViewer({ login: ADMIN, remoteAddress: '172.18.0.3', env });
+  assert.equal(vPeer.role, 'guest', 'interner Peer mit gefälschtem Header = Gast');
+});
+
 test('ipInCidr: Basisfälle inkl. ::ffff:-Präfix und Mehrfach-CIDR', () => {
   assert.equal(ipInCidr('172.20.0.5', '172.20.0.0/16'), true);
   assert.equal(ipInCidr('::ffff:172.20.0.5', '172.20.0.0/16'), true);

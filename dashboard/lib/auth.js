@@ -74,12 +74,18 @@ function ipInCidr(ip, cidrList) {
 // vertraut werden? KONSERVATIVER Default: ja (kein Serve-Aussperr-Risiko). Erst
 // wenn `DASHBOARD_INTERNAL_PEER_CIDR` gesetzt ist, gelten Quelladressen aus diesem
 // Bereich als interner Docker-Peer (z. B. WF-Monitor → homelab-dashboard:8787) →
-// Header werden verworfen, der Aufruf gilt als Gast/read-only. Loopback (Serve-/
-// Host-Pfad) wird immer vertraut.
+// Header werden verworfen, der Aufruf gilt als Gast/read-only. Loopback und
+// DASHBOARD_TRUSTED_SERVE_IP (Docker-Bridge-Gateway des Tailscale-Serve-Pfads)
+// werden immer vertraut, auch wenn sie im CIDR liegen.
 function isTrustedIdentityPath(remoteAddress, env = {}) {
   const cidr = clean(env.DASHBOARD_INTERNAL_PEER_CIDR);
   if (!cidr) return true;
   if (isLoopback(remoteAddress)) return true;
+  const serveIp = clean(env.DASHBOARD_TRUSTED_SERVE_IP || '');
+  if (serveIp) {
+    const bare = clean(remoteAddress).replace(/^::ffff:/i, '');
+    if (bare === serveIp || remoteAddress === serveIp) return true;
+  }
   return !ipInCidr(remoteAddress, cidr);
 }
 
