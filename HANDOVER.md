@@ -39,6 +39,10 @@ Der erweiterte Guard deckte sofort auf, dass das Mojibake nicht nur WF4 betraf:
 
 ---
 
+### 8. Zwei Rand-Fixes (alert-digest self-healing + flaky Test)
+- **alert-digest self-healing:** Die tägliche Alert-Mail (`lib/alert-digest.js`) nutzte die reconcile-Logik NICHT → veraltete WF5-Warnungen wären in die Mail gelandet. Jetzt `liveWarningReconcileSql(mhdDays)` in die Warnungs-Query eingebaut (Alias `w`, mhdDays Default 30) — identisch zum Cockpit. Kein Import-Zyklus.
+- **Flaky config-secret-Test:** `req()`-Helper in `dashboard-config-secret.test.js` macht jetzt Retry (5×, backoff) gegen transiente `ECONNRESET` unter paralleler Last. Suite jetzt stabil **854/854** im Volllauf (vorher gelegentlich 1 Fail).
+
 ### 7. Self-Healing-Warnungen: aussortierte Produkte (Red Bull Spring)
 User-Report: „Red Bull Spring wird als leer gemeldet" (aussortiertes Produkt). Befund: Produkt sauber ausgesondert (0 aktive Slots, Charge `ausgesondert`/0 Stück), aber eine `LOW_BATCH`-Warnung von WF5 (02.06.) hing verwaist → einziges vollständig-aussortiertes Produkt mit offener Warnung. **Wurzel:** `liveWarningReconcileSql` in `lib/overview-monitoring.js` hatte für LOW_BATCH `SUM(aktive Chargen) <= 5` — bei 0 aktivem Bestand (aussortiert) ist `0 <= 5` TRUE → Dauer-„leer". **Fix:** LOW_BATCH zusätzlich `EXISTS(aktiver Slot)` verlangt (MHD_NEAR/LOW_STOCK waren schon korrekt self-healing). Live-DB-verifiziert: Red Bull Spring→ausgeblendet, Skittles (aktiv, 5 Stk)→bleibt sichtbar. Akute Warnung in DB aufgelöst (`resolved_by='self-heal-aussortiert-2026-06-05'`). Test `AC-SELFHEAL` in `dashboard-v2-overview-monitoring.test.js` (liveWarningReconcileSql jetzt exportiert). Suite 854/854 (config-secret weiter gelegentlich flaky via ECONNRESET, isoliert grün). Inaktiv-Verwaltungsansicht bewusst NICHT gebaut (separat geplant).
 

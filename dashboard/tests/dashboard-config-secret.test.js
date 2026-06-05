@@ -27,8 +27,20 @@ function start(port, auditPath, envOverrides = {}) {
     child.on('exit', (code) => { if (code) { clearTimeout(to); reject(new Error('exit ' + code)); } });
   });
 }
-function req(port, pathname, { method = 'GET', headers = {} } = {}) {
-  return fetch(`http://127.0.0.1:${port}${pathname}`, { method, headers });
+// Unter paralleler Test-Last bricht eine einzelne Verbindung gelegentlich mit
+// ECONNRESET ab (fetch failed). Solche transienten Netzwerkfehler einige Male
+// wiederholen, damit der Test stabil bleibt (kein Logikfehler, reine Flakiness).
+async function req(port, pathname, { method = 'GET', headers = {} } = {}, attempts = 5) {
+  let lastErr;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await fetch(`http://127.0.0.1:${port}${pathname}`, { method, headers });
+    } catch (err) {
+      lastErr = err;
+      await new Promise((r) => setTimeout(r, 100 * (i + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 test('#30 GET /api/config ohne system.verwalten (Gast) → 403, kein Secret', async (t) => {

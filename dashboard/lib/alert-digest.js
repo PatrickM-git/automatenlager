@@ -18,8 +18,10 @@
 // den Fakten-Tabellen; nur echte operative Probleme stammen aus warnings/audit.
 
 const { availableBatchStatusSqlList } = require('./stock-status.js');
+const { liveWarningReconcileSql } = require('./overview-monitoring.js'); // Self-Healing wie im Cockpit
 
 const DEFAULT_LOW_BATCH_THRESHOLD = 5;
+const DEFAULT_MHD_DAYS = 30;
 
 // Warnungstypen, die ein echtes Daten-/Workflowproblem darstellen (rot in der
 // Mail). Bestands-/MHD-Typen und info-Auto-Korrekturen sind hier bewusst NICHT
@@ -175,6 +177,9 @@ async function queryAlertDigestPg(pgUrl, opts = {}) {
   const lowBatchThreshold = Number.isFinite(Number(opts.lowBatchThreshold))
     ? Number(opts.lowBatchThreshold)
     : DEFAULT_LOW_BATCH_THRESHOLD;
+  const mhdDays = Number.isFinite(Number(opts.mhdDays))
+    ? Number(opts.mhdDays)
+    : DEFAULT_MHD_DAYS;
   const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
   await client.connect();
   try {
@@ -231,11 +236,16 @@ async function queryAlertDigestPg(pgUrl, opts = {}) {
       // Operative Warnungen (offen) der letzten 7 Tage — Filterung/Klassifizierung
       // passiert in buildAlertDigest (isOperationalIssue).
       client.query(
-        `SELECT warning_type, severity, resolved, created_at, warning_key, message
-           FROM automatenlager.warnings
-          WHERE resolved = FALSE
-            AND created_at >= now() - INTERVAL '7 days'
-          ORDER BY created_at DESC
+        // Self-Healing: bestandsbezogene Warnungen (MHD/LOW_STOCK/LOW_BATCH) nur,
+        // wenn die Bedingung im AKTUELLEN PG-Stand noch zutrifft — identisch zum
+        // Cockpit (liveWarningReconcileSql). Sonst landen veraltete WF5-Warnungen
+        // (z. B. aussortierte Produkte) in der täglichen Alert-Mail.
+        `SELECT w.warning_type, w.severity, w.resolved, w.created_at, w.warning_key, w.message
+           FROM automatenlager.warnings w
+          WHERE w.resolved = FALSE
+            AND w.created_at >= now() - INTERVAL '7 days'
+            AND (${liveWarningReconcileSql(mhdDays)})
+          ORDER BY w.created_at DESC
           LIMIT 200`,
       ),
       // Fehlgeschlagene Workflow-Läufe der letzten 24 h (echte Fehler).
