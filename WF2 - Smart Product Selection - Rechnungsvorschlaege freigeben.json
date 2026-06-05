@@ -1201,36 +1201,12 @@
     },
     {
       "parameters": {
-        "authentication": "oAuth2",
-        "resource": "sheet",
-        "operation": "read",
-        "documentId": {
-          "__rl": true,
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-          "mode": "list",
-          "cachedResultName": "nayax_lager_google_sheets_import_aktualisiert_v3_kitkat_2026-05-02",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo/edit?usp=drivesdk"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": 1505466008,
-          "mode": "list",
-          "cachedResultName": "Produkte",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo/edit#gid=1505466008"
-        },
-        "filtersUI": {
-          "values": [
-            {
-              "lookupColumn": "product_key",
-              "lookupValue": "={{ $('Code - Entscheidung auswerten').item.json.product_key }}"
-            }
-          ]
-        },
-        "combineFilters": "AND",
+        "operation": "executeQuery",
+        "query": "SELECT p.product_key AS product_key, p.name AS internal_product_name,\n       COALESCE(na.alias,'') AS nayax_product_name,\n       COALESCE(sa.mdb_code::text,'') AS mdb_code,\n       m.machine_key AS machine_id,\n       CASE WHEN sa.active THEN 'TRUE' ELSE 'FALSE' END AS active,\n       sa.product_slot_key AS product_slot_id,\n       COALESCE(pr.sale_price_gross::text,'') AS sale_price_eur,\n       COALESCE(sa.current_machine_qty::text,'') AS current_machine_qty,\n       COALESCE(sa.machine_capacity::text,'') AS machine_capacity,\n       COALESCE(sa.target_stock::text,'') AS target_stock,\n       p.category AS produktart,\n       COALESCE(p.vat_rate_pct::text,'') AS mwst_satz,\n       COALESCE(sa.notes,'') AS notes\nFROM automatenlager.slot_assignments sa\nJOIN automatenlager.products p ON p.product_id = sa.product_id\nJOIN automatenlager.machines m ON m.machine_id = sa.machine_id\nLEFT JOIN LATERAL (SELECT pa.alias FROM automatenlager.product_aliases pa WHERE pa.product_id=p.product_id AND pa.source='nayax' AND pa.is_primary=TRUE ORDER BY pa.alias LIMIT 1) na ON TRUE\nLEFT JOIN LATERAL (SELECT pc.sale_price_gross FROM automatenlager.prices pc WHERE pc.slot_assignment_id=sa.slot_assignment_id AND pc.valid_to IS NULL ORDER BY pc.valid_from DESC LIMIT 1) pr ON TRUE\nORDER BY m.machine_key, sa.mdb_code, sa.active DESC",
         "options": {}
       },
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [
         3152,
         640
@@ -1238,9 +1214,9 @@
       "id": "bad7ab97-0ec0-40e7-b9cd-a9cbb4a48243",
       "name": "Produkt pr?fen",
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
         }
       },
       "alwaysOutputData": true
