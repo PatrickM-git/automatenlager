@@ -4,7 +4,7 @@
 
 ## Stand: 2026-06-05 Nachmittag — Prävention/Robustheit (4 Maßnahmen) + WF-Monitor-Reparatur
 
-Suite **852 Tests, 851 grün** — der EINE rote Test (`encoding-umlaut-fix.test.js`) ist **pre-existing** (WF4-Mojibake, NICHT in dieser Session verursacht, WF4.json unverändert). Siehe „OFFEN — WF4-Encoding" unten.
+Suite **852/852 grün** (inkl. WF4-Mojibake-Fix, siehe Punkt 5).
 
 Nach dem WF3-Crash-Fix vom Mittag: vier Präventionsmaßnahmen umgesetzt, dabei die **eigentliche Wurzel** des unbemerkten Crashes gefunden.
 
@@ -27,8 +27,10 @@ WF-Monitor (`EdgUfv1lMcE25Z3K`, alle 5 Min) war **komplett blind** für Workflow
 ### 4. Code robuster: `safeDate`-Helper in WF3
 `Code - FIFO berechnen` hat einen `safeDate(value, fallback)`-Helper: kaputte/ungültige Datumswerte (Watermark, Cutover, Verkaufsdatum) fallen jetzt auf einen Fallback zurück statt `RangeError` zu werfen — ein einzelner kaputter Datensatz killt nicht mehr den ganzen Lauf. Syntax via `node --check` validiert, live verifiziert (WF3 läuft success).
 
-### OFFEN — WF4-Encoding (separates, pre-existing Thema)
-Beim Suite-Lauf entdeckt: **WF4 (`6tOZnWsxBNzHaVqA`) hat Mojibake** in den `normalize()`-Regexes — `Ã¼` statt `ü` (`/Ã¼/g` statt `/ü/g`), analog für ä/ö/ß. Betrifft **Live UND Repo** (WF4.json unverändert von dieser Session, git-History: seit Migration c5579c0/f7d8a6b). Effekt: WF4 mappt Umlaute nicht (`Müller`→`müller` statt `mueller`). Mildere Variante von Issue #15 (dort verschwand der Umlaut ganz). Praktischer Impact begrenzt (Matching intern konsistent, solange beide Seiten dieselbe normalize nutzen), aber real bei ue/oe/ae-Aliassen. **Braucht User-Entscheidung:** jetzt fixen (Live+Repo) oder separates Issue. Macht aktuell den `encoding-umlaut-fix.test.js` rot.
+### 5. WF4-Mojibake gefixt (beim Suite-Lauf entdeckt, auf User-Freigabe behoben)
+**WF4 (`6tOZnWsxBNzHaVqA`) hatte Mojibake** in `normalize()`-Regexes UND Node-Namen — `Ã¼` statt `ü` (analog ä/ö/Ä/Ö/Ü/ß), 126 Vorkommen, Live + Repo (seit Migration c5579c0/f7d8a6b). Effekt: normalize mappte Umlaute nicht (`Müller`→`müller` statt `mueller`) — mildere Variante von Issue #15 (dort verschwand der Umlaut ganz). **Fix:** Roundtrip-Umkehrung `raw.encode('cp1252').decode('utf-8')` (Mojibake = UTF-8-Bytes als CP1252 fehlinterpretiert). Strenge Validierung vor Deploy: JSON valide, Node-Anzahl unverändert, 0 `Ã`-Marker, normalize-Test grün (`mueller groesse spass oel`), alle jsCode-Nodes `node --check`. Live deployt + Repo aktualisiert. Skript: `C:\tmp\fix_wf4_mojibake.py`, Backup: `C:\tmp\backup_WF4_pre_mojibake.json`. Suite jetzt **852/852**.
+
+**Folge-Idee (nicht umgesetzt):** Der `wf-encoding-guard.js`-Hook prüft nur U+FFFD, nicht die Mojibake-Variante (`Ã`-Marker). Ein erweiterter Guard + Suite-Test gegen `Ã`+Umlaut-Sequenzen in WF-JSON wäre konsequent — bei Bedarf bauen.
 
 ---
 
