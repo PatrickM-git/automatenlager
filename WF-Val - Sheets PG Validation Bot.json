@@ -1,782 +1,758 @@
 {
-    "updatedAt":  "2026-05-25T14:36:35.576Z",
-    "createdAt":  "2026-05-25T14:36:35.576Z",
-    "id":  "pdIjiyIfVIIPuJIt",
-    "name":  "WF-Val - Sheets PG Validation Bot",
-    "description":  null,
-    "active":  true,
-    "isArchived":  false,
-    "nodes":  [
-                  {
-                      "parameters":  {
-
-                                     },
-                      "id":  "d9b78668-aab1-4f8a-86d2-e18e42e8c20a",
-                      "name":  "Manual Trigger",
-                      "type":  "n8n-nodes-base.manualTrigger",
-                      "typeVersion":  1,
-                      "position":  [
-                                       -900,
-                                       -260
-                                   ]
-                  },
-                  {
-                      "parameters":  {
-                                         "rule":  {
-                                                      "interval":  [
-                                                                       {
-                                                                           "field":  "cronExpression",
-                                                                           "expression":  "0 15 4 * * *"
-                                                                       }
-                                                                   ]
-                                                  }
-                                     },
-                      "id":  "736542e0-7d37-4869-a512-bfcf2526c9e8",
-                      "name":  "Schedule Trigger - daily after 04:00",
-                      "type":  "n8n-nodes-base.scheduleTrigger",
-                      "typeVersion":  1.2,
-                      "position":  [
-                                       -900,
-                                       -80
-                                   ]
-                  },
-                  {
-                      "parameters":  {
-                                         "documentId":  {
-                                                            "__rl":  true,
-                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-                                                            "mode":  "id"
-                                                        },
-                                         "sheetName":  {
-                                                           "__rl":  true,
-                                                           "value":  "Verarbeitete_Transaktionen",
-                                                           "mode":  "name"
-                                                       },
-                                         "options":  {
-
-                                                     }
-                                     },
-                      "id":  "2ed95994-8b37-4575-bd42-4fe68cd4d550",
-                      "name":  "Google Sheets - Verarbeitete_Transaktionen",
-                      "type":  "n8n-nodes-base.googleSheets",
-                      "typeVersion":  4.6,
-                      "position":  [
-                                       -620,
-                                       -360
-                                   ],
-                      "credentials":  {
-                                          "googleSheetsOAuth2Api":  {
-                                                                        "id":  "6GG86fWHw536Rk36",
-                                                                        "name":  "Google Sheets API"
-                                                                    }
-                                      }
-                  },
-                  {
-                      "parameters":  {
-                                         "documentId":  {
-                                                            "__rl":  true,
-                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-                                                            "mode":  "id"
-                                                        },
-                                         "sheetName":  {
-                                                           "__rl":  true,
-                                                           "value":  "GuV_Tagesposten",
-                                                           "mode":  "name"
-                                                       },
-                                         "options":  {
-
-                                                     }
-                                     },
-                      "id":  "918a50a4-8e3c-46ed-899c-db0be20aee70",
-                      "name":  "Google Sheets - GuV_Tagesposten",
-                      "type":  "n8n-nodes-base.googleSheets",
-                      "typeVersion":  4.6,
-                      "position":  [
-                                       -620,
-                                       -180
-                                   ],
-                      "credentials":  {
-                                          "googleSheetsOAuth2Api":  {
-                                                                        "id":  "6GG86fWHw536Rk36",
-                                                                        "name":  "Google Sheets API"
-                                                                    }
-                                      }
-                  },
-                  {
-                      "parameters":  {
-                                         "documentId":  {
-                                                            "__rl":  true,
-                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-                                                            "mode":  "id"
-                                                        },
-                                         "sheetName":  {
-                                                           "__rl":  true,
-                                                           "value":  "Produkte",
-                                                           "mode":  "name"
-                                                       },
-                                         "options":  {
-
-                                                     }
-                                     },
-                      "id":  "cd58fc60-f68b-47e6-86ef-6742d94391f3",
-                      "name":  "Google Sheets - Produkte",
-                      "type":  "n8n-nodes-base.googleSheets",
-                      "typeVersion":  4.6,
-                      "position":  [
-                                       -620,
-                                       0
-                                   ],
-                      "credentials":  {
-                                          "googleSheetsOAuth2Api":  {
-                                                                        "id":  "6GG86fWHw536Rk36",
-                                                                        "name":  "Google Sheets API"
-                                                                    }
-                                      }
-                  },
-                  {
-                      "parameters":  {
-                                         "documentId":  {
-                                                            "__rl":  true,
-                                                            "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-                                                            "mode":  "id"
-                                                        },
-                                         "sheetName":  {
-                                                           "__rl":  true,
-                                                           "value":  "Lagerchargen",
-                                                           "mode":  "name"
-                                                       },
-                                         "options":  {
-
-                                                     }
-                                     },
-                      "id":  "43472a19-e625-4984-81cf-0fc2612481c4",
-                      "name":  "Google Sheets - Lagerchargen",
-                      "type":  "n8n-nodes-base.googleSheets",
-                      "typeVersion":  4.6,
-                      "position":  [
-                                       -620,
-                                       180
-                                   ],
-                      "credentials":  {
-                                          "googleSheetsOAuth2Api":  {
-                                                                        "id":  "6GG86fWHw536Rk36",
-                                                                        "name":  "Google Sheets API"
-                                                                    }
-                                      }
-                  },
-                  {
-                      "parameters":  {
-                                         "operation":  "executeQuery",
-                                         "query":  "WITH tx AS (\n  SELECT COUNT(*)::int AS count, COALESCE(SUM(gross_amount), 0)::numeric(12,2) AS gross_revenue\n  FROM automatenlager.sales_transactions\n  WHERE source \u003c\u003e \u0027historic_backfill\u0027\n), guv AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object(\u0027key\u0027, concat_ws(\u0027|\u0027, posting_date::text, m.machine_key, gd.mdb_code::text, p.product_key), \u0027revenueGross\u0027, gd.revenue_gross)), \u0027[]\u0027::jsonb) AS rows\n  FROM automatenlager.guv_daily gd\n  JOIN automatenlager.machines m ON m.machine_id = gd.machine_id\n  JOIN automatenlager.products p ON p.product_id = gd.product_id\n  WHERE gd.source \u003c\u003e \u0027historic_backfill\u0027\n), slots AS (\n  SELECT COALESCE(jsonb_agg(concat_ws(\u0027|\u0027, m.machine_key, sa.mdb_code::text, p.product_key)), \u0027[]\u0027::jsonb) AS rows\n  FROM automatenlager.slot_assignments sa\n  JOIN automatenlager.machines m ON m.machine_id = sa.machine_id\n  JOIN automatenlager.products p ON p.product_id = sa.product_id\n  WHERE sa.active = TRUE\n), aliases AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object(\u0027alias\u0027, pa.alias, \u0027productKey\u0027, p.product_key)), \u0027[]\u0027::jsonb) AS rows\n  FROM automatenlager.product_aliases pa\n  JOIN automatenlager.products p ON p.product_id = pa.product_id\n), unmapped AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object(\u0027productNameRaw\u0027, product_name_raw, \u0027nayaxTransactionId\u0027, nayax_transaction_id)), \u0027[]\u0027::jsonb) AS rows\n  FROM automatenlager.sales_transactions st\n  WHERE st.product_id IS NULL\n), prices AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object(\u0027productKey\u0027, p.product_key, \u0027priceGross\u0027, pr.sale_price_gross)), \u0027[]\u0027::jsonb) AS rows\n  FROM automatenlager.prices pr\n  JOIN automatenlager.slot_assignments sa ON sa.slot_assignment_id = pr.slot_assignment_id\n  JOIN automatenlager.products p ON p.product_id = sa.product_id\n  WHERE pr.valid_to IS NULL\n), movement_rows AS (\n  SELECT sb.batch_key, COALESCE(SUM(sm.quantity_delta_total), 0) AS movement_total, sb.initial_qty - sb.remaining_qty AS expected_movement_total\n  FROM automatenlager.stock_batches sb\n  LEFT JOIN automatenlager.stock_movements sm ON sm.batch_id = sb.batch_id\n  GROUP BY sb.batch_key, sb.initial_qty, sb.remaining_qty\n), movements AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object(\u0027batchKey\u0027, batch_key, \u0027movementTotal\u0027, movement_total, \u0027expectedMovementTotal\u0027, expected_movement_total)), \u0027[]\u0027::jsonb) AS rows\n  FROM movement_rows\n), backup AS (\n  SELECT MAX(created_at) AS last_backup_ok_at\n  FROM automatenlager.warnings\n  WHERE warning_type = \u0027BACKUP_OK\u0027\n)\nSELECT jsonb_build_object(\n  \u0027transactions\u0027, jsonb_build_object(\u0027count\u0027, tx.count, \u0027grossRevenue\u0027, tx.gross_revenue),\n  \u0027guvDaily\u0027, guv.rows,\n  \u0027activeSlots\u0027, slots.rows,\n  \u0027productAliases\u0027, aliases.rows,\n  \u0027unmappedSales\u0027, unmapped.rows,\n  \u0027prices\u0027, prices.rows,\n  \u0027stockMovements\u0027, movements.rows,\n  \u0027lastBackupOkAt\u0027, backup.last_backup_ok_at\n) AS postgres_snapshot\nFROM tx, guv, slots, aliases, unmapped, prices, movements, backup;"
-                                     },
-                      "id":  "0e8c2424-adb7-44ed-92cb-63aa827b79bb",
-                      "name":  "Postgres - Validation Snapshot",
-                      "type":  "n8n-nodes-base.postgres",
-                      "typeVersion":  2.6,
-                      "position":  [
-                                       -360,
-                                       -80
-                                   ],
-                      "credentials":  {
-                                          "postgres":  {
-                                                           "id":  "Jept3990Uq8aN3Tr",
-                                                           "name":  "PostgreSQL"
-                                                       }
-                                      }
-                  },
-                  {
-                      "parameters":  {
-                                         "jsCode":  "const WARNING_TYPE = \u0027VALIDATION_DRIFT_SHEETS_PG\u0027;\nconst now = new Date();\nconst runDate = now.toISOString().slice(0, 10);\n\nfunction all(name) {\n  try { return $(name).all().map(item =\u003e item.json); } catch (_) { return []; }\n}\nfunction first(name) {\n  const rows = all(name);\n  return rows[0] || {};\n}\nfunction clean(value) { return String(value ?? \u0027\u0027).trim(); }\nfunction num(value) { const n = Number(clean(value).replace(\u0027,\u0027, \u0027.\u0027)); return Number.isFinite(n) ? n : 0; }\nfunction cents(value) { return Math.round(num(value) * 100) / 100; }\nfunction warning(subject, message, details = {}) {\n  return {\n    event_type: \u0027warning\u0027,\n    batch_run_id: `wf-val_${runDate}`,\n    data: {\n      warning_key: `${WARNING_TYPE}|${subject}|${runDate}`,\n      warning_type: WARNING_TYPE,\n      severity: subject === \u0027BACKUP_OK\u0027 ? \u0027critical\u0027 : \u0027warning\u0027,\n      subject_key: subject,\n      source_workflow: \u0027wf-val\u0027,\n      message,\n      details,\n    },\n  };\n}\n\nconst txRows = all(\u0027Google Sheets - Verarbeitete_Transaktionen\u0027);\nconst guvRows = all(\u0027Google Sheets - GuV_Tagesposten\u0027);\nconst productRows = all(\u0027Google Sheets - Produkte\u0027);\nconst batchRows = all(\u0027Google Sheets - Lagerchargen\u0027);\nconst pg = first(\u0027Postgres - Validation Snapshot\u0027).postgres_snapshot || first(\u0027Postgres - Validation Snapshot\u0027) || {};\nconst events = [];\n\nconst sheetTxRevenue = cents(txRows.reduce((sum, row) =\u003e sum + num(row.gross_amount ?? row.Brutto ?? row.Umsatz ?? row.amount), 0));\nconst pgTxRevenue = cents(pg.transactions?.grossRevenue);\nif (txRows.length !== num(pg.transactions?.count) || Math.abs(sheetTxRevenue - pgTxRevenue) \u003e 0.01) {\n  events.push(warning(\u0027TRANSACTIONS\u0027, `Transactions drift: Sheets ${txRows.length}/${sheetTxRevenue.toFixed(2)} vs PG ${num(pg.transactions?.count)}/${pgTxRevenue.toFixed(2)}`));\n}\n\nconst sheetGuvKeys = new Set(guvRows.map(row =\u003e [row.posting_date ?? row.Datum ?? row.date, row.machine_id ?? row.MachineID ?? \u0027457107528\u0027, row.mdb_code ?? row.MDB, row.product_key ?? row.SKU].map(clean).join(\u0027|\u0027)));\nconst pgGuvKeys = new Set((pg.guvDaily || []).map(row =\u003e clean(row.key)));\nconst guvDiff = [...sheetGuvKeys].filter(key =\u003e key \u0026\u0026 !pgGuvKeys.has(key));\nif (guvDiff.length) events.push(warning(\u0027GUV_DAILY\u0027, `GuV daily drift in ${guvDiff.length} key(s)`, { keys: guvDiff.slice(0, 20) }));\n\nconst sheetSlots = new Set(productRows.filter(row =\u003e [\u0027true\u0027, \u0027ja\u0027, \u0027yes\u0027, \u00271\u0027, \u0027active\u0027].includes(clean(row.active ?? row.aktiv).toLowerCase())).map(row =\u003e [row.machine_id ?? \u0027457107528\u0027, row.mdb_code ?? row.MDB, row.product_key ?? row.SKU].map(clean).join(\u0027|\u0027)));\nconst pgSlots = new Set(pg.activeSlots || []);\nconst slotDiff = [...sheetSlots].filter(key =\u003e key \u0026\u0026 !pgSlots.has(key));\nif (slotDiff.length) events.push(warning(\u0027SLOT_ACTIVE\u0027, `Active slot drift in ${slotDiff.length} slot(s)`, { keys: slotDiff.slice(0, 20) }));\n\nconst aliases = new Set((pg.productAliases || []).map(row =\u003e clean(row.alias)));\nconst mappedUnmatched = (pg.unmappedSales || []).filter(row =\u003e aliases.has(clean(row.productNameRaw)));\nif (mappedUnmatched.length) events.push(warning(\u0027PRODUCT_MAPPING\u0027, `Product mapping drift for ${mappedUnmatched.length} PG sale(s)`, { sales: mappedUnmatched.slice(0, 20) }));\n\nconst pgPrices = new Map((pg.prices || []).map(row =\u003e [clean(row.productKey), cents(row.priceGross)]));\nconst priceDiff = productRows.filter(row =\u003e pgPrices.has(clean(row.product_key ?? row.SKU)) \u0026\u0026 Math.abs(cents(row.price_gross ?? row.Preis ?? row.price) - pgPrices.get(clean(row.product_key ?? row.SKU))) \u003e 0.01);\nif (priceDiff.length) events.push(warning(\u0027PRICE_SAMPLE\u0027, `Price sample drift for ${priceDiff.length} product(s)`, { products: priceDiff.slice(0, 20).map(row =\u003e clean(row.product_key ?? row.SKU)) }));\n\nconst batchQtyByKey = new Map(batchRows.map(row =\u003e [clean(row.batch_key ?? row.batch_id ?? row.Charge), num(row.initial_qty ?? row.Anfangsbestand) - num(row.remaining_qty ?? row.Restbestand)]));\nconst stockDiff = (pg.stockMovements || []).filter(row =\u003e batchQtyByKey.has(clean(row.batchKey)) \u0026\u0026 num(row.movementTotal) !== batchQtyByKey.get(clean(row.batchKey)));\nif (stockDiff.length) events.push(warning(\u0027STOCK_MOVEMENT_BALANCE\u0027, `Stock movement balance drift for ${stockDiff.length} batch(es)`, { batches: stockDiff.slice(0, 20).map(row =\u003e row.batchKey) }));\n\nconst backupAt = pg.lastBackupOkAt ? new Date(pg.lastBackupOkAt).getTime() : 0;\nif (!backupAt || (Date.now() - backupAt) / 36e5 \u003e 26) {\n  events.push(warning(\u0027BACKUP_OK\u0027, \u0027BACKUP_OK missing for more than 26 hours\u0027, { lastBackupOkAt: pg.lastBackupOkAt || null }));\n}\n\nconst text = [`WF-Val Validation Report ${runDate}`, \u0027\u0027, `${events.length} Drift-Warnungen`, \u0027\u0027, ...events.map(event =\u003e `${event.data.subject_key}: ${event.data.message}`)].join(\u0027\\n\u0027);\nconst mail = { sendTo: \u0027PatrickZinke@gmx.net\u0027, subject: events.length ? `WF-Val ${runDate}: ${events.length} Drift-Warnungen` : `WF-Val ${runDate}: keine Drift`, text, html: `\u003cpre\u003e${text}\u003c/pre\u003e` };\nreturn [{ json: { warningEvents: events, mail, status: events.length ? \u0027drift\u0027 : \u0027ok\u0027 } }];"
-                                     },
-                      "id":  "14f8b9e2-79d0-40c8-a430-e705898f63c3",
-                      "name":  "Code - Build Validation Report",
-                      "type":  "n8n-nodes-base.code",
-                      "typeVersion":  2,
-                      "position":  [
-                                       -80,
-                                       -80
-                                   ]
-                  },
-                  {
-                      "parameters":  {
-                                         "jsCode":  "const events = $json.warningEvents || [];\nreturn events.map(event =\u003e ({ json: event }));"
-                                     },
-                      "id":  "2e74a115-b114-458c-a32f-42e5ca789db0",
-                      "name":  "Code - Warning Events",
-                      "type":  "n8n-nodes-base.code",
-                      "typeVersion":  2,
-                      "position":  [
-                                       180,
-                                       -180
-                                   ]
-                  },
-                  {
-                      "parameters":  {
-                                         "workflowId":  {
-                                                            "__rl":  true,
-                                                            "value":  "Sajezv8tJll0CLIv",
-                                                            "mode":  "id"
-                                                        },
-                                         "mode":  "each",
-                                         "options":  {
-                                                         "waitForSubWorkflow":  false
-                                                     }
-                                     },
-                      "id":  "89c80c91-b534-41e2-9207-47b620a67a02",
-                      "name":  "WF-PGW - Validation Drift Warnings",
-                      "type":  "n8n-nodes-base.executeWorkflow",
-                      "typeVersion":  1.2,
-                      "position":  [
-                                       440,
-                                       -180
-                                   ]
-                  },
-                  {
-                      "parameters":  {
-                                         "sendTo":  "PatrickZinke@gmx.net",
-                                         "subject":  "={{ $json.mail.subject }}",
-                                         "message":  "={{ $json.mail.html }}",
-                                         "options":  {
-
-                                                     }
-                                     },
-                      "id":  "79212152-2278-47a4-bb4f-6ea6c0cedc85",
-                      "name":  "Gmail - Send Validation Report",
-                      "type":  "n8n-nodes-base.gmail",
-                      "typeVersion":  2.1,
-                      "position":  [
-                                       180,
-                                       60
-                                   ],
-                      "webhookId":  "9c57ff80-3bc9-497c-b055-465820132e41",
-                      "credentials":  {
-                                          "gmailOAuth2":  {
-                                                              "id":  "8zhryCRhHAc2OnKA",
-                                                              "name":  "Gmail account"
-                                                          }
-                                      }
-                  }
-              ],
-    "connections":  {
-                        "Manual Trigger":  {
-                                               "main":  [
-                                                            [
-                                                                {
-                                                                    "node":  "Google Sheets - Verarbeitete_Transaktionen",
-                                                                    "type":  "main",
-                                                                    "index":  0
-                                                                }
-                                                            ]
-                                                        ]
-                                           },
-                        "Schedule Trigger - daily after 04:00":  {
-                                                                     "main":  [
-                                                                                  [
-                                                                                      {
-                                                                                          "node":  "Google Sheets - Verarbeitete_Transaktionen",
-                                                                                          "type":  "main",
-                                                                                          "index":  0
-                                                                                      }
-                                                                                  ]
-                                                                              ]
-                                                                 },
-                        "Google Sheets - Verarbeitete_Transaktionen":  {
-                                                                           "main":  [
-                                                                                        [
-                                                                                            {
-                                                                                                "node":  "Google Sheets - GuV_Tagesposten",
-                                                                                                "type":  "main",
-                                                                                                "index":  0
-                                                                                            }
-                                                                                        ]
-                                                                                    ]
-                                                                       },
-                        "Google Sheets - GuV_Tagesposten":  {
-                                                                "main":  [
-                                                                             [
-                                                                                 {
-                                                                                     "node":  "Google Sheets - Produkte",
-                                                                                     "type":  "main",
-                                                                                     "index":  0
-                                                                                 }
-                                                                             ]
-                                                                         ]
-                                                            },
-                        "Google Sheets - Produkte":  {
-                                                         "main":  [
-                                                                      [
-                                                                          {
-                                                                              "node":  "Google Sheets - Lagerchargen",
-                                                                              "type":  "main",
-                                                                              "index":  0
-                                                                          }
-                                                                      ]
-                                                                  ]
-                                                     },
-                        "Google Sheets - Lagerchargen":  {
-                                                             "main":  [
-                                                                          [
-                                                                              {
-                                                                                  "node":  "Postgres - Validation Snapshot",
-                                                                                  "type":  "main",
-                                                                                  "index":  0
-                                                                              }
-                                                                          ]
-                                                                      ]
-                                                         },
-                        "Postgres - Validation Snapshot":  {
-                                                               "main":  [
-                                                                            [
-                                                                                {
-                                                                                    "node":  "Code - Build Validation Report",
-                                                                                    "type":  "main",
-                                                                                    "index":  0
-                                                                                }
-                                                                            ]
-                                                                        ]
-                                                           },
-                        "Code - Build Validation Report":  {
-                                                               "main":  [
-                                                                            [
-                                                                                {
-                                                                                    "node":  "Code - Warning Events",
-                                                                                    "type":  "main",
-                                                                                    "index":  0
-                                                                                },
-                                                                                {
-                                                                                    "node":  "Gmail - Send Validation Report",
-                                                                                    "type":  "main",
-                                                                                    "index":  0
-                                                                                }
-                                                                            ]
-                                                                        ]
-                                                           },
-                        "Code - Warning Events":  {
-                                                      "main":  [
-                                                                   [
-                                                                       {
-                                                                           "node":  "WF-PGW - Validation Drift Warnings",
-                                                                           "type":  "main",
-                                                                           "index":  0
-                                                                       }
-                                                                   ]
-                                                               ]
-                                                  }
-                    },
-    "settings":  {
-                     "executionOrder":  "v1",
-                     "timezone":  "Europe/Berlin"
-                 },
-    "staticData":  {
-                       "node:Schedule Trigger - daily after 04:00":  {
-                                                                         "recurrenceRules":  [
-
-                                                                                             ]
-                                                                     }
-                   },
-    "meta":  null,
-    "pinData":  null,
-    "versionId":  "1e894d63-cfc1-4cdb-b1b3-317892d4bc9f",
-    "activeVersionId":  "1e894d63-cfc1-4cdb-b1b3-317892d4bc9f",
-    "versionCounter":  5,
-    "triggerCount":  1,
-    "shared":  [
-                   {
-                       "updatedAt":  "2026-05-25T14:36:35.576Z",
-                       "createdAt":  "2026-05-25T14:36:35.576Z",
-                       "role":  "workflow:owner",
-                       "workflowId":  "pdIjiyIfVIIPuJIt",
-                       "projectId":  "68wR1Q9zBUk0Gxhv",
-                       "project":  {
-                                       "updatedAt":  "2026-05-19T17:59:53.408Z",
-                                       "createdAt":  "2026-05-19T16:50:04.773Z",
-                                       "id":  "68wR1Q9zBUk0Gxhv",
-                                       "name":  "Patrick Matthes \u003cpatrickmatthes2609@gmail.com\u003e",
-                                       "type":  "personal",
-                                       "icon":  null,
-                                       "description":  null,
-                                       "creatorId":  "dd26b63a-7133-4afa-995a-0d7d72693aee"
-                                   }
-                   }
-               ],
-    "tags":  [
-
-             ],
-    "activeVersion":  {
-                          "updatedAt":  "2026-05-25T14:36:35.576Z",
-                          "createdAt":  "2026-05-25T14:36:35.576Z",
-                          "versionId":  "1e894d63-cfc1-4cdb-b1b3-317892d4bc9f",
-                          "workflowId":  "pdIjiyIfVIIPuJIt",
-                          "nodes":  [
-                                        {
-                                            "parameters":  {
-
-                                                           },
-                                            "id":  "d9b78668-aab1-4f8a-86d2-e18e42e8c20a",
-                                            "name":  "Manual Trigger",
-                                            "type":  "n8n-nodes-base.manualTrigger",
-                                            "typeVersion":  1,
-                                            "position":  [
-                                                             -900,
-                                                             -260
-                                                         ]
-                                        },
-                                        {
-                                            "parameters":  {
-                                                               "rule":  {
-                                                                            "interval":  [
-                                                                                             {
-                                                                                                 "field":  "cronExpression",
-                                                                                                 "expression":  "0 15 4 * * *"
-                                                                                             }
-                                                                                         ]
-                                                                        }
-                                                           },
-                                            "id":  "736542e0-7d37-4869-a512-bfcf2526c9e8",
-                                            "name":  "Schedule Trigger - daily after 04:00",
-                                            "type":  "n8n-nodes-base.scheduleTrigger",
-                                            "typeVersion":  1.2,
-                                            "position":  [
-                                                             -900,
-                                                             -80
-                                                         ]
-                                        },
-                                        {
-                                            "parameters":  {
-                                                               "documentId":  {
-                                                                                  "__rl":  true,
-                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-                                                                                  "mode":  "id"
-                                                                              },
-                                                               "sheetName":  {
-                                                                                 "__rl":  true,
-                                                                                 "value":  "Verarbeitete_Transaktionen",
-                                                                                 "mode":  "name"
-                                                                             },
-                                                               "options":  {
-
-                                                                           }
-                                                           },
-                                            "id":  "2ed95994-8b37-4575-bd42-4fe68cd4d550",
-                                            "name":  "Google Sheets - Verarbeitete_Transaktionen",
-                                            "type":  "n8n-nodes-base.googleSheets",
-                                            "typeVersion":  4.6,
-                                            "position":  [
-                                                             -620,
-                                                             -360
-                                                         ],
-                                            "credentials":  {
-                                                                "googleSheetsOAuth2Api":  {
-                                                                                              "id":  "6GG86fWHw536Rk36",
-                                                                                              "name":  "Google Sheets API"
-                                                                                          }
-                                                            }
-                                        },
-                                        {
-                                            "parameters":  {
-                                                               "documentId":  {
-                                                                                  "__rl":  true,
-                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-                                                                                  "mode":  "id"
-                                                                              },
-                                                               "sheetName":  {
-                                                                                 "__rl":  true,
-                                                                                 "value":  "GuV_Tagesposten",
-                                                                                 "mode":  "name"
-                                                                             },
-                                                               "options":  {
-
-                                                                           }
-                                                           },
-                                            "id":  "918a50a4-8e3c-46ed-899c-db0be20aee70",
-                                            "name":  "Google Sheets - GuV_Tagesposten",
-                                            "type":  "n8n-nodes-base.googleSheets",
-                                            "typeVersion":  4.6,
-                                            "position":  [
-                                                             -620,
-                                                             -180
-                                                         ],
-                                            "credentials":  {
-                                                                "googleSheetsOAuth2Api":  {
-                                                                                              "id":  "6GG86fWHw536Rk36",
-                                                                                              "name":  "Google Sheets API"
-                                                                                          }
-                                                            }
-                                        },
-                                        {
-                                            "parameters":  {
-                                                               "documentId":  {
-                                                                                  "__rl":  true,
-                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-                                                                                  "mode":  "id"
-                                                                              },
-                                                               "sheetName":  {
-                                                                                 "__rl":  true,
-                                                                                 "value":  "Produkte",
-                                                                                 "mode":  "name"
-                                                                             },
-                                                               "options":  {
-
-                                                                           }
-                                                           },
-                                            "id":  "cd58fc60-f68b-47e6-86ef-6742d94391f3",
-                                            "name":  "Google Sheets - Produkte",
-                                            "type":  "n8n-nodes-base.googleSheets",
-                                            "typeVersion":  4.6,
-                                            "position":  [
-                                                             -620,
-                                                             0
-                                                         ],
-                                            "credentials":  {
-                                                                "googleSheetsOAuth2Api":  {
-                                                                                              "id":  "6GG86fWHw536Rk36",
-                                                                                              "name":  "Google Sheets API"
-                                                                                          }
-                                                            }
-                                        },
-                                        {
-                                            "parameters":  {
-                                                               "documentId":  {
-                                                                                  "__rl":  true,
-                                                                                  "value":  "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-                                                                                  "mode":  "id"
-                                                                              },
-                                                               "sheetName":  {
-                                                                                 "__rl":  true,
-                                                                                 "value":  "Lagerchargen",
-                                                                                 "mode":  "name"
-                                                                             },
-                                                               "options":  {
-
-                                                                           }
-                                                           },
-                                            "id":  "43472a19-e625-4984-81cf-0fc2612481c4",
-                                            "name":  "Google Sheets - Lagerchargen",
-                                            "type":  "n8n-nodes-base.googleSheets",
-                                            "typeVersion":  4.6,
-                                            "position":  [
-                                                             -620,
-                                                             180
-                                                         ],
-                                            "credentials":  {
-                                                                "googleSheetsOAuth2Api":  {
-                                                                                              "id":  "6GG86fWHw536Rk36",
-                                                                                              "name":  "Google Sheets API"
-                                                                                          }
-                                                            }
-                                        },
-                                        {
-                                            "parameters":  {
-                                                               "operation":  "executeQuery",
-                                                               "query":  "WITH tx AS (\n  SELECT COUNT(*)::int AS count, COALESCE(SUM(gross_amount), 0)::numeric(12,2) AS gross_revenue\n  FROM automatenlager.sales_transactions\n  WHERE source \u003c\u003e \u0027historic_backfill\u0027\n), guv AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object(\u0027key\u0027, concat_ws(\u0027|\u0027, posting_date::text, m.machine_key, gd.mdb_code::text, p.product_key), \u0027revenueGross\u0027, gd.revenue_gross)), \u0027[]\u0027::jsonb) AS rows\n  FROM automatenlager.guv_daily gd\n  JOIN automatenlager.machines m ON m.machine_id = gd.machine_id\n  JOIN automatenlager.products p ON p.product_id = gd.product_id\n  WHERE gd.source \u003c\u003e \u0027historic_backfill\u0027\n), slots AS (\n  SELECT COALESCE(jsonb_agg(concat_ws(\u0027|\u0027, m.machine_key, sa.mdb_code::text, p.product_key)), \u0027[]\u0027::jsonb) AS rows\n  FROM automatenlager.slot_assignments sa\n  JOIN automatenlager.machines m ON m.machine_id = sa.machine_id\n  JOIN automatenlager.products p ON p.product_id = sa.product_id\n  WHERE sa.active = TRUE\n), aliases AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object(\u0027alias\u0027, pa.alias, \u0027productKey\u0027, p.product_key)), \u0027[]\u0027::jsonb) AS rows\n  FROM automatenlager.product_aliases pa\n  JOIN automatenlager.products p ON p.product_id = pa.product_id\n), unmapped AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object(\u0027productNameRaw\u0027, product_name_raw, \u0027nayaxTransactionId\u0027, nayax_transaction_id)), \u0027[]\u0027::jsonb) AS rows\n  FROM automatenlager.sales_transactions st\n  WHERE st.product_id IS NULL\n), prices AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object(\u0027productKey\u0027, p.product_key, \u0027priceGross\u0027, pr.sale_price_gross)), \u0027[]\u0027::jsonb) AS rows\n  FROM automatenlager.prices pr\n  JOIN automatenlager.slot_assignments sa ON sa.slot_assignment_id = pr.slot_assignment_id\n  JOIN automatenlager.products p ON p.product_id = sa.product_id\n  WHERE pr.valid_to IS NULL\n), movement_rows AS (\n  SELECT sb.batch_key, COALESCE(SUM(sm.quantity_delta_total), 0) AS movement_total, sb.initial_qty - sb.remaining_qty AS expected_movement_total\n  FROM automatenlager.stock_batches sb\n  LEFT JOIN automatenlager.stock_movements sm ON sm.batch_id = sb.batch_id\n  GROUP BY sb.batch_key, sb.initial_qty, sb.remaining_qty\n), movements AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object(\u0027batchKey\u0027, batch_key, \u0027movementTotal\u0027, movement_total, \u0027expectedMovementTotal\u0027, expected_movement_total)), \u0027[]\u0027::jsonb) AS rows\n  FROM movement_rows\n), backup AS (\n  SELECT MAX(created_at) AS last_backup_ok_at\n  FROM automatenlager.warnings\n  WHERE warning_type = \u0027BACKUP_OK\u0027\n)\nSELECT jsonb_build_object(\n  \u0027transactions\u0027, jsonb_build_object(\u0027count\u0027, tx.count, \u0027grossRevenue\u0027, tx.gross_revenue),\n  \u0027guvDaily\u0027, guv.rows,\n  \u0027activeSlots\u0027, slots.rows,\n  \u0027productAliases\u0027, aliases.rows,\n  \u0027unmappedSales\u0027, unmapped.rows,\n  \u0027prices\u0027, prices.rows,\n  \u0027stockMovements\u0027, movements.rows,\n  \u0027lastBackupOkAt\u0027, backup.last_backup_ok_at\n) AS postgres_snapshot\nFROM tx, guv, slots, aliases, unmapped, prices, movements, backup;"
-                                                           },
-                                            "id":  "0e8c2424-adb7-44ed-92cb-63aa827b79bb",
-                                            "name":  "Postgres - Validation Snapshot",
-                                            "type":  "n8n-nodes-base.postgres",
-                                            "typeVersion":  2.6,
-                                            "position":  [
-                                                             -360,
-                                                             -80
-                                                         ],
-                                            "credentials":  {
-                                                                "postgres":  {
-                                                                                 "id":  "Jept3990Uq8aN3Tr",
-                                                                                 "name":  "PostgreSQL"
-                                                                             }
-                                                            }
-                                        },
-                                        {
-                                            "parameters":  {
-                                                               "jsCode":  "const WARNING_TYPE = \u0027VALIDATION_DRIFT_SHEETS_PG\u0027;\nconst now = new Date();\nconst runDate = now.toISOString().slice(0, 10);\n\nfunction all(name) {\n  try { return $(name).all().map(item =\u003e item.json); } catch (_) { return []; }\n}\nfunction first(name) {\n  const rows = all(name);\n  return rows[0] || {};\n}\nfunction clean(value) { return String(value ?? \u0027\u0027).trim(); }\nfunction num(value) { const n = Number(clean(value).replace(\u0027,\u0027, \u0027.\u0027)); return Number.isFinite(n) ? n : 0; }\nfunction cents(value) { return Math.round(num(value) * 100) / 100; }\nfunction warning(subject, message, details = {}) {\n  return {\n    event_type: \u0027warning\u0027,\n    batch_run_id: `wf-val_${runDate}`,\n    data: {\n      warning_key: `${WARNING_TYPE}|${subject}|${runDate}`,\n      warning_type: WARNING_TYPE,\n      severity: subject === \u0027BACKUP_OK\u0027 ? \u0027critical\u0027 : \u0027warning\u0027,\n      subject_key: subject,\n      source_workflow: \u0027wf-val\u0027,\n      message,\n      details,\n    },\n  };\n}\n\nconst txRows = all(\u0027Google Sheets - Verarbeitete_Transaktionen\u0027);\nconst guvRows = all(\u0027Google Sheets - GuV_Tagesposten\u0027);\nconst productRows = all(\u0027Google Sheets - Produkte\u0027);\nconst batchRows = all(\u0027Google Sheets - Lagerchargen\u0027);\nconst pg = first(\u0027Postgres - Validation Snapshot\u0027).postgres_snapshot || first(\u0027Postgres - Validation Snapshot\u0027) || {};\nconst events = [];\n\nconst sheetTxRevenue = cents(txRows.reduce((sum, row) =\u003e sum + num(row.gross_amount ?? row.Brutto ?? row.Umsatz ?? row.amount), 0));\nconst pgTxRevenue = cents(pg.transactions?.grossRevenue);\nif (txRows.length !== num(pg.transactions?.count) || Math.abs(sheetTxRevenue - pgTxRevenue) \u003e 0.01) {\n  events.push(warning(\u0027TRANSACTIONS\u0027, `Transactions drift: Sheets ${txRows.length}/${sheetTxRevenue.toFixed(2)} vs PG ${num(pg.transactions?.count)}/${pgTxRevenue.toFixed(2)}`));\n}\n\nconst sheetGuvKeys = new Set(guvRows.map(row =\u003e [row.posting_date ?? row.Datum ?? row.date, row.machine_id ?? row.MachineID ?? \u0027457107528\u0027, row.mdb_code ?? row.MDB, row.product_key ?? row.SKU].map(clean).join(\u0027|\u0027)));\nconst pgGuvKeys = new Set((pg.guvDaily || []).map(row =\u003e clean(row.key)));\nconst guvDiff = [...sheetGuvKeys].filter(key =\u003e key \u0026\u0026 !pgGuvKeys.has(key));\nif (guvDiff.length) events.push(warning(\u0027GUV_DAILY\u0027, `GuV daily drift in ${guvDiff.length} key(s)`, { keys: guvDiff.slice(0, 20) }));\n\nconst sheetSlots = new Set(productRows.filter(row =\u003e [\u0027true\u0027, \u0027ja\u0027, \u0027yes\u0027, \u00271\u0027, \u0027active\u0027].includes(clean(row.active ?? row.aktiv).toLowerCase())).map(row =\u003e [row.machine_id ?? \u0027457107528\u0027, row.mdb_code ?? row.MDB, row.product_key ?? row.SKU].map(clean).join(\u0027|\u0027)));\nconst pgSlots = new Set(pg.activeSlots || []);\nconst slotDiff = [...sheetSlots].filter(key =\u003e key \u0026\u0026 !pgSlots.has(key));\nif (slotDiff.length) events.push(warning(\u0027SLOT_ACTIVE\u0027, `Active slot drift in ${slotDiff.length} slot(s)`, { keys: slotDiff.slice(0, 20) }));\n\nconst aliases = new Set((pg.productAliases || []).map(row =\u003e clean(row.alias)));\nconst mappedUnmatched = (pg.unmappedSales || []).filter(row =\u003e aliases.has(clean(row.productNameRaw)));\nif (mappedUnmatched.length) events.push(warning(\u0027PRODUCT_MAPPING\u0027, `Product mapping drift for ${mappedUnmatched.length} PG sale(s)`, { sales: mappedUnmatched.slice(0, 20) }));\n\nconst pgPrices = new Map((pg.prices || []).map(row =\u003e [clean(row.productKey), cents(row.priceGross)]));\nconst priceDiff = productRows.filter(row =\u003e pgPrices.has(clean(row.product_key ?? row.SKU)) \u0026\u0026 Math.abs(cents(row.price_gross ?? row.Preis ?? row.price) - pgPrices.get(clean(row.product_key ?? row.SKU))) \u003e 0.01);\nif (priceDiff.length) events.push(warning(\u0027PRICE_SAMPLE\u0027, `Price sample drift for ${priceDiff.length} product(s)`, { products: priceDiff.slice(0, 20).map(row =\u003e clean(row.product_key ?? row.SKU)) }));\n\nconst batchQtyByKey = new Map(batchRows.map(row =\u003e [clean(row.batch_key ?? row.batch_id ?? row.Charge), num(row.initial_qty ?? row.Anfangsbestand) - num(row.remaining_qty ?? row.Restbestand)]));\nconst stockDiff = (pg.stockMovements || []).filter(row =\u003e batchQtyByKey.has(clean(row.batchKey)) \u0026\u0026 num(row.movementTotal) !== batchQtyByKey.get(clean(row.batchKey)));\nif (stockDiff.length) events.push(warning(\u0027STOCK_MOVEMENT_BALANCE\u0027, `Stock movement balance drift for ${stockDiff.length} batch(es)`, { batches: stockDiff.slice(0, 20).map(row =\u003e row.batchKey) }));\n\nconst backupAt = pg.lastBackupOkAt ? new Date(pg.lastBackupOkAt).getTime() : 0;\nif (!backupAt || (Date.now() - backupAt) / 36e5 \u003e 26) {\n  events.push(warning(\u0027BACKUP_OK\u0027, \u0027BACKUP_OK missing for more than 26 hours\u0027, { lastBackupOkAt: pg.lastBackupOkAt || null }));\n}\n\nconst text = [`WF-Val Validation Report ${runDate}`, \u0027\u0027, `${events.length} Drift-Warnungen`, \u0027\u0027, ...events.map(event =\u003e `${event.data.subject_key}: ${event.data.message}`)].join(\u0027\\n\u0027);\nconst mail = { sendTo: \u0027PatrickZinke@gmx.net\u0027, subject: events.length ? `WF-Val ${runDate}: ${events.length} Drift-Warnungen` : `WF-Val ${runDate}: keine Drift`, text, html: `\u003cpre\u003e${text}\u003c/pre\u003e` };\nreturn [{ json: { warningEvents: events, mail, status: events.length ? \u0027drift\u0027 : \u0027ok\u0027 } }];"
-                                                           },
-                                            "id":  "14f8b9e2-79d0-40c8-a430-e705898f63c3",
-                                            "name":  "Code - Build Validation Report",
-                                            "type":  "n8n-nodes-base.code",
-                                            "typeVersion":  2,
-                                            "position":  [
-                                                             -80,
-                                                             -80
-                                                         ]
-                                        },
-                                        {
-                                            "parameters":  {
-                                                               "jsCode":  "const events = $json.warningEvents || [];\nreturn events.map(event =\u003e ({ json: event }));"
-                                                           },
-                                            "id":  "2e74a115-b114-458c-a32f-42e5ca789db0",
-                                            "name":  "Code - Warning Events",
-                                            "type":  "n8n-nodes-base.code",
-                                            "typeVersion":  2,
-                                            "position":  [
-                                                             180,
-                                                             -180
-                                                         ]
-                                        },
-                                        {
-                                            "parameters":  {
-                                                               "workflowId":  {
-                                                                                  "__rl":  true,
-                                                                                  "value":  "Sajezv8tJll0CLIv",
-                                                                                  "mode":  "id"
-                                                                              },
-                                                               "mode":  "each",
-                                                               "options":  {
-                                                                               "waitForSubWorkflow":  false
-                                                                           }
-                                                           },
-                                            "id":  "89c80c91-b534-41e2-9207-47b620a67a02",
-                                            "name":  "WF-PGW - Validation Drift Warnings",
-                                            "type":  "n8n-nodes-base.executeWorkflow",
-                                            "typeVersion":  1.2,
-                                            "position":  [
-                                                             440,
-                                                             -180
-                                                         ]
-                                        },
-                                        {
-                                            "parameters":  {
-                                                               "sendTo":  "PatrickZinke@gmx.net",
-                                                               "subject":  "={{ $json.mail.subject }}",
-                                                               "message":  "={{ $json.mail.html }}",
-                                                               "options":  {
-
-                                                                           }
-                                                           },
-                                            "id":  "79212152-2278-47a4-bb4f-6ea6c0cedc85",
-                                            "name":  "Gmail - Send Validation Report",
-                                            "type":  "n8n-nodes-base.gmail",
-                                            "typeVersion":  2.1,
-                                            "position":  [
-                                                             180,
-                                                             60
-                                                         ],
-                                            "webhookId":  "9c57ff80-3bc9-497c-b055-465820132e41",
-                                            "credentials":  {
-                                                                "gmailOAuth2":  {
-                                                                                    "id":  "8zhryCRhHAc2OnKA",
-                                                                                    "name":  "Gmail account"
-                                                                                }
-                                                            }
-                                        }
-                                    ],
-                          "connections":  {
-                                              "Manual Trigger":  {
-                                                                     "main":  [
-                                                                                  [
-                                                                                      {
-                                                                                          "node":  "Google Sheets - Verarbeitete_Transaktionen",
-                                                                                          "type":  "main",
-                                                                                          "index":  0
-                                                                                      }
-                                                                                  ]
-                                                                              ]
-                                                                 },
-                                              "Schedule Trigger - daily after 04:00":  {
-                                                                                           "main":  [
-                                                                                                        [
-                                                                                                            {
-                                                                                                                "node":  "Google Sheets - Verarbeitete_Transaktionen",
-                                                                                                                "type":  "main",
-                                                                                                                "index":  0
-                                                                                                            }
-                                                                                                        ]
-                                                                                                    ]
-                                                                                       },
-                                              "Google Sheets - Verarbeitete_Transaktionen":  {
-                                                                                                 "main":  [
-                                                                                                              [
-                                                                                                                  {
-                                                                                                                      "node":  "Google Sheets - GuV_Tagesposten",
-                                                                                                                      "type":  "main",
-                                                                                                                      "index":  0
-                                                                                                                  }
-                                                                                                              ]
-                                                                                                          ]
-                                                                                             },
-                                              "Google Sheets - GuV_Tagesposten":  {
-                                                                                      "main":  [
-                                                                                                   [
-                                                                                                       {
-                                                                                                           "node":  "Google Sheets - Produkte",
-                                                                                                           "type":  "main",
-                                                                                                           "index":  0
-                                                                                                       }
-                                                                                                   ]
-                                                                                               ]
-                                                                                  },
-                                              "Google Sheets - Produkte":  {
-                                                                               "main":  [
-                                                                                            [
-                                                                                                {
-                                                                                                    "node":  "Google Sheets - Lagerchargen",
-                                                                                                    "type":  "main",
-                                                                                                    "index":  0
-                                                                                                }
-                                                                                            ]
-                                                                                        ]
-                                                                           },
-                                              "Google Sheets - Lagerchargen":  {
-                                                                                   "main":  [
-                                                                                                [
-                                                                                                    {
-                                                                                                        "node":  "Postgres - Validation Snapshot",
-                                                                                                        "type":  "main",
-                                                                                                        "index":  0
-                                                                                                    }
-                                                                                                ]
-                                                                                            ]
-                                                                               },
-                                              "Postgres - Validation Snapshot":  {
-                                                                                     "main":  [
-                                                                                                  [
-                                                                                                      {
-                                                                                                          "node":  "Code - Build Validation Report",
-                                                                                                          "type":  "main",
-                                                                                                          "index":  0
-                                                                                                      }
-                                                                                                  ]
-                                                                                              ]
-                                                                                 },
-                                              "Code - Build Validation Report":  {
-                                                                                     "main":  [
-                                                                                                  [
-                                                                                                      {
-                                                                                                          "node":  "Code - Warning Events",
-                                                                                                          "type":  "main",
-                                                                                                          "index":  0
-                                                                                                      },
-                                                                                                      {
-                                                                                                          "node":  "Gmail - Send Validation Report",
-                                                                                                          "type":  "main",
-                                                                                                          "index":  0
-                                                                                                      }
-                                                                                                  ]
-                                                                                              ]
-                                                                                 },
-                                              "Code - Warning Events":  {
-                                                                            "main":  [
-                                                                                         [
-                                                                                             {
-                                                                                                 "node":  "WF-PGW - Validation Drift Warnings",
-                                                                                                 "type":  "main",
-                                                                                                 "index":  0
-                                                                                             }
-                                                                                         ]
-                                                                                     ]
-                                                                        }
-                                          },
-                          "authors":  "Patrick Matthes",
-                          "name":  null,
-                          "description":  null,
-                          "autosaved":  false,
-                          "workflowPublishHistory":  [
-                                                         {
-                                                             "createdAt":  "2026-05-25T14:36:35.646Z",
-                                                             "id":  75,
-                                                             "workflowId":  "pdIjiyIfVIIPuJIt",
-                                                             "versionId":  "1e894d63-cfc1-4cdb-b1b3-317892d4bc9f",
-                                                             "event":  "activated",
-                                                             "userId":  "dd26b63a-7133-4afa-995a-0d7d72693aee"
-                                                         }
-                                                     ]
-                      }
+  "updatedAt": "2026-05-25T14:36:35.576Z",
+  "createdAt": "2026-05-25T14:36:35.576Z",
+  "id": "pdIjiyIfVIIPuJIt",
+  "name": "WF-Val - Sheets PG Validation Bot",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "d9b78668-aab1-4f8a-86d2-e18e42e8c20a",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -900,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 15 4 * * *"
+            }
+          ]
+        }
+      },
+      "id": "736542e0-7d37-4869-a512-bfcf2526c9e8",
+      "name": "Schedule Trigger - daily after 04:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -900,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Verarbeitete_Transaktionen",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "2ed95994-8b37-4575-bd42-4fe68cd4d550",
+      "name": "Google Sheets - Verarbeitete_Transaktionen",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        -620,
+        -360
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "GuV_Tagesposten",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "918a50a4-8e3c-46ed-899c-db0be20aee70",
+      "name": "Google Sheets - GuV_Tagesposten",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        -620,
+        -180
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Produkte",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "cd58fc60-f68b-47e6-86ef-6742d94391f3",
+      "name": "Google Sheets - Produkte",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        -620,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Lagerchargen",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "43472a19-e625-4984-81cf-0fc2612481c4",
+      "name": "Google Sheets - Lagerchargen",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        -620,
+        180
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "6GG86fWHw536Rk36",
+          "name": "Google Sheets API"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH tx AS (\n  SELECT COUNT(*)::int AS count, COALESCE(SUM(gross_amount), 0)::numeric(12,2) AS gross_revenue\n  FROM automatenlager.sales_transactions\n  WHERE source <> 'historic_backfill'\n), guv AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object('key', concat_ws('|', posting_date::text, m.machine_key, gd.mdb_code::text, p.product_key), 'revenueGross', gd.revenue_gross)), '[]'::jsonb) AS rows\n  FROM automatenlager.guv_daily gd\n  JOIN automatenlager.machines m ON m.machine_id = gd.machine_id\n  JOIN automatenlager.products p ON p.product_id = gd.product_id\n  WHERE gd.source <> 'historic_backfill'\n), slots AS (\n  SELECT COALESCE(jsonb_agg(concat_ws('|', m.machine_key, sa.mdb_code::text, p.product_key)), '[]'::jsonb) AS rows\n  FROM automatenlager.slot_assignments sa\n  JOIN automatenlager.machines m ON m.machine_id = sa.machine_id\n  JOIN automatenlager.products p ON p.product_id = sa.product_id\n  WHERE sa.active = TRUE\n), aliases AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object('alias', pa.alias, 'productKey', p.product_key)), '[]'::jsonb) AS rows\n  FROM automatenlager.product_aliases pa\n  JOIN automatenlager.products p ON p.product_id = pa.product_id\n), unmapped AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object('productNameRaw', product_name_raw, 'nayaxTransactionId', nayax_transaction_id)), '[]'::jsonb) AS rows\n  FROM automatenlager.sales_transactions st\n  WHERE st.product_id IS NULL\n), prices AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object('productKey', p.product_key, 'priceGross', pr.sale_price_gross)), '[]'::jsonb) AS rows\n  FROM automatenlager.prices pr\n  JOIN automatenlager.slot_assignments sa ON sa.slot_assignment_id = pr.slot_assignment_id\n  JOIN automatenlager.products p ON p.product_id = sa.product_id\n  WHERE pr.valid_to IS NULL\n), movement_rows AS (\n  SELECT sb.batch_key, COALESCE(SUM(sm.quantity_delta_total), 0) AS movement_total, sb.initial_qty - sb.remaining_qty AS expected_movement_total\n  FROM automatenlager.stock_batches sb\n  LEFT JOIN automatenlager.stock_movements sm ON sm.batch_id = sb.batch_id\n  GROUP BY sb.batch_key, sb.initial_qty, sb.remaining_qty\n), movements AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object('batchKey', batch_key, 'movementTotal', movement_total, 'expectedMovementTotal', expected_movement_total)), '[]'::jsonb) AS rows\n  FROM movement_rows\n), backup AS (\n  SELECT MAX(created_at) AS last_backup_ok_at\n  FROM automatenlager.warnings\n  WHERE warning_type = 'BACKUP_OK'\n)\nSELECT jsonb_build_object(\n  'transactions', jsonb_build_object('count', tx.count, 'grossRevenue', tx.gross_revenue),\n  'guvDaily', guv.rows,\n  'activeSlots', slots.rows,\n  'productAliases', aliases.rows,\n  'unmappedSales', unmapped.rows,\n  'prices', prices.rows,\n  'stockMovements', movements.rows,\n  'lastBackupOkAt', backup.last_backup_ok_at\n) AS postgres_snapshot\nFROM tx, guv, slots, aliases, unmapped, prices, movements, backup;"
+      },
+      "id": "0e8c2424-adb7-44ed-92cb-63aa827b79bb",
+      "name": "Postgres - Validation Snapshot",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -360,
+        -80
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const WARNING_TYPE = 'VALIDATION_DRIFT_SHEETS_PG';\nconst now = new Date();\nconst runDate = now.toISOString().slice(0, 10);\n\nfunction all(name) {\n  try { return $(name).all().map(item => item.json); } catch (_) { return []; }\n}\nfunction first(name) {\n  const rows = all(name);\n  return rows[0] || {};\n}\nfunction clean(value) { return String(value ?? '').trim(); }\nfunction num(value) { const n = Number(clean(value).replace(',', '.')); return Number.isFinite(n) ? n : 0; }\nfunction cents(value) { return Math.round(num(value) * 100) / 100; }\nfunction warning(subject, message, details = {}) {\n  return {\n    event_type: 'warning',\n    batch_run_id: `wf-val_${runDate}`,\n    data: {\n      warning_key: `${WARNING_TYPE}|${subject}|${runDate}`,\n      warning_type: WARNING_TYPE,\n      severity: subject === 'BACKUP_OK' ? 'critical' : 'warning',\n      subject_key: subject,\n      source_workflow: 'wf-val',\n      message,\n      details,\n    },\n  };\n}\n\nconst txRows = all('Google Sheets - Verarbeitete_Transaktionen');\nconst guvRows = all('Google Sheets - GuV_Tagesposten');\nconst productRows = all('Google Sheets - Produkte');\nconst batchRows = all('Google Sheets - Lagerchargen');\nconst pg = first('Postgres - Validation Snapshot').postgres_snapshot || first('Postgres - Validation Snapshot') || {};\nconst events = [];\n\nconst sheetTxRevenue = cents(txRows.reduce((sum, row) => sum + num(row.gross_amount ?? row.Brutto ?? row.Umsatz ?? row.amount), 0));\nconst pgTxRevenue = cents(pg.transactions?.grossRevenue);\nif (txRows.length !== num(pg.transactions?.count) || Math.abs(sheetTxRevenue - pgTxRevenue) > 0.01) {\n  events.push(warning('TRANSACTIONS', `Transactions drift: Sheets ${txRows.length}/${sheetTxRevenue.toFixed(2)} vs PG ${num(pg.transactions?.count)}/${pgTxRevenue.toFixed(2)}`));\n}\n\nconst sheetGuvKeys = new Set(guvRows.map(row => [row.posting_date ?? row.Datum ?? row.date, row.machine_id ?? row.MachineID ?? '457107528', row.mdb_code ?? row.MDB, row.product_key ?? row.SKU].map(clean).join('|')));\nconst pgGuvKeys = new Set((pg.guvDaily || []).map(row => clean(row.key)));\nconst guvDiff = [...sheetGuvKeys].filter(key => key && !pgGuvKeys.has(key));\nif (guvDiff.length) events.push(warning('GUV_DAILY', `GuV daily drift in ${guvDiff.length} key(s)`, { keys: guvDiff.slice(0, 20) }));\n\nconst sheetSlots = new Set(productRows.filter(row => ['true', 'ja', 'yes', '1', 'active'].includes(clean(row.active ?? row.aktiv).toLowerCase())).map(row => [row.machine_id ?? '457107528', row.mdb_code ?? row.MDB, row.product_key ?? row.SKU].map(clean).join('|')));\nconst pgSlots = new Set(pg.activeSlots || []);\nconst slotDiff = [...sheetSlots].filter(key => key && !pgSlots.has(key));\nif (slotDiff.length) events.push(warning('SLOT_ACTIVE', `Active slot drift in ${slotDiff.length} slot(s)`, { keys: slotDiff.slice(0, 20) }));\n\nconst aliases = new Set((pg.productAliases || []).map(row => clean(row.alias)));\nconst mappedUnmatched = (pg.unmappedSales || []).filter(row => aliases.has(clean(row.productNameRaw)));\nif (mappedUnmatched.length) events.push(warning('PRODUCT_MAPPING', `Product mapping drift for ${mappedUnmatched.length} PG sale(s)`, { sales: mappedUnmatched.slice(0, 20) }));\n\nconst pgPrices = new Map((pg.prices || []).map(row => [clean(row.productKey), cents(row.priceGross)]));\nconst priceDiff = productRows.filter(row => pgPrices.has(clean(row.product_key ?? row.SKU)) && Math.abs(cents(row.price_gross ?? row.Preis ?? row.price) - pgPrices.get(clean(row.product_key ?? row.SKU))) > 0.01);\nif (priceDiff.length) events.push(warning('PRICE_SAMPLE', `Price sample drift for ${priceDiff.length} product(s)`, { products: priceDiff.slice(0, 20).map(row => clean(row.product_key ?? row.SKU)) }));\n\nconst batchQtyByKey = new Map(batchRows.map(row => [clean(row.batch_key ?? row.batch_id ?? row.Charge), num(row.initial_qty ?? row.Anfangsbestand) - num(row.remaining_qty ?? row.Restbestand)]));\nconst stockDiff = (pg.stockMovements || []).filter(row => batchQtyByKey.has(clean(row.batchKey)) && num(row.movementTotal) !== batchQtyByKey.get(clean(row.batchKey)));\nif (stockDiff.length) events.push(warning('STOCK_MOVEMENT_BALANCE', `Stock movement balance drift for ${stockDiff.length} batch(es)`, { batches: stockDiff.slice(0, 20).map(row => row.batchKey) }));\n\nconst backupAt = pg.lastBackupOkAt ? new Date(pg.lastBackupOkAt).getTime() : 0;\nif (!backupAt || (Date.now() - backupAt) / 36e5 > 26) {\n  events.push(warning('BACKUP_OK', 'BACKUP_OK missing for more than 26 hours', { lastBackupOkAt: pg.lastBackupOkAt || null }));\n}\n\nconst text = [`WF-Val Validation Report ${runDate}`, '', `${events.length} Drift-Warnungen`, '', ...events.map(event => `${event.data.subject_key}: ${event.data.message}`)].join('\\n');\nconst mail = { sendTo: 'PatrickZinke@gmx.net', subject: events.length ? `WF-Val ${runDate}: ${events.length} Drift-Warnungen` : `WF-Val ${runDate}: keine Drift`, text, html: `<pre>${text}</pre>` };\nreturn [{ json: { warningEvents: events, mail, status: events.length ? 'drift' : 'ok' } }];"
+      },
+      "id": "14f8b9e2-79d0-40c8-a430-e705898f63c3",
+      "name": "Code - Build Validation Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const events = $json.warningEvents || [];\nreturn events.map(event => ({ json: event }));"
+      },
+      "id": "2e74a115-b114-458c-a32f-42e5ca789db0",
+      "name": "Code - Warning Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        180,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "Sajezv8tJll0CLIv",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "89c80c91-b534-41e2-9207-47b620a67a02",
+      "name": "WF-PGW - Validation Drift Warnings",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "PatrickZinke@gmx.net",
+        "subject": "={{ $json.mail.subject }}",
+        "message": "={{ $json.mail.html }}",
+        "options": {}
+      },
+      "id": "79212152-2278-47a4-bb4f-6ea6c0cedc85",
+      "name": "Gmail - Send Validation Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        180,
+        60
+      ],
+      "webhookId": "9c57ff80-3bc9-497c-b055-465820132e41",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8zhryCRhHAc2OnKA",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Verarbeitete_Transaktionen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger - daily after 04:00": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Verarbeitete_Transaktionen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Verarbeitete_Transaktionen": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - GuV_Tagesposten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - GuV_Tagesposten": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Produkte",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Produkte": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Lagerchargen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Lagerchargen": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Validation Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Validation Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Code - Build Validation Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Build Validation Report": {
+      "main": [
+        [
+          {
+            "node": "Code - Warning Events",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail - Send Validation Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Warning Events": {
+      "main": [
+        [
+          {
+            "node": "WF-PGW - Validation Drift Warnings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Berlin"
+  },
+  "staticData": {
+    "node:Schedule Trigger - daily after 04:00": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": null,
+  "pinData": null,
+  "versionId": "1e894d63-cfc1-4cdb-b1b3-317892d4bc9f",
+  "activeVersionId": "1e894d63-cfc1-4cdb-b1b3-317892d4bc9f",
+  "versionCounter": 6,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-05-25T14:36:35.576Z",
+      "createdAt": "2026-05-25T14:36:35.576Z",
+      "role": "workflow:owner",
+      "workflowId": "pdIjiyIfVIIPuJIt",
+      "projectId": "68wR1Q9zBUk0Gxhv",
+      "project": {
+        "updatedAt": "2026-05-19T17:59:53.408Z",
+        "createdAt": "2026-05-19T16:50:04.773Z",
+        "id": "68wR1Q9zBUk0Gxhv",
+        "name": "Patrick Matthes <patrickmatthes2609@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-05-25T14:36:35.576Z",
+    "createdAt": "2026-05-25T14:36:35.576Z",
+    "versionId": "1e894d63-cfc1-4cdb-b1b3-317892d4bc9f",
+    "workflowId": "pdIjiyIfVIIPuJIt",
+    "nodes": [
+      {
+        "parameters": {},
+        "id": "d9b78668-aab1-4f8a-86d2-e18e42e8c20a",
+        "name": "Manual Trigger",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          -900,
+          -260
+        ]
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 15 4 * * *"
+              }
+            ]
+          }
+        },
+        "id": "736542e0-7d37-4869-a512-bfcf2526c9e8",
+        "name": "Schedule Trigger - daily after 04:00",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -900,
+          -80
+        ]
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Verarbeitete_Transaktionen",
+            "mode": "name"
+          },
+          "options": {}
+        },
+        "id": "2ed95994-8b37-4575-bd42-4fe68cd4d550",
+        "name": "Google Sheets - Verarbeitete_Transaktionen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.6,
+        "position": [
+          -620,
+          -360
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "GuV_Tagesposten",
+            "mode": "name"
+          },
+          "options": {}
+        },
+        "id": "918a50a4-8e3c-46ed-899c-db0be20aee70",
+        "name": "Google Sheets - GuV_Tagesposten",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.6,
+        "position": [
+          -620,
+          -180
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Produkte",
+            "mode": "name"
+          },
+          "options": {}
+        },
+        "id": "cd58fc60-f68b-47e6-86ef-6742d94391f3",
+        "name": "Google Sheets - Produkte",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.6,
+        "position": [
+          -620,
+          0
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Lagerchargen",
+            "mode": "name"
+          },
+          "options": {}
+        },
+        "id": "43472a19-e625-4984-81cf-0fc2612481c4",
+        "name": "Google Sheets - Lagerchargen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.6,
+        "position": [
+          -620,
+          180
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "WITH tx AS (\n  SELECT COUNT(*)::int AS count, COALESCE(SUM(gross_amount), 0)::numeric(12,2) AS gross_revenue\n  FROM automatenlager.sales_transactions\n  WHERE source <> 'historic_backfill'\n), guv AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object('key', concat_ws('|', posting_date::text, m.machine_key, gd.mdb_code::text, p.product_key), 'revenueGross', gd.revenue_gross)), '[]'::jsonb) AS rows\n  FROM automatenlager.guv_daily gd\n  JOIN automatenlager.machines m ON m.machine_id = gd.machine_id\n  JOIN automatenlager.products p ON p.product_id = gd.product_id\n  WHERE gd.source <> 'historic_backfill'\n), slots AS (\n  SELECT COALESCE(jsonb_agg(concat_ws('|', m.machine_key, sa.mdb_code::text, p.product_key)), '[]'::jsonb) AS rows\n  FROM automatenlager.slot_assignments sa\n  JOIN automatenlager.machines m ON m.machine_id = sa.machine_id\n  JOIN automatenlager.products p ON p.product_id = sa.product_id\n  WHERE sa.active = TRUE\n), aliases AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object('alias', pa.alias, 'productKey', p.product_key)), '[]'::jsonb) AS rows\n  FROM automatenlager.product_aliases pa\n  JOIN automatenlager.products p ON p.product_id = pa.product_id\n), unmapped AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object('productNameRaw', product_name_raw, 'nayaxTransactionId', nayax_transaction_id)), '[]'::jsonb) AS rows\n  FROM automatenlager.sales_transactions st\n  WHERE st.product_id IS NULL\n), prices AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object('productKey', p.product_key, 'priceGross', pr.sale_price_gross)), '[]'::jsonb) AS rows\n  FROM automatenlager.prices pr\n  JOIN automatenlager.slot_assignments sa ON sa.slot_assignment_id = pr.slot_assignment_id\n  JOIN automatenlager.products p ON p.product_id = sa.product_id\n  WHERE pr.valid_to IS NULL\n), movement_rows AS (\n  SELECT sb.batch_key, COALESCE(SUM(sm.quantity_delta_total), 0) AS movement_total, sb.initial_qty - sb.remaining_qty AS expected_movement_total\n  FROM automatenlager.stock_batches sb\n  LEFT JOIN automatenlager.stock_movements sm ON sm.batch_id = sb.batch_id\n  GROUP BY sb.batch_key, sb.initial_qty, sb.remaining_qty\n), movements AS (\n  SELECT COALESCE(jsonb_agg(jsonb_build_object('batchKey', batch_key, 'movementTotal', movement_total, 'expectedMovementTotal', expected_movement_total)), '[]'::jsonb) AS rows\n  FROM movement_rows\n), backup AS (\n  SELECT MAX(created_at) AS last_backup_ok_at\n  FROM automatenlager.warnings\n  WHERE warning_type = 'BACKUP_OK'\n)\nSELECT jsonb_build_object(\n  'transactions', jsonb_build_object('count', tx.count, 'grossRevenue', tx.gross_revenue),\n  'guvDaily', guv.rows,\n  'activeSlots', slots.rows,\n  'productAliases', aliases.rows,\n  'unmappedSales', unmapped.rows,\n  'prices', prices.rows,\n  'stockMovements', movements.rows,\n  'lastBackupOkAt', backup.last_backup_ok_at\n) AS postgres_snapshot\nFROM tx, guv, slots, aliases, unmapped, prices, movements, backup;"
+        },
+        "id": "0e8c2424-adb7-44ed-92cb-63aa827b79bb",
+        "name": "Postgres - Validation Snapshot",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -360,
+          -80
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Jept3990Uq8aN3Tr",
+            "name": "PostgreSQL"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const WARNING_TYPE = 'VALIDATION_DRIFT_SHEETS_PG';\nconst now = new Date();\nconst runDate = now.toISOString().slice(0, 10);\n\nfunction all(name) {\n  try { return $(name).all().map(item => item.json); } catch (_) { return []; }\n}\nfunction first(name) {\n  const rows = all(name);\n  return rows[0] || {};\n}\nfunction clean(value) { return String(value ?? '').trim(); }\nfunction num(value) { const n = Number(clean(value).replace(',', '.')); return Number.isFinite(n) ? n : 0; }\nfunction cents(value) { return Math.round(num(value) * 100) / 100; }\nfunction warning(subject, message, details = {}) {\n  return {\n    event_type: 'warning',\n    batch_run_id: `wf-val_${runDate}`,\n    data: {\n      warning_key: `${WARNING_TYPE}|${subject}|${runDate}`,\n      warning_type: WARNING_TYPE,\n      severity: subject === 'BACKUP_OK' ? 'critical' : 'warning',\n      subject_key: subject,\n      source_workflow: 'wf-val',\n      message,\n      details,\n    },\n  };\n}\n\nconst txRows = all('Google Sheets - Verarbeitete_Transaktionen');\nconst guvRows = all('Google Sheets - GuV_Tagesposten');\nconst productRows = all('Google Sheets - Produkte');\nconst batchRows = all('Google Sheets - Lagerchargen');\nconst pg = first('Postgres - Validation Snapshot').postgres_snapshot || first('Postgres - Validation Snapshot') || {};\nconst events = [];\n\nconst sheetTxRevenue = cents(txRows.reduce((sum, row) => sum + num(row.gross_amount ?? row.Brutto ?? row.Umsatz ?? row.amount), 0));\nconst pgTxRevenue = cents(pg.transactions?.grossRevenue);\nif (txRows.length !== num(pg.transactions?.count) || Math.abs(sheetTxRevenue - pgTxRevenue) > 0.01) {\n  events.push(warning('TRANSACTIONS', `Transactions drift: Sheets ${txRows.length}/${sheetTxRevenue.toFixed(2)} vs PG ${num(pg.transactions?.count)}/${pgTxRevenue.toFixed(2)}`));\n}\n\nconst sheetGuvKeys = new Set(guvRows.map(row => [row.posting_date ?? row.Datum ?? row.date, row.machine_id ?? row.MachineID ?? '457107528', row.mdb_code ?? row.MDB, row.product_key ?? row.SKU].map(clean).join('|')));\nconst pgGuvKeys = new Set((pg.guvDaily || []).map(row => clean(row.key)));\nconst guvDiff = [...sheetGuvKeys].filter(key => key && !pgGuvKeys.has(key));\nif (guvDiff.length) events.push(warning('GUV_DAILY', `GuV daily drift in ${guvDiff.length} key(s)`, { keys: guvDiff.slice(0, 20) }));\n\nconst sheetSlots = new Set(productRows.filter(row => ['true', 'ja', 'yes', '1', 'active'].includes(clean(row.active ?? row.aktiv).toLowerCase())).map(row => [row.machine_id ?? '457107528', row.mdb_code ?? row.MDB, row.product_key ?? row.SKU].map(clean).join('|')));\nconst pgSlots = new Set(pg.activeSlots || []);\nconst slotDiff = [...sheetSlots].filter(key => key && !pgSlots.has(key));\nif (slotDiff.length) events.push(warning('SLOT_ACTIVE', `Active slot drift in ${slotDiff.length} slot(s)`, { keys: slotDiff.slice(0, 20) }));\n\nconst aliases = new Set((pg.productAliases || []).map(row => clean(row.alias)));\nconst mappedUnmatched = (pg.unmappedSales || []).filter(row => aliases.has(clean(row.productNameRaw)));\nif (mappedUnmatched.length) events.push(warning('PRODUCT_MAPPING', `Product mapping drift for ${mappedUnmatched.length} PG sale(s)`, { sales: mappedUnmatched.slice(0, 20) }));\n\nconst pgPrices = new Map((pg.prices || []).map(row => [clean(row.productKey), cents(row.priceGross)]));\nconst priceDiff = productRows.filter(row => pgPrices.has(clean(row.product_key ?? row.SKU)) && Math.abs(cents(row.price_gross ?? row.Preis ?? row.price) - pgPrices.get(clean(row.product_key ?? row.SKU))) > 0.01);\nif (priceDiff.length) events.push(warning('PRICE_SAMPLE', `Price sample drift for ${priceDiff.length} product(s)`, { products: priceDiff.slice(0, 20).map(row => clean(row.product_key ?? row.SKU)) }));\n\nconst batchQtyByKey = new Map(batchRows.map(row => [clean(row.batch_key ?? row.batch_id ?? row.Charge), num(row.initial_qty ?? row.Anfangsbestand) - num(row.remaining_qty ?? row.Restbestand)]));\nconst stockDiff = (pg.stockMovements || []).filter(row => batchQtyByKey.has(clean(row.batchKey)) && num(row.movementTotal) !== batchQtyByKey.get(clean(row.batchKey)));\nif (stockDiff.length) events.push(warning('STOCK_MOVEMENT_BALANCE', `Stock movement balance drift for ${stockDiff.length} batch(es)`, { batches: stockDiff.slice(0, 20).map(row => row.batchKey) }));\n\nconst backupAt = pg.lastBackupOkAt ? new Date(pg.lastBackupOkAt).getTime() : 0;\nif (!backupAt || (Date.now() - backupAt) / 36e5 > 26) {\n  events.push(warning('BACKUP_OK', 'BACKUP_OK missing for more than 26 hours', { lastBackupOkAt: pg.lastBackupOkAt || null }));\n}\n\nconst text = [`WF-Val Validation Report ${runDate}`, '', `${events.length} Drift-Warnungen`, '', ...events.map(event => `${event.data.subject_key}: ${event.data.message}`)].join('\\n');\nconst mail = { sendTo: 'PatrickZinke@gmx.net', subject: events.length ? `WF-Val ${runDate}: ${events.length} Drift-Warnungen` : `WF-Val ${runDate}: keine Drift`, text, html: `<pre>${text}</pre>` };\nreturn [{ json: { warningEvents: events, mail, status: events.length ? 'drift' : 'ok' } }];"
+        },
+        "id": "14f8b9e2-79d0-40c8-a430-e705898f63c3",
+        "name": "Code - Build Validation Report",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -80,
+          -80
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const events = $json.warningEvents || [];\nreturn events.map(event => ({ json: event }));"
+        },
+        "id": "2e74a115-b114-458c-a32f-42e5ca789db0",
+        "name": "Code - Warning Events",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          180,
+          -180
+        ]
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "Sajezv8tJll0CLIv",
+            "mode": "id"
+          },
+          "mode": "each",
+          "options": {
+            "waitForSubWorkflow": false
+          }
+        },
+        "id": "89c80c91-b534-41e2-9207-47b620a67a02",
+        "name": "WF-PGW - Validation Drift Warnings",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          440,
+          -180
+        ]
+      },
+      {
+        "parameters": {
+          "sendTo": "PatrickZinke@gmx.net",
+          "subject": "={{ $json.mail.subject }}",
+          "message": "={{ $json.mail.html }}",
+          "options": {}
+        },
+        "id": "79212152-2278-47a4-bb4f-6ea6c0cedc85",
+        "name": "Gmail - Send Validation Report",
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 2.1,
+        "position": [
+          180,
+          60
+        ],
+        "webhookId": "9c57ff80-3bc9-497c-b055-465820132e41",
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "8zhryCRhHAc2OnKA",
+            "name": "Gmail account"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Manual Trigger": {
+        "main": [
+          [
+            {
+              "node": "Google Sheets - Verarbeitete_Transaktionen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Schedule Trigger - daily after 04:00": {
+        "main": [
+          [
+            {
+              "node": "Google Sheets - Verarbeitete_Transaktionen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Sheets - Verarbeitete_Transaktionen": {
+        "main": [
+          [
+            {
+              "node": "Google Sheets - GuV_Tagesposten",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Sheets - GuV_Tagesposten": {
+        "main": [
+          [
+            {
+              "node": "Google Sheets - Produkte",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Sheets - Produkte": {
+        "main": [
+          [
+            {
+              "node": "Google Sheets - Lagerchargen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Sheets - Lagerchargen": {
+        "main": [
+          [
+            {
+              "node": "Postgres - Validation Snapshot",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Postgres - Validation Snapshot": {
+        "main": [
+          [
+            {
+              "node": "Code - Build Validation Report",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - Build Validation Report": {
+        "main": [
+          [
+            {
+              "node": "Code - Warning Events",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Gmail - Send Validation Report",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - Warning Events": {
+        "main": [
+          [
+            {
+              "node": "WF-PGW - Validation Drift Warnings",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Patrick Matthes",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-05-25T14:36:35.646Z",
+        "id": 75,
+        "workflowId": "pdIjiyIfVIIPuJIt",
+        "versionId": "1e894d63-cfc1-4cdb-b1b3-317892d4bc9f",
+        "event": "activated",
+        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      }
+    ]
+  }
 }

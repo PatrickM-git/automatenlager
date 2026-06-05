@@ -149,71 +149,45 @@
     },
     {
       "parameters": {
-        "authentication": "oAuth2",
-        "resource": "sheet",
-        "operation": "read",
-        "documentId": {
-          "__rl": true,
-          "value": "={{ $('Config').first().json.google_sheet_id }}",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Lagerchargen",
-          "mode": "name"
-        },
-        "filtersUI": {},
-        "combineFilters": "AND",
+        "operation": "executeQuery",
+        "query": "SELECT sb.batch_key AS batch_id, p.product_key AS product_key, p.name AS product_name,\n       'aktiv' AS status,\n       COALESCE(to_char(sb.mhd_date,'YYYY-MM-DD'),'') AS mhd,\n       sb.remaining_qty::text AS remaining_qty,\n       COALESCE(sb.unit_cost_net::text,'') AS unit_cost,\n       COALESCE(p.vat_rate_pct::text,'') AS mwst_satz\nFROM automatenlager.stock_batches sb\nJOIN automatenlager.products p ON p.product_id = sb.product_id\nWHERE sb.status IN ('aktiv','active','reserve')\nORDER BY p.name, sb.mhd_date ASC NULLS LAST",
         "options": {}
       },
       "id": "f0038ce6-e19d-4539-8ced-d6191bee089d",
       "name": "Google Sheets - Lagerchargen lesen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [
         -1616,
         496
       ],
       "executeOnce": true,
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
         }
       }
     },
     {
       "parameters": {
-        "authentication": "oAuth2",
-        "resource": "sheet",
-        "operation": "read",
-        "documentId": {
-          "__rl": true,
-          "value": "={{ $('Config').first().json.google_sheet_id }}",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Verarbeitete_Transaktionen",
-          "mode": "name"
-        },
-        "filtersUI": {},
-        "combineFilters": "AND",
+        "operation": "executeQuery",
+        "query": "SELECT nayax_transaction_id AS transaction_id\nFROM automatenlager.sales_transactions\nWHERE settlement_at > NOW() - INTERVAL '120 days'",
         "options": {}
       },
       "id": "cf64cbee-a9e0-49b8-a0d4-d5479c088109",
       "name": "Google Sheets - Transaktionen lesen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [
         -1824,
         736
       ],
       "executeOnce": true,
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
         }
       }
     },
@@ -1338,36 +1312,12 @@
     },
     {
       "parameters": {
-        "authentication": "oAuth2",
-        "resource": "sheet",
-        "operation": "read",
-        "documentId": {
-          "__rl": true,
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-          "mode": "list",
-          "cachedResultName": "nayax_lager_google_sheets_import_aktualisiert_v3_kitkat_2026-05-02",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo/edit?usp=drivesdk"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": 1189419178,
-          "mode": "list",
-          "cachedResultName": "letzter Verkaufsworkflow",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo/edit#gid=1189419178"
-        },
-        "filtersUI": {
-          "values": [
-            {
-              "lookupColumn": "workflow_key",
-              "lookupValue": "WF3_NAYAX_FIFO"
-            }
-          ]
-        },
-        "combineFilters": "AND",
+        "operation": "executeQuery",
+        "query": "SELECT workflow_key,\n       COALESCE(to_char(last_inventory_review_at,'YYYY-MM-DDTHH24:MI:SS') || '.000Z','') AS last_inventory_review_at\nFROM automatenlager.workflow_state\nWHERE workflow_key = 'WF3_NAYAX_FIFO'",
         "options": {}
       },
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [
         -1424,
         752
@@ -1376,9 +1326,9 @@
       "name": "Google Sheets - letzter Verkaufsworkflow lesen",
       "executeOnce": true,
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
         }
       }
     },
@@ -1400,71 +1350,12 @@
     },
     {
       "parameters": {
-        "authentication": "oAuth2",
-        "resource": "sheet",
-        "operation": "update",
-        "documentId": {
-          "__rl": true,
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-          "mode": "list",
-          "cachedResultName": "nayax_lager_google_sheets_import_aktualisiert_v3_kitkat_2026-05-02",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo/edit?usp=drivesdk"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": 1189419178,
-          "mode": "list",
-          "cachedResultName": "letzter Verkaufsworkflow",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo/edit#gid=1189419178"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "workflow_key": "={{ $json.workflow_key }}",
-            "last_inventory_review_at": "={{ $json.last_inventory_review_at }}"
-          },
-          "matchingColumns": [
-            "workflow_key"
-          ],
-          "schema": [
-            {
-              "id": "workflow_key",
-              "displayName": "workflow_key",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "last_inventory_review_at",
-              "displayName": "last_inventory_review_at",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "row_number",
-              "displayName": "row_number",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "number",
-              "canBeUsedToMatch": true,
-              "readOnly": true,
-              "removed": true
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        },
+        "operation": "executeQuery",
+        "query": "INSERT INTO automatenlager.workflow_state\n  (workflow_key, last_inventory_review_at, updated_at)\nVALUES (\n  '{{ $json.workflow_key }}',\n  '{{ $json.last_inventory_review_at }}'::timestamptz,\n  NOW()\n)\nON CONFLICT (workflow_key) DO UPDATE\n  SET last_inventory_review_at = EXCLUDED.last_inventory_review_at,\n      updated_at = NOW()",
         "options": {}
       },
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [
         -400,
         -144
@@ -1472,12 +1363,12 @@
       "id": "df4a2bea-f8ca-4433-8533-3292bc5ac563",
       "name": "Google Sheets - letzter Verkaufsworkflow aktualisieren",
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
         }
       },
-      "disabled": true
+      "disabled": false
     },
     {
       "parameters": {

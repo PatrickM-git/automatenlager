@@ -1,5 +1,11 @@
 {
+  "updatedAt": "2026-06-02T20:27:14.178Z",
+  "createdAt": "2026-05-25T14:37:23.847Z",
+  "id": "3ceKeNWmdj455Tcr",
   "name": "WF5 - MHD und niedrige Lagercharge ueberwachen",
+  "description": null,
+  "active": true,
+  "isArchived": false,
   "nodes": [
     {
       "parameters": {
@@ -129,71 +135,45 @@
     },
     {
       "parameters": {
-        "authentication": "oAuth2",
-        "resource": "sheet",
-        "operation": "read",
-        "documentId": {
-          "__rl": true,
-          "value": "={{ $('Config - WF5').first().json.google_sheet_id }}",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "={{ $('Config - WF5').first().json.sheet_produkte }}",
-          "mode": "name"
-        },
-        "filtersUI": {},
-        "combineFilters": "AND",
+        "operation": "executeQuery",
+        "query": "SELECT p.product_key AS product_key, p.name AS internal_product_name,\n       COALESCE(na.alias,'') AS nayax_product_name,\n       COALESCE(sa.mdb_code::text,'') AS mdb_code,\n       m.machine_key AS machine_id,\n       CASE WHEN sa.active THEN 'TRUE' ELSE 'FALSE' END AS active,\n       sa.product_slot_key AS product_slot_id,\n       COALESCE(pr.sale_price_gross::text,'') AS sale_price_eur,\n       COALESCE(sa.current_machine_qty::text,'') AS current_machine_qty,\n       COALESCE(sa.machine_capacity::text,'') AS machine_capacity,\n       COALESCE(sa.target_stock::text,'') AS target_stock,\n       p.category AS produktart,\n       COALESCE(p.vat_rate_pct::text,'') AS mwst_satz,\n       COALESCE(sa.notes,'') AS notes\nFROM automatenlager.slot_assignments sa\nJOIN automatenlager.products p ON p.product_id = sa.product_id\nJOIN automatenlager.machines m ON m.machine_id = sa.machine_id\nLEFT JOIN LATERAL (SELECT pa.alias FROM automatenlager.product_aliases pa WHERE pa.product_id=p.product_id AND pa.source='nayax' AND pa.is_primary=TRUE ORDER BY pa.alias LIMIT 1) na ON TRUE\nLEFT JOIN LATERAL (SELECT pc.sale_price_gross FROM automatenlager.prices pc WHERE pc.slot_assignment_id=sa.slot_assignment_id AND pc.valid_to IS NULL ORDER BY pc.valid_from DESC LIMIT 1) pr ON TRUE\nORDER BY m.machine_key, sa.mdb_code, sa.active DESC",
         "options": {}
       },
       "id": "8547da6a-1da7-4ed9-9112-ef8cc80bb934",
       "name": "Google Sheets - Produkte lesen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [
         48,
         144
       ],
       "executeOnce": true,
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
         }
       }
     },
     {
       "parameters": {
-        "authentication": "oAuth2",
-        "resource": "sheet",
-        "operation": "read",
-        "documentId": {
-          "__rl": true,
-          "value": "={{ $('Config - WF5').first().json.google_sheet_id }}",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "={{ $('Config - WF5').first().json.sheet_hinweise }}",
-          "mode": "name"
-        },
-        "filtersUI": {},
-        "combineFilters": "AND",
+        "operation": "executeQuery",
+        "query": "SELECT w.warning_key,\n       w.warning_type AS type,\n       w.severity,\n       w.message,\n       to_char(w.created_at AT TIME ZONE 'UTC','YYYY-MM-DDTHH24:MI:SS') || 'Z' AS created_at,\n       CASE WHEN w.resolved THEN 'TRUE' ELSE 'FALSE' END AS resolved,\n       COALESCE(to_char(w.resolved_at,'YYYY-MM-DDTHH24:MI:SS') || 'Z','') AS resolved_at,\n       COALESCE(w.mdb_code::text,'') AS mdb_code,\n       COALESCE(p.product_key,'') AS product_key,\n       COALESCE(m.machine_key,'') AS machine_id\nFROM automatenlager.warnings w\nLEFT JOIN automatenlager.products p ON p.product_id = w.product_id\nLEFT JOIN automatenlager.machines m ON m.machine_id = w.machine_id\nORDER BY w.created_at DESC\nLIMIT 500",
         "options": {}
       },
       "id": "7e760748-c859-4dcc-9dad-8487e3b2d4a2",
       "name": "Google Sheets - Hinweise lesen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [
         48,
         288
       ],
       "executeOnce": true,
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
         }
       }
     },
@@ -201,7 +181,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "const rows = $input.all().map(i => i.json);\nconst alerts = [];\n\nfunction clean(value) {\n  return String(value ?? '')\n    .replace(/\\n/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction num(value) {\n  const n = Number(String(value ?? '').replace(',', '.'));\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction parseDate(value) {\n  const raw = clean(value);\n  if (!raw) return null;\n  const d = new Date(raw);\n  if (!Number.isNaN(d.getTime())) {\n    return d;\n  }\n  const m = raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);\n  if (m) {\n    return new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);\n  }\n  return null;\n}\n\nfunction daysUntil(value) {\n  const d = parseDate(value);\n  if (!d) return null;\n  const today = new Date();\n  today.setHours(0, 0, 0, 0);\n  const target = new Date(d);\n  target.setHours(0, 0, 0, 0);\n  return Math.ceil((target - today) / 86400000);\n}\n\nfunction isActive(value) {\n  const v = clean(value).toUpperCase();\n  return ['TRUE', '1', 'JA', 'YES', 'AKTIV', 'ACTIVE'].includes(v);\n}\n\nfunction productName(row) {\n  return clean(\n    row.internal_product_name ||\n    row.nayax_product_name ||\n    row.product_name ||\n    row.product_key ||\n    'Unbekanntes Produkt'\n  );\n}\n\nconst now = new Date().toISOString();\n\n// PATCH DEDUP_ALERTS: lade existierende Hinweise und baue Set\n// fuer Type+ProductKey-Combos, die innerhalb der letzten DEDUP_DAYS Tage\n// schon gemeldet wurden (resolved=FALSE). Diese werden im WF5-Run\n// uebersprungen, sodass User nicht jeden Tag dieselbe Mail bekommt.\nconst DEDUP_DAYS = 7;\nlet existingHinweise = [];\ntry {\n  existingHinweise = $('Google Sheets - Hinweise lesen').all().map(i => i.json);\n} catch (e) {\n  existingHinweise = [];\n}\nconst dedupCutoff = new Date(Date.now() - DEDUP_DAYS * 24 * 60 * 60 * 1000);\nconst recentNotifications = new Set();\nfor (const h of existingHinweise) {\n  const resolved = clean(h.resolved).toUpperCase();\n  if (['TRUE','JA','YES','1','ERLEDIGT','RESOLVED'].includes(resolved)) continue;\n  const createdRaw = clean(h.created_at);\n  const created = parseDate(createdRaw);\n  if (!created || created < dedupCutoff) continue;\n  const key = clean(h.type) + '|' + clean(h.product_key) + '|' + clean(h.batch_id || '');\n  recentNotifications.add(key);\n}\nfunction shouldEmitAlert(type, productKey, batchId) {\n  const key = (type || '') + '|' + (productKey || '') + '|' + (batchId || '');\n  if (recentNotifications.has(key)) return false;\n  recentNotifications.add(key);  // Auch innerhalb diesem Lauf nicht doppelt melden\n  return true;\n}\n\n// PATCH-A2c: Empty/Low-Batch Aggregat\n// Ziel: Erkenne wenn Lagercharge-Summe pro product_key <= Schwellwert,\n// unabhaengig vom (oft stale) current_machine_qty.\n// low_batch_qty_threshold kommt aus Config-Node (default 5).\nconst config = ($('Config - WF5') ? $('Config - WF5').first()?.json : {}) || {};\nconst lowBatchThreshold = Number(config.low_batch_qty_threshold ?? 5);\n\nconst remainPerKey = new Map();\nconst sampleRowPerKey = new Map();\nfor (const row of rows) {\n  const pk = clean(row.product_key);\n  if (!pk) continue;\n  const r = num(row.remaining_qty);\n  // Nur aktive Chargen mit numerischem remaining zaehlen.\n  // (Produkte-Zeilen ohne batch_id haben r=null und werden uebersprungen.)\n  if (r === null) continue;\n  const status = clean(row.status).toLowerCase();\n  // Pro Lagercharge-Zeile: nur aktiv oder leer (nicht 'verbraucht'/'verworfen') beruecksichtigen.\n  if (status && !['aktiv', 'leer'].includes(status)) continue;\n  remainPerKey.set(pk, (remainPerKey.get(pk) || 0) + r);\n  if (!sampleRowPerKey.has(pk)) sampleRowPerKey.set(pk, row);\n}\n\nconst emittedBatchAlert = new Set();\nfor (const [pk, total] of remainPerKey.entries()) {\n  if (total > lowBatchThreshold) continue;\n  if (emittedBatchAlert.has(pk)) continue;\n  const _typ = total <= 0 ? 'EMPTY_BATCH' : 'LOW_BATCH';\n  if (!shouldEmitAlert(_typ, pk, '')) { emittedBatchAlert.add(pk); continue; }\n  const sample = sampleRowPerKey.get(pk) || {};\n  const name = productName(sample);\n  const crit = total <= 0;\n  alerts.push({\n    created_at: now,\n    type: crit ? 'EMPTY_BATCH' : 'LOW_BATCH',\n    severity: crit ? 'critical' : 'warning',\n    product_key: pk,\n    product_name: name,\n    internal_product_name: clean(sample.internal_product_name),\n    nayax_product_name: clean(sample.nayax_product_name),\n    machine_id: clean(sample.machine_id),\n    mdb_code: clean(sample.mdb_code),\n    total_remaining_qty: total,\n    threshold: lowBatchThreshold,\n    message: crit\n      ? `${name}: Lagerbestand ist 0 - Produkt komplett leer.`\n      : `${name}: Nur noch ${total} Stueck im Lager (Schwellwert ${lowBatchThreshold}).`\n  });\n  emittedBatchAlert.add(pk);\n}\n\nfor (const row of rows) {\n  const productKey = clean(row.product_key);\n  if (!productKey) continue;\n\n  // Nur aktive Zeilen berücksichtigen\n  const active =\n    isActive(row.active) ||\n    isActive(row.status) ||\n    isActive(row.replenishment_status);\n  if (!active) continue;\n\n  const name = productName(row);\n  const currentMachineQty = num(row.current_machine_qty);\n  const minStock = num(row.min_stock);\n  const targetStock = num(row.target_stock);\n  const machineCapacity = num(row.machine_capacity);\n  const mhd = clean(row.mhd);\n  const remainingQty = num(row.remaining_qty);\n  const days = daysUntil(mhd);\n\n  // MHD Warnung\n  if (mhd && days !== null && days <= 30 && shouldEmitAlert('MHD_WARNING', productKey, clean(row.batch_id))) {\n    alerts.push({\n      created_at: now,\n      type: 'MHD_WARNING',\n      severity: days < 0 ? 'critical' : 'warning',\n      product_key: productKey,\n      product_name: name,\n      internal_product_name: clean(row.internal_product_name),\n      nayax_product_name: clean(row.nayax_product_name),\n      batch_id: clean(row.batch_id),\n      mhd,\n      remaining_qty: remainingQty,\n      machine_id: clean(row.machine_id),\n      mdb_code: clean(row.mdb_code),\n      message:\n        days < 0\n          ? `${name}: Charge ${clean(row.batch_id)} ist seit ${Math.abs(days)} Tag(en) abgelaufen.`\n          : `${name}: Charge ${clean(row.batch_id)} läuft in ${days} Tag(en) ab.`\n    });\n  }\n\n  // PATCH AUTO_REFILL_WF5: LOW_STOCK informativ statt warning/critical,\n  // DEDUP: nur einmal pro 7 Tage\n  // weil WF3 auto-refill den Slot beim naechsten Sale heilt.\n  if (\n    currentMachineQty !== null &&\n    minStock !== null &&\n    machineCapacity !== null &&\n    machineCapacity > 0 &&\n    currentMachineQty < minStock &&\n    shouldEmitAlert('LOW_STOCK', productKey, '')\n  ) {\n    alerts.push({\n      created_at: now,\n      type: 'LOW_STOCK',\n      severity: 'info',\n      product_key: productKey,\n      product_name: name,\n      internal_product_name: clean(row.internal_product_name),\n      nayax_product_name: clean(row.nayax_product_name),\n      machine_id: clean(row.machine_id),\n      mdb_code: clean(row.mdb_code),\n      current_machine_qty: currentMachineQty,\n      min_stock: minStock,\n      target_stock: targetStock,\n      machine_capacity: machineCapacity,\n      message: currentMachineQty <= 0\n        ? `${name}: Slot laut Sheet leer - wird beim naechsten Sale auto-aufgefuellt.`\n        : `${name}: Slot laut Sheet bei ${currentMachineQty} Stueck.`\n    });\n  }\n}\n\n// PATCH AUTO_RESOLVE_WF5: Offene Hinweise auflösen wenn Bedingung nicht mehr gilt\n// Wird täglich von WF5 geprüft - User muss resolved=TRUE nie mehr manuell setzen.\nconst autoResolveHints = [];\nfor (const h of existingHinweise) {\n  const hResolved = String(h.resolved ?? '').trim().toUpperCase();\n  if (['TRUE','JA','YES','1','ERLEDIGT','RESOLVED'].includes(hResolved)) continue;\n  const hType = String(h.type ?? '').trim();\n  const hPk   = String(h.product_key ?? '').trim();\n  const hCat  = clean(h.created_at);\n  if (!hType || !hPk || !hCat) continue;\n\n  let shouldAutoResolve = false;\n\n  if (['EMPTY_BATCH', 'INSUFFICIENT_BATCH_STOCK'].includes(hType)) {\n    const totalRemain = remainPerKey.get(hPk) || 0;\n    if (totalRemain > 0) shouldAutoResolve = true;\n  }\n  if (hType === 'LOW_BATCH') {\n    const totalRemain = remainPerKey.get(hPk) || 0;\n    if (totalRemain > lowBatchThreshold) shouldAutoResolve = true;\n  }\n  if (hType === 'LOW_STOCK') {\n    // Resolve wenn irgendein aktiver Produkte-Slot für diesen product_key >= min_stock\n    const productRow = rows.find(r =>\n      String(r.product_key ?? '').trim() === hPk &&\n      isActive(r.active) &&\n      r.current_machine_qty !== undefined &&\n      r.min_stock !== undefined\n    );\n    if (productRow) {\n      const cmq  = num(productRow.current_machine_qty);\n      const minS = num(productRow.min_stock);\n      if (cmq !== null && minS !== null && cmq >= minS) shouldAutoResolve = true;\n    }\n  }\n\n  if (shouldAutoResolve) {\n    autoResolveHints.push({ created_at: hCat, resolved: 'TRUE' });\n  }\n}\n\nreturn [{\n  json: {\n    alerts,\n    autoResolveHints,\n    summary: {\n      checked_batches: rows.length,\n      alerts_created: alerts.length,\n      auto_resolved: autoResolveHints.length,\n      created_at: now\n    }\n  }\n}];",
+        "jsCode": "const rows = $input.all().map(i => i.json);\nconst alerts = [];\n\nfunction clean(value) {\n  return String(value ?? '')\n    .replace(/\\n/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction num(value) {\n  const n = Number(String(value ?? '').replace(',', '.'));\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction parseDate(value) {\n  const raw = clean(value);\n  if (!raw) return null;\n  const d = new Date(raw);\n  if (!Number.isNaN(d.getTime())) {\n    return d;\n  }\n  const m = raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);\n  if (m) {\n    return new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);\n  }\n  return null;\n}\n\nfunction daysUntil(value) {\n  const d = parseDate(value);\n  if (!d) return null;\n  const today = new Date();\n  today.setHours(0, 0, 0, 0);\n  const target = new Date(d);\n  target.setHours(0, 0, 0, 0);\n  return Math.ceil((target - today) / 86400000);\n}\n\nfunction isActive(value) {\n  const v = clean(value).toUpperCase();\n  return ['TRUE', '1', 'JA', 'YES', 'AKTIV', 'ACTIVE'].includes(v);\n}\n\nfunction productName(row) {\n  return clean(\n    row.internal_product_name ||\n    row.nayax_product_name ||\n    row.product_name ||\n    row.product_key ||\n    'Unbekanntes Produkt'\n  );\n}\n\nconst now = new Date().toISOString();\n\n// PATCH DEDUP_ALERTS: lade existierende Hinweise und baue Set\n// fuer Type+ProductKey-Combos, die innerhalb der letzten DEDUP_DAYS Tage\n// schon gemeldet wurden (resolved=FALSE). Diese werden im WF5-Run\n// uebersprungen, sodass User nicht jeden Tag dieselbe Mail bekommt.\nconst DEDUP_DAYS = 7;\nlet existingHinweise = [];\ntry {\n  existingHinweise = $('Google Sheets - Hinweise lesen').all().map(i => i.json);\n} catch (e) {\n  existingHinweise = [];\n}\nconst dedupCutoff = new Date(Date.now() - DEDUP_DAYS * 24 * 60 * 60 * 1000);\nconst recentNotifications = new Set();\nfor (const h of existingHinweise) {\n  const resolved = clean(h.resolved).toUpperCase();\n  if (['TRUE','JA','YES','1','ERLEDIGT','RESOLVED'].includes(resolved)) continue;\n  const createdRaw = clean(h.created_at);\n  const created = parseDate(createdRaw);\n  if (!created || created < dedupCutoff) continue;\n  const key = clean(h.type) + '|' + clean(h.product_key) + '|' + clean(h.batch_id || '');\n  recentNotifications.add(key);\n}\nfunction shouldEmitAlert(type, productKey, batchId) {\n  const key = (type || '') + '|' + (productKey || '') + '|' + (batchId || '');\n  if (recentNotifications.has(key)) return false;\n  recentNotifications.add(key);  // Auch innerhalb diesem Lauf nicht doppelt melden\n  return true;\n}\n\n// PATCH-A2c: Empty/Low-Batch Aggregat\n// Ziel: Erkenne wenn Lagercharge-Summe pro product_key <= Schwellwert,\n// unabhaengig vom (oft stale) current_machine_qty.\n// low_batch_qty_threshold kommt aus Config-Node (default 5).\nconst config = ($('Config - WF5') ? $('Config - WF5').first()?.json : {}) || {};\nconst lowBatchThreshold = Number(config.low_batch_qty_threshold ?? 5);\n\nconst remainPerKey = new Map();\nconst sampleRowPerKey = new Map();\nfor (const row of rows) {\n  const pk = clean(row.product_key);\n  if (!pk) continue;\n  const r = num(row.remaining_qty);\n  // Nur aktive Chargen mit numerischem remaining zaehlen.\n  // (Produkte-Zeilen ohne batch_id haben r=null und werden uebersprungen.)\n  if (r === null) continue;\n  const status = clean(row.status).toLowerCase();\n  // Pro Lagercharge-Zeile: nur aktiv oder leer (nicht 'verbraucht'/'verworfen') beruecksichtigen.\n  if (status && !['aktiv', 'leer'].includes(status)) continue;\n  remainPerKey.set(pk, (remainPerKey.get(pk) || 0) + r);\n  if (!sampleRowPerKey.has(pk)) sampleRowPerKey.set(pk, row);\n}\n\nconst emittedBatchAlert = new Set();\nfor (const [pk, total] of remainPerKey.entries()) {\n  if (total > lowBatchThreshold) continue;\n  if (emittedBatchAlert.has(pk)) continue;\n  const _typ = total <= 0 ? 'EMPTY_BATCH' : 'LOW_BATCH';\n  if (!shouldEmitAlert(_typ, pk, '')) { emittedBatchAlert.add(pk); continue; }\n  const sample = sampleRowPerKey.get(pk) || {};\n  const name = productName(sample);\n  const crit = total <= 0;\n  alerts.push({\n    created_at: now,\n    type: crit ? 'EMPTY_BATCH' : 'LOW_BATCH',\n    severity: crit ? 'critical' : 'warning',\n    product_key: pk,\n    product_name: name,\n    internal_product_name: clean(sample.internal_product_name),\n    nayax_product_name: clean(sample.nayax_product_name),\n    machine_id: clean(sample.machine_id),\n    mdb_code: clean(sample.mdb_code),\n    total_remaining_qty: total,\n    threshold: lowBatchThreshold,\n    message: crit\n      ? `${name}: Lagerbestand ist 0 - Produkt komplett leer.`\n      : `${name}: Nur noch ${total} Stueck im Lager (Schwellwert ${lowBatchThreshold}).`\n  });\n  emittedBatchAlert.add(pk);\n}\n\nfor (const row of rows) {\n  const productKey = clean(row.product_key);\n  if (!productKey) continue;\n\n  // Nur aktive Zeilen berÃ¼cksichtigen\n  const active =\n    isActive(row.active) ||\n    isActive(row.status) ||\n    isActive(row.replenishment_status);\n  if (!active) continue;\n\n  const name = productName(row);\n  const currentMachineQty = num(row.current_machine_qty);\n  const minStock = num(row.min_stock);\n  const targetStock = num(row.target_stock);\n  const machineCapacity = num(row.machine_capacity);\n  const mhd = clean(row.mhd);\n  const remainingQty = num(row.remaining_qty);\n  const days = daysUntil(mhd);\n\n  // MHD Warnung\n  if (mhd && days !== null && days <= 30 && shouldEmitAlert('MHD_WARNING', productKey, clean(row.batch_id))) {\n    alerts.push({\n      created_at: now,\n      type: 'MHD_WARNING',\n      severity: days < 0 ? 'critical' : 'warning',\n      product_key: productKey,\n      product_name: name,\n      internal_product_name: clean(row.internal_product_name),\n      nayax_product_name: clean(row.nayax_product_name),\n      batch_id: clean(row.batch_id),\n      mhd,\n      remaining_qty: remainingQty,\n      machine_id: clean(row.machine_id),\n      mdb_code: clean(row.mdb_code),\n      message:\n        days < 0\n          ? `${name}: Charge ${clean(row.batch_id)} ist seit ${Math.abs(days)} Tag(en) abgelaufen.`\n          : `${name}: Charge ${clean(row.batch_id)} lÃ¤uft in ${days} Tag(en) ab.`\n    });\n  }\n\n  // PATCH AUTO_REFILL_WF5: LOW_STOCK informativ statt warning/critical,\n  // DEDUP: nur einmal pro 7 Tage\n  // weil WF3 auto-refill den Slot beim naechsten Sale heilt.\n  if (\n    currentMachineQty !== null &&\n    minStock !== null &&\n    machineCapacity !== null &&\n    machineCapacity > 0 &&\n    currentMachineQty < minStock &&\n    shouldEmitAlert('LOW_STOCK', productKey, '')\n  ) {\n    alerts.push({\n      created_at: now,\n      type: 'LOW_STOCK',\n      severity: 'info',\n      product_key: productKey,\n      product_name: name,\n      internal_product_name: clean(row.internal_product_name),\n      nayax_product_name: clean(row.nayax_product_name),\n      machine_id: clean(row.machine_id),\n      mdb_code: clean(row.mdb_code),\n      current_machine_qty: currentMachineQty,\n      min_stock: minStock,\n      target_stock: targetStock,\n      machine_capacity: machineCapacity,\n      message: currentMachineQty <= 0\n        ? `${name}: Slot laut Sheet leer - wird beim naechsten Sale auto-aufgefuellt.`\n        : `${name}: Slot laut Sheet bei ${currentMachineQty} Stueck.`\n    });\n  }\n}\n\n// PATCH AUTO_RESOLVE_WF5: Offene Hinweise auflÃ¶sen wenn Bedingung nicht mehr gilt\n// Wird tÃ¤glich von WF5 geprÃ¼ft - User muss resolved=TRUE nie mehr manuell setzen.\nconst autoResolveHints = [];\nfor (const h of existingHinweise) {\n  const hResolved = String(h.resolved ?? '').trim().toUpperCase();\n  if (['TRUE','JA','YES','1','ERLEDIGT','RESOLVED'].includes(hResolved)) continue;\n  const hType = String(h.type ?? '').trim();\n  const hPk   = String(h.product_key ?? '').trim();\n  const hCat  = clean(h.created_at);\n  if (!hType || !hPk || !hCat) continue;\n\n  let shouldAutoResolve = false;\n\n  if (['EMPTY_BATCH', 'INSUFFICIENT_BATCH_STOCK'].includes(hType)) {\n    const totalRemain = remainPerKey.get(hPk) || 0;\n    if (totalRemain > 0) shouldAutoResolve = true;\n  }\n  if (hType === 'LOW_BATCH') {\n    const totalRemain = remainPerKey.get(hPk) || 0;\n    if (totalRemain > lowBatchThreshold) shouldAutoResolve = true;\n  }\n  if (hType === 'LOW_STOCK') {\n    // Resolve wenn irgendein aktiver Produkte-Slot fÃ¼r diesen product_key >= min_stock\n    const productRow = rows.find(r =>\n      String(r.product_key ?? '').trim() === hPk &&\n      isActive(r.active) &&\n      r.current_machine_qty !== undefined &&\n      r.min_stock !== undefined\n    );\n    if (productRow) {\n      const cmq  = num(productRow.current_machine_qty);\n      const minS = num(productRow.min_stock);\n      if (cmq !== null && minS !== null && cmq >= minS) shouldAutoResolve = true;\n    }\n  }\n\n  if (shouldAutoResolve) {\n    autoResolveHints.push({ created_at: hCat, resolved: 'TRUE' });\n  }\n}\n\nreturn [{\n  json: {\n    alerts,\n    autoResolveHints,\n    summary: {\n      checked_batches: rows.length,\n      alerts_created: alerts.length,\n      auto_resolved: autoResolveHints.length,\n      created_at: now\n    }\n  }\n}];",
         "notice": ""
       },
       "id": "a97f4d9e-ec8e-451c-92a4-c66514d6d092",
@@ -359,13 +339,14 @@
           "id": "6GG86fWHw536Rk36",
           "name": "Google Sheets API"
         }
-      }
+      },
+      "disabled": true
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "// WF5 Mail-Builder — Single-Source aus PostgreSQL (Dashboard-Digest).\n// Holt /api/v2/alerts/digest (PG-Fakten) und rendert die Report-Mail daraus.\n// Bestand kommt aus PG (nicht mehr Google Sheets); AUTO_REFILL_SLOT/info-\n// Hinweise zählen NICHT mehr als Workflow-Fehler.\nconst cfg = (() => { try { return $('Config - WF5').first().json || {}; } catch (e) { return {}; } })();\nconst DIGEST_URL = cfg.digest_url || 'http://homelab-dashboard:8787/api/v2/alerts/digest';\n\nlet digest = {};\ntry {\n  const resp = await this.helpers.httpRequest({ method: 'GET', url: DIGEST_URL, json: true });\n  digest = (resp && resp.data) ? resp.data : (resp || {});\n} catch (e) {\n  digest = { _error: String(e && e.message || e) };\n}\n\nconst mhdExpired   = digest.mhdExpired   || [];\nconst mhdSoon      = digest.mhdSoon      || [];\nconst emptySlots   = digest.emptySlots   || [];\nconst lowBatches   = digest.lowBatches   || [];\nconst emptyBatches = digest.emptyBatches || [];\nconst dataIssues   = digest.dataIssues   || [];\n\nfunction clean(v) { return String(v == null ? '' : v).replace(/\\s+/g, ' ').trim(); }\nfunction esc(v) {\n  return clean(v).replace(/&/g, '&amp;').replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n}\nfunction formatDate(v) {\n  const raw = clean(v);\n  if (!raw) return '-';\n  const d = new Date(raw);\n  if (Number.isNaN(d.getTime())) return raw;\n  return d.toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', year: 'numeric' });\n}\nconst dateText = new Date().toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', year: 'numeric' });\n\nfunction card(title, count, color) {\n  return '<td style=\"width:50%;padding:8px;\"><div style=\"border:1px solid #e5e7eb;border-radius:12px;background:#ffffff;padding:14px;\">' +\n    '<div style=\"font-size:12px;color:#6b7280;margin-bottom:4px;\">' + esc(title) + '</div>' +\n    '<div style=\"font-size:26px;font-weight:700;color:' + color + ';\">' + count + '</div></div></td>';\n}\nfunction section(title, itemsHtml) {\n  if (!itemsHtml) return '';\n  return '<h2 style=\"font-size:18px;margin:28px 0 10px;color:#111827;\">' + esc(title) + '</h2>' +\n    '<div style=\"border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#ffffff;\">' + itemsHtml + '</div>';\n}\nfunction itemBlock(lines) {\n  return '<div style=\"padding:14px 16px;border-bottom:1px solid #e5e7eb;\">' +\n    lines.filter(Boolean).map(function (l) {\n      return '<div style=\"margin:4px 0;font-size:14px;line-height:1.35;\">' + l + '</div>';\n    }).join('') + '</div>';\n}\n\nfunction mhdBlock(a) {\n  const days = a.days_remaining;\n  const daysText = (days == null) ? 'Datum prüfen'\n    : (days < 0 ? 'seit ' + Math.abs(days) + ' Tag(en) abgelaufen' : 'in ' + days + ' Tag(en)');\n  return itemBlock([\n    esc(a.product_name) + (a.machine_id ? ' | Maschine: ' + esc(a.machine_id) : '') + (a.batch_key ? ' | Charge: ' + esc(a.batch_key) : ''),\n    'MHD: ' + esc(formatDate(a.mhd_date)) + ' | ' + esc(daysText) + ' | Restmenge: ' + (a.remaining_qty != null ? esc(a.remaining_qty) : '-')\n  ]);\n}\nfunction slotBlock(a) {\n  return itemBlock([\n    esc(a.product_name) + (a.machine_id ? ' | Maschine: ' + esc(a.machine_id) : '') + (a.mdb_code ? ' | MDB: ' + esc(a.mdb_code) : ''),\n    'Bestand im Automaten: ' + esc(a.current_machine_qty != null ? a.current_machine_qty : 0)\n  ]);\n}\nfunction batchBlock(a) {\n  return itemBlock([\n    esc(a.product_name) + (a.product_key ? ' | SKU: ' + esc(a.product_key) : ''),\n    'Lagerbestand: ' + esc(a.total_remaining_qty != null ? a.total_remaining_qty : 0) + ' (Schwellwert ' + esc(a.threshold != null ? a.threshold : 5) + ')'\n  ]);\n}\nfunction issueBlock(a) {\n  return itemBlock([\n    esc(a.entity || a.warning_type || 'Hinweis') + ' | Typ: ' + esc(a.warning_type || '-') + ' | Schweregrad: ' + esc(a.severity || '-'),\n    a.message ? 'Hinweis: ' + esc(a.message) : ''\n  ]);\n}\n\nconst batchAlerts = emptyBatches.concat(lowBatches);\n\nconst subjectParts = [];\nif (mhdExpired.length)  subjectParts.push(mhdExpired.length + ' MHD abgelaufen');\nif (mhdSoon.length)     subjectParts.push(mhdSoon.length + ' MHD bald');\nif (emptySlots.length)  subjectParts.push(emptySlots.length + ' leere Slots');\nif (batchAlerts.length) subjectParts.push(batchAlerts.length + ' Lager niedrig');\nif (dataIssues.length)  subjectParts.push(dataIssues.length + ' Datenfehler');\nconst subject = subjectParts.length\n  ? 'Automatenlager Check ' + dateText + ': ' + subjectParts.join(' | ')\n  : 'Automatenlager Check ' + dateText + ': keine akuten Punkte';\n\nconst nextSteps = [];\nif (mhdExpired.length)  nextSteps.push('Abgelaufene Produkte sofort aus Automat/Lager entfernen.');\nif (mhdSoon.length)     nextSteps.push('Produkte mit nahendem MHD priorisiert verkaufen oder austauschen.');\nif (emptySlots.length)  nextSteps.push('Leere Automaten-Slots für die nächste Befüllung einplanen.');\nif (batchAlerts.length) nextSteps.push('Niedrige Lagerbestände nachbestellen.');\nif (dataIssues.length)  nextSteps.push('Daten-/Workflowfehler prüfen (Monitoring/Dashboard).');\nif (!nextSteps.length)  nextSteps.push('Keine Aktion erforderlich.');\n\nconst errBanner = digest._error\n  ? '<div style=\"background:#fef2f2;border:1px solid #fecaca;color:#7f1d1d;border-radius:12px;padding:12px 14px;margin-bottom:18px;font-size:13px;\">Digest-Endpunkt nicht erreichbar: ' + esc(digest._error) + '</div>'\n  : '';\n\nconst html =\n  '<div style=\"font-family:Arial,Helvetica,sans-serif;background:#f3f4f6;padding:24px;color:#111827;\">' +\n  '<div style=\"max-width:780px;margin:0 auto;background:#ffffff;border-radius:16px;padding:24px;border:1px solid #e5e7eb;\">' +\n  '<h1 style=\"font-size:24px;margin:0 0 4px;\">Automatenlager Check</h1>' +\n  '<div style=\"font-size:14px;color:#6b7280;margin-bottom:6px;\">Datum: ' + esc(dateText) + '</div>' +\n  '<div style=\"font-size:12px;color:#9ca3af;margin-bottom:18px;\">Datenquelle: PostgreSQL (live)</div>' +\n  errBanner +\n  '<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:separate;border-spacing:0;margin-bottom:18px;\">' +\n  '<tr>' + card('MHD abgelaufen', mhdExpired.length, '#b91c1c') + card('MHD läuft bald ab', mhdSoon.length, '#b45309') + '</tr>' +\n  '<tr>' + card('Leere Slots (Automat)', emptySlots.length, '#1d4ed8') + card('Lager niedrig/leer', batchAlerts.length, '#b45309') + '</tr>' +\n  '<tr>' + card('Daten-/Workflowfehler', dataIssues.length, '#7f1d1d') + card('', '', '#ffffff') + '</tr>' +\n  '</table>' +\n  section('MHD abgelaufen', mhdExpired.map(mhdBlock).join('')) +\n  section('MHD läuft bald ab', mhdSoon.map(mhdBlock).join('')) +\n  section('Leere Automaten-Slots', emptySlots.map(slotBlock).join('')) +\n  section('Lagerbestand niedrig/leer', batchAlerts.map(batchBlock).join('')) +\n  section('Daten-/Workflowfehler', dataIssues.map(issueBlock).join('')) +\n  '<h2 style=\"font-size:18px;margin:28px 0 10px;\">Nächste Schritte</h2>' +\n  '<ul style=\"margin:0;padding-left:20px;\">' +\n  nextSteps.map(function (s) { return '<li style=\"margin:6px 0;font-size:14px;line-height:1.35;\">' + esc(s) + '</li>'; }).join('') +\n  '</ul>' +\n  '<div style=\"font-size:12px;color:#6b7280;margin-top:28px;border-top:1px solid #e5e7eb;padding-top:12px;\">Automatisch erstellt durch n8n · Quelle: Dashboard /api/v2/alerts/digest (PostgreSQL).</div>' +\n  '</div></div>';\n\nconst text = [\n  'Automatenlager Check ' + dateText + ' (Quelle: PostgreSQL)',\n  '',\n  'MHD abgelaufen: ' + mhdExpired.length,\n  'MHD läuft bald ab: ' + mhdSoon.length,\n  'Leere Slots (Automat): ' + emptySlots.length,\n  'Lager niedrig/leer: ' + batchAlerts.length,\n  'Daten-/Workflowfehler: ' + dataIssues.length\n].join('\\n');\n\nreturn [{\n  json: {\n    email_subject: subject,\n    email_body: html,\n    email_text: text,\n    source: 'postgres-digest',\n    mhd_expired_count: mhdExpired.length,\n    mhd_soon_count: mhdSoon.length,\n    empty_slots_count: emptySlots.length,\n    batch_alert_count: batchAlerts.length,\n    data_issue_count: dataIssues.length,\n    digest_error: digest._error || null\n  }\n}];\n",
+        "jsCode": "// WF5 Mail-Builder â€” Single-Source aus PostgreSQL (Dashboard-Digest).\n// Holt /api/v2/alerts/digest (PG-Fakten) und rendert die Report-Mail daraus.\n// Bestand kommt aus PG (nicht mehr Google Sheets); AUTO_REFILL_SLOT/info-\n// Hinweise zÃ¤hlen NICHT mehr als Workflow-Fehler.\nconst cfg = (() => { try { return $('Config - WF5').first().json || {}; } catch (e) { return {}; } })();\nconst DIGEST_URL = cfg.digest_url || 'http://homelab-dashboard:8787/api/v2/alerts/digest';\n\nlet digest = {};\ntry {\n  const resp = await this.helpers.httpRequest({ method: 'GET', url: DIGEST_URL, json: true });\n  digest = (resp && resp.data) ? resp.data : (resp || {});\n} catch (e) {\n  digest = { _error: String(e && e.message || e) };\n}\n\nconst mhdExpired   = digest.mhdExpired   || [];\nconst mhdSoon      = digest.mhdSoon      || [];\nconst emptySlots   = digest.emptySlots   || [];\nconst lowBatches   = digest.lowBatches   || [];\nconst emptyBatches = digest.emptyBatches || [];\nconst dataIssues   = digest.dataIssues   || [];\n\nfunction clean(v) { return String(v == null ? '' : v).replace(/\\s+/g, ' ').trim(); }\nfunction esc(v) {\n  return clean(v).replace(/&/g, '&amp;').replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n}\nfunction formatDate(v) {\n  const raw = clean(v);\n  if (!raw) return '-';\n  const d = new Date(raw);\n  if (Number.isNaN(d.getTime())) return raw;\n  return d.toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', year: 'numeric' });\n}\nconst dateText = new Date().toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', year: 'numeric' });\n\nfunction card(title, count, color) {\n  return '<td style=\"width:50%;padding:8px;\"><div style=\"border:1px solid #e5e7eb;border-radius:12px;background:#ffffff;padding:14px;\">' +\n    '<div style=\"font-size:12px;color:#6b7280;margin-bottom:4px;\">' + esc(title) + '</div>' +\n    '<div style=\"font-size:26px;font-weight:700;color:' + color + ';\">' + count + '</div></div></td>';\n}\nfunction section(title, itemsHtml) {\n  if (!itemsHtml) return '';\n  return '<h2 style=\"font-size:18px;margin:28px 0 10px;color:#111827;\">' + esc(title) + '</h2>' +\n    '<div style=\"border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#ffffff;\">' + itemsHtml + '</div>';\n}\nfunction itemBlock(lines) {\n  return '<div style=\"padding:14px 16px;border-bottom:1px solid #e5e7eb;\">' +\n    lines.filter(Boolean).map(function (l) {\n      return '<div style=\"margin:4px 0;font-size:14px;line-height:1.35;\">' + l + '</div>';\n    }).join('') + '</div>';\n}\n\nfunction mhdBlock(a) {\n  const days = a.days_remaining;\n  const daysText = (days == null) ? 'Datum prÃ¼fen'\n    : (days < 0 ? 'seit ' + Math.abs(days) + ' Tag(en) abgelaufen' : 'in ' + days + ' Tag(en)');\n  return itemBlock([\n    esc(a.product_name) + (a.machine_id ? ' | Maschine: ' + esc(a.machine_id) : '') + (a.batch_key ? ' | Charge: ' + esc(a.batch_key) : ''),\n    'MHD: ' + esc(formatDate(a.mhd_date)) + ' | ' + esc(daysText) + ' | Restmenge: ' + (a.remaining_qty != null ? esc(a.remaining_qty) : '-')\n  ]);\n}\nfunction slotBlock(a) {\n  return itemBlock([\n    esc(a.product_name) + (a.machine_id ? ' | Maschine: ' + esc(a.machine_id) : '') + (a.mdb_code ? ' | MDB: ' + esc(a.mdb_code) : ''),\n    'Bestand im Automaten: ' + esc(a.current_machine_qty != null ? a.current_machine_qty : 0)\n  ]);\n}\nfunction batchBlock(a) {\n  return itemBlock([\n    esc(a.product_name) + (a.product_key ? ' | SKU: ' + esc(a.product_key) : ''),\n    'Lagerbestand: ' + esc(a.total_remaining_qty != null ? a.total_remaining_qty : 0) + ' (Schwellwert ' + esc(a.threshold != null ? a.threshold : 5) + ')'\n  ]);\n}\nfunction issueBlock(a) {\n  return itemBlock([\n    esc(a.entity || a.warning_type || 'Hinweis') + ' | Typ: ' + esc(a.warning_type || '-') + ' | Schweregrad: ' + esc(a.severity || '-'),\n    a.message ? 'Hinweis: ' + esc(a.message) : ''\n  ]);\n}\n\nconst batchAlerts = emptyBatches.concat(lowBatches);\n\nconst subjectParts = [];\nif (mhdExpired.length)  subjectParts.push(mhdExpired.length + ' MHD abgelaufen');\nif (mhdSoon.length)     subjectParts.push(mhdSoon.length + ' MHD bald');\nif (emptySlots.length)  subjectParts.push(emptySlots.length + ' leere Slots');\nif (batchAlerts.length) subjectParts.push(batchAlerts.length + ' Lager niedrig');\nif (dataIssues.length)  subjectParts.push(dataIssues.length + ' Datenfehler');\nconst subject = subjectParts.length\n  ? 'Automatenlager Check ' + dateText + ': ' + subjectParts.join(' | ')\n  : 'Automatenlager Check ' + dateText + ': keine akuten Punkte';\n\nconst nextSteps = [];\nif (mhdExpired.length)  nextSteps.push('Abgelaufene Produkte sofort aus Automat/Lager entfernen.');\nif (mhdSoon.length)     nextSteps.push('Produkte mit nahendem MHD priorisiert verkaufen oder austauschen.');\nif (emptySlots.length)  nextSteps.push('Leere Automaten-Slots fÃ¼r die nÃ¤chste BefÃ¼llung einplanen.');\nif (batchAlerts.length) nextSteps.push('Niedrige LagerbestÃ¤nde nachbestellen.');\nif (dataIssues.length)  nextSteps.push('Daten-/Workflowfehler prÃ¼fen (Monitoring/Dashboard).');\nif (!nextSteps.length)  nextSteps.push('Keine Aktion erforderlich.');\n\nconst errBanner = digest._error\n  ? '<div style=\"background:#fef2f2;border:1px solid #fecaca;color:#7f1d1d;border-radius:12px;padding:12px 14px;margin-bottom:18px;font-size:13px;\">Digest-Endpunkt nicht erreichbar: ' + esc(digest._error) + '</div>'\n  : '';\n\nconst html =\n  '<div style=\"font-family:Arial,Helvetica,sans-serif;background:#f3f4f6;padding:24px;color:#111827;\">' +\n  '<div style=\"max-width:780px;margin:0 auto;background:#ffffff;border-radius:16px;padding:24px;border:1px solid #e5e7eb;\">' +\n  '<h1 style=\"font-size:24px;margin:0 0 4px;\">Automatenlager Check</h1>' +\n  '<div style=\"font-size:14px;color:#6b7280;margin-bottom:6px;\">Datum: ' + esc(dateText) + '</div>' +\n  '<div style=\"font-size:12px;color:#9ca3af;margin-bottom:18px;\">Datenquelle: PostgreSQL (live)</div>' +\n  errBanner +\n  '<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:separate;border-spacing:0;margin-bottom:18px;\">' +\n  '<tr>' + card('MHD abgelaufen', mhdExpired.length, '#b91c1c') + card('MHD lÃ¤uft bald ab', mhdSoon.length, '#b45309') + '</tr>' +\n  '<tr>' + card('Leere Slots (Automat)', emptySlots.length, '#1d4ed8') + card('Lager niedrig/leer', batchAlerts.length, '#b45309') + '</tr>' +\n  '<tr>' + card('Daten-/Workflowfehler', dataIssues.length, '#7f1d1d') + card('', '', '#ffffff') + '</tr>' +\n  '</table>' +\n  section('MHD abgelaufen', mhdExpired.map(mhdBlock).join('')) +\n  section('MHD lÃ¤uft bald ab', mhdSoon.map(mhdBlock).join('')) +\n  section('Leere Automaten-Slots', emptySlots.map(slotBlock).join('')) +\n  section('Lagerbestand niedrig/leer', batchAlerts.map(batchBlock).join('')) +\n  section('Daten-/Workflowfehler', dataIssues.map(issueBlock).join('')) +\n  '<h2 style=\"font-size:18px;margin:28px 0 10px;\">NÃ¤chste Schritte</h2>' +\n  '<ul style=\"margin:0;padding-left:20px;\">' +\n  nextSteps.map(function (s) { return '<li style=\"margin:6px 0;font-size:14px;line-height:1.35;\">' + esc(s) + '</li>'; }).join('') +\n  '</ul>' +\n  '<div style=\"font-size:12px;color:#6b7280;margin-top:28px;border-top:1px solid #e5e7eb;padding-top:12px;\">Automatisch erstellt durch n8n Â· Quelle: Dashboard /api/v2/alerts/digest (PostgreSQL).</div>' +\n  '</div></div>';\n\nconst text = [\n  'Automatenlager Check ' + dateText + ' (Quelle: PostgreSQL)',\n  '',\n  'MHD abgelaufen: ' + mhdExpired.length,\n  'MHD lÃ¤uft bald ab: ' + mhdSoon.length,\n  'Leere Slots (Automat): ' + emptySlots.length,\n  'Lager niedrig/leer: ' + batchAlerts.length,\n  'Daten-/Workflowfehler: ' + dataIssues.length\n].join('\\n');\n\nreturn [{\n  json: {\n    email_subject: subject,\n    email_body: html,\n    email_text: text,\n    source: 'postgres-digest',\n    mhd_expired_count: mhdExpired.length,\n    mhd_soon_count: mhdSoon.length,\n    empty_slots_count: emptySlots.length,\n    batch_alert_count: batchAlerts.length,\n    data_issue_count: dataIssues.length,\n    digest_error: digest._error || null\n  }\n}];\n",
         "notice": ""
       },
       "id": "707bd02a-2473-40d0-a938-6357c809f715",
@@ -475,36 +456,23 @@
     },
     {
       "parameters": {
-        "authentication": "oAuth2",
-        "resource": "sheet",
-        "operation": "read",
-        "documentId": {
-          "__rl": true,
-          "value": "={{ $('Config - WF5').first().json.google_sheet_id }}",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "={{ $('Config - WF5').first().json.sheet_verarbeitete_transaktionen }}",
-          "mode": "name"
-        },
-        "filtersUI": {},
-        "combineFilters": "AND",
+        "operation": "executeQuery",
+        "query": "SELECT\n  st.nayax_transaction_id AS transaction_id,\n  to_char(st.settlement_at AT TIME ZONE 'Europe/Berlin','YYYY-MM-DD') AS sale_date,\n  to_char(st.settlement_at,'YYYY-MM-DDTHH24:MI:SS') || 'Z' AS settlement_datetime_gmt,\n  m.machine_key AS machine_id,\n  COALESCE(p.product_key,'') AS product_key,\n  st.mdb_code AS mdb_code_extracted,\n  st.quantity,\n  st.gross_amount AS umsatz_brutto,\n  st.processing_status AS status,\n  st.product_name_raw AS nayax_product_name,\n  sa.product_slot_key AS product_slot_id\nFROM automatenlager.sales_transactions st\nJOIN automatenlager.machines m ON m.machine_id = st.machine_id\nLEFT JOIN automatenlager.products p ON p.product_id = st.product_id\nLEFT JOIN automatenlager.slot_assignments sa ON sa.slot_assignment_id = st.slot_assignment_id\nWHERE st.settlement_at > NOW() - INTERVAL '90 days'\nORDER BY st.settlement_at ASC",
         "options": {}
       },
       "id": "0a9b4948-0150-4c4d-888e-6593a663b1e8",
       "name": "Google Sheets - Verarbeitete Transaktionen lesen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [
         48,
         432
       ],
       "executeOnce": true,
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
         }
       }
     },
@@ -542,7 +510,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "// PATCH AUTO_RESOLVE_WF5: Gibt autoResolveHints als einzelne Items zurück.\n// Wenn keine Einträge vorhanden  kein Item  Google-Sheets-Update wird nicht ausgeführt.\nconst hints = ($input.first()?.json?.autoResolveHints) || [];\nif (!hints.length) return [];\nreturn hints.map(h => ({ json: h }));",
+        "jsCode": "// PATCH AUTO_RESOLVE_WF5: Gibt autoResolveHints als einzelne Items zurÃ¼ck.\n// Wenn keine EintrÃ¤ge vorhanden  kein Item  Google-Sheets-Update wird nicht ausgefÃ¼hrt.\nconst hints = ($input.first()?.json?.autoResolveHints) || [];\nif (!hints.length) return [];\nreturn hints.map(h => ({ json: h }));",
         "notice": ""
       },
       "id": "3a31df9d-e961-46b6-a423-6c4a0dad88e4",
@@ -556,63 +524,22 @@
     },
     {
       "parameters": {
-        "authentication": "oAuth2",
-        "resource": "sheet",
-        "operation": "update",
-        "documentId": {
-          "__rl": true,
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Fehler_und_Hinweise",
-          "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "created_at": "={{ $json.created_at }}",
-            "resolved": "={{ $json.resolved }}"
-          },
-          "matchingColumns": [
-            "created_at"
-          ],
-          "schema": [
-            {
-              "id": "created_at",
-              "displayName": "created_at",
-              "required": false,
-              "defaultMatch": true,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "resolved",
-              "displayName": "resolved",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": false
-            }
-          ]
-        },
+        "operation": "executeQuery",
+        "query": "UPDATE automatenlager.warnings\nSET resolved = TRUE, resolved_at = NOW()\nWHERE to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DDTHH24:MI:SS') || 'Z' = '{{ $json.created_at }}'",
         "options": {}
       },
       "id": "a072b25c-409f-42a3-922d-cb3eb8a7614b",
-      "name": "Google Sheets - Hinweise auflösen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
+      "name": "Google Sheets - Hinweise auflÃ¶sen",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [
         1248,
         272
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
         }
       }
     },
@@ -860,7 +787,7 @@
       "main": [
         [
           {
-            "node": "Google Sheets - Hinweise auflösen",
+            "node": "Google Sheets - Hinweise auflÃ¶sen",
             "type": "main",
             "index": 0
           }
@@ -890,9 +817,939 @@
       ]
     }
   },
-  "active": true,
   "settings": {
     "executionOrder": "v1"
   },
-  "id": "3ceKeNWmdj455Tcr"
+  "staticData": {
+    "node:Schedule Trigger - taeglich 07:00": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": null,
+  "pinData": null,
+  "versionId": "acd32641-bd41-4e00-8bd9-46e0c7e1dae0",
+  "activeVersionId": "acd32641-bd41-4e00-8bd9-46e0c7e1dae0",
+  "versionCounter": 10,
+  "triggerCount": 2,
+  "shared": [
+    {
+      "updatedAt": "2026-05-25T14:37:23.847Z",
+      "createdAt": "2026-05-25T14:37:23.847Z",
+      "role": "workflow:owner",
+      "workflowId": "3ceKeNWmdj455Tcr",
+      "projectId": "68wR1Q9zBUk0Gxhv",
+      "project": {
+        "updatedAt": "2026-05-19T17:59:53.408Z",
+        "createdAt": "2026-05-19T16:50:04.773Z",
+        "id": "68wR1Q9zBUk0Gxhv",
+        "name": "Patrick Matthes <patrickmatthes2609@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-06-02T20:27:11.774Z",
+    "createdAt": "2026-06-02T20:27:11.774Z",
+    "versionId": "acd32641-bd41-4e00-8bd9-46e0c7e1dae0",
+    "workflowId": "3ceKeNWmdj455Tcr",
+    "nodes": [
+      {
+        "parameters": {
+          "notice": ""
+        },
+        "id": "dd0434f6-77d1-4cff-8ee1-4bb81661f02f",
+        "name": "Manual Trigger",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          -496,
+          64
+        ]
+      },
+      {
+        "parameters": {
+          "notice": "",
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "notice": "",
+                "expression": "0 7 * * *"
+              }
+            ]
+          }
+        },
+        "id": "de27b27c-75c6-405e-8525-326a338ffd1c",
+        "name": "Schedule Trigger - taeglich 07:00",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -496,
+          256
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "duplicateItem": false,
+          "assignments": {
+            "assignments": [
+              {
+                "id": "machine_id",
+                "name": "machine_id",
+                "value": "457107528",
+                "type": "string"
+              },
+              {
+                "id": "google_sheet_id",
+                "name": "google_sheet_id",
+                "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+                "type": "string"
+              },
+              {
+                "id": "sheet_produkte",
+                "name": "sheet_produkte",
+                "value": "Produkte",
+                "type": "string"
+              },
+              {
+                "id": "sheet_lagerchargen",
+                "name": "sheet_lagerchargen",
+                "value": "Lagerchargen",
+                "type": "string"
+              },
+              {
+                "id": "sheet_hinweise",
+                "name": "sheet_hinweise",
+                "value": "Fehler_und_Hinweise",
+                "type": "string"
+              },
+              {
+                "id": "mhd_warning_days",
+                "name": "mhd_warning_days",
+                "value": 30,
+                "type": "number"
+              },
+              {
+                "id": "low_batch_qty_threshold",
+                "name": "low_batch_qty_threshold",
+                "value": 5,
+                "type": "number"
+              },
+              {
+                "id": "sheet_verarbeitete_transaktionen",
+                "name": "sheet_verarbeitete_transaktionen",
+                "value": "Verarbeitete_Transaktionen",
+                "type": "string"
+              }
+            ]
+          },
+          "includeOtherFields": false,
+          "options": {}
+        },
+        "id": "10ce4c4f-87be-45d8-b0c8-2979d19e9263",
+        "name": "Config - WF5",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -256,
+          160
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "database",
+          "operation": "executeQuery",
+          "query": "SELECT sb.batch_key AS batch_id, p.product_key AS product_key, p.name AS product_name,\n       'aktiv' AS status,\n       COALESCE(to_char(sb.mhd_date,'YYYY-MM-DD'),'') AS mhd,\n       sb.remaining_qty::text AS remaining_qty\nFROM automatenlager.stock_batches sb\nJOIN automatenlager.products p ON p.product_id = sb.product_id\nWHERE sb.status IN ('aktiv','active','reserve')\nORDER BY p.name, sb.mhd_date ASC NULLS LAST",
+          "options": {}
+        },
+        "id": "3574a34c-f614-4cc9-aba0-4dcc762bf0c7",
+        "name": "PG - Lagerchargen lesen",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          0,
+          0
+        ],
+        "executeOnce": true,
+        "credentials": {
+          "postgres": {
+            "id": "Jept3990Uq8aN3Tr",
+            "name": "PostgreSQL"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "authentication": "oAuth2",
+          "resource": "sheet",
+          "operation": "read",
+          "documentId": {
+            "__rl": true,
+            "value": "={{ $('Config - WF5').first().json.google_sheet_id }}",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "={{ $('Config - WF5').first().json.sheet_produkte }}",
+            "mode": "name"
+          },
+          "filtersUI": {},
+          "combineFilters": "AND",
+          "options": {}
+        },
+        "id": "8547da6a-1da7-4ed9-9112-ef8cc80bb934",
+        "name": "Google Sheets - Produkte lesen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.5,
+        "position": [
+          48,
+          144
+        ],
+        "executeOnce": true,
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "authentication": "oAuth2",
+          "resource": "sheet",
+          "operation": "read",
+          "documentId": {
+            "__rl": true,
+            "value": "={{ $('Config - WF5').first().json.google_sheet_id }}",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "={{ $('Config - WF5').first().json.sheet_hinweise }}",
+            "mode": "name"
+          },
+          "filtersUI": {},
+          "combineFilters": "AND",
+          "options": {}
+        },
+        "id": "7e760748-c859-4dcc-9dad-8487e3b2d4a2",
+        "name": "Google Sheets - Hinweise lesen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.5,
+        "position": [
+          48,
+          288
+        ],
+        "executeOnce": true,
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const rows = $input.all().map(i => i.json);\nconst alerts = [];\n\nfunction clean(value) {\n  return String(value ?? '')\n    .replace(/\\n/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction num(value) {\n  const n = Number(String(value ?? '').replace(',', '.'));\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction parseDate(value) {\n  const raw = clean(value);\n  if (!raw) return null;\n  const d = new Date(raw);\n  if (!Number.isNaN(d.getTime())) {\n    return d;\n  }\n  const m = raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);\n  if (m) {\n    return new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);\n  }\n  return null;\n}\n\nfunction daysUntil(value) {\n  const d = parseDate(value);\n  if (!d) return null;\n  const today = new Date();\n  today.setHours(0, 0, 0, 0);\n  const target = new Date(d);\n  target.setHours(0, 0, 0, 0);\n  return Math.ceil((target - today) / 86400000);\n}\n\nfunction isActive(value) {\n  const v = clean(value).toUpperCase();\n  return ['TRUE', '1', 'JA', 'YES', 'AKTIV', 'ACTIVE'].includes(v);\n}\n\nfunction productName(row) {\n  return clean(\n    row.internal_product_name ||\n    row.nayax_product_name ||\n    row.product_name ||\n    row.product_key ||\n    'Unbekanntes Produkt'\n  );\n}\n\nconst now = new Date().toISOString();\n\n// PATCH DEDUP_ALERTS: lade existierende Hinweise und baue Set\n// fuer Type+ProductKey-Combos, die innerhalb der letzten DEDUP_DAYS Tage\n// schon gemeldet wurden (resolved=FALSE). Diese werden im WF5-Run\n// uebersprungen, sodass User nicht jeden Tag dieselbe Mail bekommt.\nconst DEDUP_DAYS = 7;\nlet existingHinweise = [];\ntry {\n  existingHinweise = $('Google Sheets - Hinweise lesen').all().map(i => i.json);\n} catch (e) {\n  existingHinweise = [];\n}\nconst dedupCutoff = new Date(Date.now() - DEDUP_DAYS * 24 * 60 * 60 * 1000);\nconst recentNotifications = new Set();\nfor (const h of existingHinweise) {\n  const resolved = clean(h.resolved).toUpperCase();\n  if (['TRUE','JA','YES','1','ERLEDIGT','RESOLVED'].includes(resolved)) continue;\n  const createdRaw = clean(h.created_at);\n  const created = parseDate(createdRaw);\n  if (!created || created < dedupCutoff) continue;\n  const key = clean(h.type) + '|' + clean(h.product_key) + '|' + clean(h.batch_id || '');\n  recentNotifications.add(key);\n}\nfunction shouldEmitAlert(type, productKey, batchId) {\n  const key = (type || '') + '|' + (productKey || '') + '|' + (batchId || '');\n  if (recentNotifications.has(key)) return false;\n  recentNotifications.add(key);  // Auch innerhalb diesem Lauf nicht doppelt melden\n  return true;\n}\n\n// PATCH-A2c: Empty/Low-Batch Aggregat\n// Ziel: Erkenne wenn Lagercharge-Summe pro product_key <= Schwellwert,\n// unabhaengig vom (oft stale) current_machine_qty.\n// low_batch_qty_threshold kommt aus Config-Node (default 5).\nconst config = ($('Config - WF5') ? $('Config - WF5').first()?.json : {}) || {};\nconst lowBatchThreshold = Number(config.low_batch_qty_threshold ?? 5);\n\nconst remainPerKey = new Map();\nconst sampleRowPerKey = new Map();\nfor (const row of rows) {\n  const pk = clean(row.product_key);\n  if (!pk) continue;\n  const r = num(row.remaining_qty);\n  // Nur aktive Chargen mit numerischem remaining zaehlen.\n  // (Produkte-Zeilen ohne batch_id haben r=null und werden uebersprungen.)\n  if (r === null) continue;\n  const status = clean(row.status).toLowerCase();\n  // Pro Lagercharge-Zeile: nur aktiv oder leer (nicht 'verbraucht'/'verworfen') beruecksichtigen.\n  if (status && !['aktiv', 'leer'].includes(status)) continue;\n  remainPerKey.set(pk, (remainPerKey.get(pk) || 0) + r);\n  if (!sampleRowPerKey.has(pk)) sampleRowPerKey.set(pk, row);\n}\n\nconst emittedBatchAlert = new Set();\nfor (const [pk, total] of remainPerKey.entries()) {\n  if (total > lowBatchThreshold) continue;\n  if (emittedBatchAlert.has(pk)) continue;\n  const _typ = total <= 0 ? 'EMPTY_BATCH' : 'LOW_BATCH';\n  if (!shouldEmitAlert(_typ, pk, '')) { emittedBatchAlert.add(pk); continue; }\n  const sample = sampleRowPerKey.get(pk) || {};\n  const name = productName(sample);\n  const crit = total <= 0;\n  alerts.push({\n    created_at: now,\n    type: crit ? 'EMPTY_BATCH' : 'LOW_BATCH',\n    severity: crit ? 'critical' : 'warning',\n    product_key: pk,\n    product_name: name,\n    internal_product_name: clean(sample.internal_product_name),\n    nayax_product_name: clean(sample.nayax_product_name),\n    machine_id: clean(sample.machine_id),\n    mdb_code: clean(sample.mdb_code),\n    total_remaining_qty: total,\n    threshold: lowBatchThreshold,\n    message: crit\n      ? `${name}: Lagerbestand ist 0 - Produkt komplett leer.`\n      : `${name}: Nur noch ${total} Stueck im Lager (Schwellwert ${lowBatchThreshold}).`\n  });\n  emittedBatchAlert.add(pk);\n}\n\nfor (const row of rows) {\n  const productKey = clean(row.product_key);\n  if (!productKey) continue;\n\n  // Nur aktive Zeilen berÃ¼cksichtigen\n  const active =\n    isActive(row.active) ||\n    isActive(row.status) ||\n    isActive(row.replenishment_status);\n  if (!active) continue;\n\n  const name = productName(row);\n  const currentMachineQty = num(row.current_machine_qty);\n  const minStock = num(row.min_stock);\n  const targetStock = num(row.target_stock);\n  const machineCapacity = num(row.machine_capacity);\n  const mhd = clean(row.mhd);\n  const remainingQty = num(row.remaining_qty);\n  const days = daysUntil(mhd);\n\n  // MHD Warnung\n  if (mhd && days !== null && days <= 30 && shouldEmitAlert('MHD_WARNING', productKey, clean(row.batch_id))) {\n    alerts.push({\n      created_at: now,\n      type: 'MHD_WARNING',\n      severity: days < 0 ? 'critical' : 'warning',\n      product_key: productKey,\n      product_name: name,\n      internal_product_name: clean(row.internal_product_name),\n      nayax_product_name: clean(row.nayax_product_name),\n      batch_id: clean(row.batch_id),\n      mhd,\n      remaining_qty: remainingQty,\n      machine_id: clean(row.machine_id),\n      mdb_code: clean(row.mdb_code),\n      message:\n        days < 0\n          ? `${name}: Charge ${clean(row.batch_id)} ist seit ${Math.abs(days)} Tag(en) abgelaufen.`\n          : `${name}: Charge ${clean(row.batch_id)} lÃ¤uft in ${days} Tag(en) ab.`\n    });\n  }\n\n  // PATCH AUTO_REFILL_WF5: LOW_STOCK informativ statt warning/critical,\n  // DEDUP: nur einmal pro 7 Tage\n  // weil WF3 auto-refill den Slot beim naechsten Sale heilt.\n  if (\n    currentMachineQty !== null &&\n    minStock !== null &&\n    machineCapacity !== null &&\n    machineCapacity > 0 &&\n    currentMachineQty < minStock &&\n    shouldEmitAlert('LOW_STOCK', productKey, '')\n  ) {\n    alerts.push({\n      created_at: now,\n      type: 'LOW_STOCK',\n      severity: 'info',\n      product_key: productKey,\n      product_name: name,\n      internal_product_name: clean(row.internal_product_name),\n      nayax_product_name: clean(row.nayax_product_name),\n      machine_id: clean(row.machine_id),\n      mdb_code: clean(row.mdb_code),\n      current_machine_qty: currentMachineQty,\n      min_stock: minStock,\n      target_stock: targetStock,\n      machine_capacity: machineCapacity,\n      message: currentMachineQty <= 0\n        ? `${name}: Slot laut Sheet leer - wird beim naechsten Sale auto-aufgefuellt.`\n        : `${name}: Slot laut Sheet bei ${currentMachineQty} Stueck.`\n    });\n  }\n}\n\n// PATCH AUTO_RESOLVE_WF5: Offene Hinweise auflÃ¶sen wenn Bedingung nicht mehr gilt\n// Wird tÃ¤glich von WF5 geprÃ¼ft - User muss resolved=TRUE nie mehr manuell setzen.\nconst autoResolveHints = [];\nfor (const h of existingHinweise) {\n  const hResolved = String(h.resolved ?? '').trim().toUpperCase();\n  if (['TRUE','JA','YES','1','ERLEDIGT','RESOLVED'].includes(hResolved)) continue;\n  const hType = String(h.type ?? '').trim();\n  const hPk   = String(h.product_key ?? '').trim();\n  const hCat  = clean(h.created_at);\n  if (!hType || !hPk || !hCat) continue;\n\n  let shouldAutoResolve = false;\n\n  if (['EMPTY_BATCH', 'INSUFFICIENT_BATCH_STOCK'].includes(hType)) {\n    const totalRemain = remainPerKey.get(hPk) || 0;\n    if (totalRemain > 0) shouldAutoResolve = true;\n  }\n  if (hType === 'LOW_BATCH') {\n    const totalRemain = remainPerKey.get(hPk) || 0;\n    if (totalRemain > lowBatchThreshold) shouldAutoResolve = true;\n  }\n  if (hType === 'LOW_STOCK') {\n    // Resolve wenn irgendein aktiver Produkte-Slot fÃ¼r diesen product_key >= min_stock\n    const productRow = rows.find(r =>\n      String(r.product_key ?? '').trim() === hPk &&\n      isActive(r.active) &&\n      r.current_machine_qty !== undefined &&\n      r.min_stock !== undefined\n    );\n    if (productRow) {\n      const cmq  = num(productRow.current_machine_qty);\n      const minS = num(productRow.min_stock);\n      if (cmq !== null && minS !== null && cmq >= minS) shouldAutoResolve = true;\n    }\n  }\n\n  if (shouldAutoResolve) {\n    autoResolveHints.push({ created_at: hCat, resolved: 'TRUE' });\n  }\n}\n\nreturn [{\n  json: {\n    alerts,\n    autoResolveHints,\n    summary: {\n      checked_batches: rows.length,\n      alerts_created: alerts.length,\n      auto_resolved: autoResolveHints.length,\n      created_at: now\n    }\n  }\n}];",
+          "notice": ""
+        },
+        "id": "a97f4d9e-ec8e-451c-92a4-c66514d6d092",
+        "name": "Code - MHD und Lagercharge pruefen",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          336,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const source = $input.all()\n  .map(i => i.json)\n  .find(item => Array.isArray(item.alerts) && item.summary && item.summary.alerts_created !== undefined);\n\nreturn ((source && source.alerts) || []).map(alert => ({ json: alert }));",
+          "notice": ""
+        },
+        "id": "3ab22f29-7105-4e3f-8e2e-334f4b3f03f0",
+        "name": "Extract - Hinweise",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1024,
+          160
+        ]
+      },
+      {
+        "parameters": {
+          "authentication": "oAuth2",
+          "resource": "sheet",
+          "operation": "append",
+          "documentId": {
+            "__rl": true,
+            "value": "={{ $('Config - WF5').first().json.google_sheet_id }}",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "={{ $('Config - WF5').first().json.sheet_hinweise }}",
+            "mode": "name"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "created_at": "={{ $json.created_at }}",
+              "type": "={{ $json.type }}",
+              "severity": "={{ $json.severity }}",
+              "machine_id": "={{ $json.machine_id }}",
+              "product_key": "={{ $json.product_key }}",
+              "nayax_product_name": "={{ $json.nayax_product_name }}",
+              "message": "={{ $json.message }}",
+              "resolved": "={{ $json.resolved }}"
+            },
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "created_at",
+                "displayName": "created_at",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "type",
+                "displayName": "type",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "severity",
+                "displayName": "severity",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "machine_id",
+                "displayName": "machine_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "product_key",
+                "displayName": "product_key",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "nayax_product_name",
+                "displayName": "nayax_product_name",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "message",
+                "displayName": "message",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "resolved",
+                "displayName": "resolved",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "change_id",
+                "displayName": "change_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "options": {}
+        },
+        "id": "e4c9b01e-2ab5-4cac-8b1f-82ecbc67ffb3",
+        "name": "Google Sheets - Hinweise anhaengen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.5,
+        "position": [
+          1280,
+          48
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "// WF5 Mail-Builder â€” Single-Source aus PostgreSQL (Dashboard-Digest).\n// Holt /api/v2/alerts/digest (PG-Fakten) und rendert die Report-Mail daraus.\n// Bestand kommt aus PG (nicht mehr Google Sheets); AUTO_REFILL_SLOT/info-\n// Hinweise zÃ¤hlen NICHT mehr als Workflow-Fehler.\nconst cfg = (() => { try { return $('Config - WF5').first().json || {}; } catch (e) { return {}; } })();\nconst DIGEST_URL = cfg.digest_url || 'http://homelab-dashboard:8787/api/v2/alerts/digest';\n\nlet digest = {};\ntry {\n  const resp = await this.helpers.httpRequest({ method: 'GET', url: DIGEST_URL, json: true });\n  digest = (resp && resp.data) ? resp.data : (resp || {});\n} catch (e) {\n  digest = { _error: String(e && e.message || e) };\n}\n\nconst mhdExpired   = digest.mhdExpired   || [];\nconst mhdSoon      = digest.mhdSoon      || [];\nconst emptySlots   = digest.emptySlots   || [];\nconst lowBatches   = digest.lowBatches   || [];\nconst emptyBatches = digest.emptyBatches || [];\nconst dataIssues   = digest.dataIssues   || [];\n\nfunction clean(v) { return String(v == null ? '' : v).replace(/\\s+/g, ' ').trim(); }\nfunction esc(v) {\n  return clean(v).replace(/&/g, '&amp;').replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n}\nfunction formatDate(v) {\n  const raw = clean(v);\n  if (!raw) return '-';\n  const d = new Date(raw);\n  if (Number.isNaN(d.getTime())) return raw;\n  return d.toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', year: 'numeric' });\n}\nconst dateText = new Date().toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', year: 'numeric' });\n\nfunction card(title, count, color) {\n  return '<td style=\"width:50%;padding:8px;\"><div style=\"border:1px solid #e5e7eb;border-radius:12px;background:#ffffff;padding:14px;\">' +\n    '<div style=\"font-size:12px;color:#6b7280;margin-bottom:4px;\">' + esc(title) + '</div>' +\n    '<div style=\"font-size:26px;font-weight:700;color:' + color + ';\">' + count + '</div></div></td>';\n}\nfunction section(title, itemsHtml) {\n  if (!itemsHtml) return '';\n  return '<h2 style=\"font-size:18px;margin:28px 0 10px;color:#111827;\">' + esc(title) + '</h2>' +\n    '<div style=\"border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#ffffff;\">' + itemsHtml + '</div>';\n}\nfunction itemBlock(lines) {\n  return '<div style=\"padding:14px 16px;border-bottom:1px solid #e5e7eb;\">' +\n    lines.filter(Boolean).map(function (l) {\n      return '<div style=\"margin:4px 0;font-size:14px;line-height:1.35;\">' + l + '</div>';\n    }).join('') + '</div>';\n}\n\nfunction mhdBlock(a) {\n  const days = a.days_remaining;\n  const daysText = (days == null) ? 'Datum prÃ¼fen'\n    : (days < 0 ? 'seit ' + Math.abs(days) + ' Tag(en) abgelaufen' : 'in ' + days + ' Tag(en)');\n  return itemBlock([\n    esc(a.product_name) + (a.machine_id ? ' | Maschine: ' + esc(a.machine_id) : '') + (a.batch_key ? ' | Charge: ' + esc(a.batch_key) : ''),\n    'MHD: ' + esc(formatDate(a.mhd_date)) + ' | ' + esc(daysText) + ' | Restmenge: ' + (a.remaining_qty != null ? esc(a.remaining_qty) : '-')\n  ]);\n}\nfunction slotBlock(a) {\n  return itemBlock([\n    esc(a.product_name) + (a.machine_id ? ' | Maschine: ' + esc(a.machine_id) : '') + (a.mdb_code ? ' | MDB: ' + esc(a.mdb_code) : ''),\n    'Bestand im Automaten: ' + esc(a.current_machine_qty != null ? a.current_machine_qty : 0)\n  ]);\n}\nfunction batchBlock(a) {\n  return itemBlock([\n    esc(a.product_name) + (a.product_key ? ' | SKU: ' + esc(a.product_key) : ''),\n    'Lagerbestand: ' + esc(a.total_remaining_qty != null ? a.total_remaining_qty : 0) + ' (Schwellwert ' + esc(a.threshold != null ? a.threshold : 5) + ')'\n  ]);\n}\nfunction issueBlock(a) {\n  return itemBlock([\n    esc(a.entity || a.warning_type || 'Hinweis') + ' | Typ: ' + esc(a.warning_type || '-') + ' | Schweregrad: ' + esc(a.severity || '-'),\n    a.message ? 'Hinweis: ' + esc(a.message) : ''\n  ]);\n}\n\nconst batchAlerts = emptyBatches.concat(lowBatches);\n\nconst subjectParts = [];\nif (mhdExpired.length)  subjectParts.push(mhdExpired.length + ' MHD abgelaufen');\nif (mhdSoon.length)     subjectParts.push(mhdSoon.length + ' MHD bald');\nif (emptySlots.length)  subjectParts.push(emptySlots.length + ' leere Slots');\nif (batchAlerts.length) subjectParts.push(batchAlerts.length + ' Lager niedrig');\nif (dataIssues.length)  subjectParts.push(dataIssues.length + ' Datenfehler');\nconst subject = subjectParts.length\n  ? 'Automatenlager Check ' + dateText + ': ' + subjectParts.join(' | ')\n  : 'Automatenlager Check ' + dateText + ': keine akuten Punkte';\n\nconst nextSteps = [];\nif (mhdExpired.length)  nextSteps.push('Abgelaufene Produkte sofort aus Automat/Lager entfernen.');\nif (mhdSoon.length)     nextSteps.push('Produkte mit nahendem MHD priorisiert verkaufen oder austauschen.');\nif (emptySlots.length)  nextSteps.push('Leere Automaten-Slots fÃ¼r die nÃ¤chste BefÃ¼llung einplanen.');\nif (batchAlerts.length) nextSteps.push('Niedrige LagerbestÃ¤nde nachbestellen.');\nif (dataIssues.length)  nextSteps.push('Daten-/Workflowfehler prÃ¼fen (Monitoring/Dashboard).');\nif (!nextSteps.length)  nextSteps.push('Keine Aktion erforderlich.');\n\nconst errBanner = digest._error\n  ? '<div style=\"background:#fef2f2;border:1px solid #fecaca;color:#7f1d1d;border-radius:12px;padding:12px 14px;margin-bottom:18px;font-size:13px;\">Digest-Endpunkt nicht erreichbar: ' + esc(digest._error) + '</div>'\n  : '';\n\nconst html =\n  '<div style=\"font-family:Arial,Helvetica,sans-serif;background:#f3f4f6;padding:24px;color:#111827;\">' +\n  '<div style=\"max-width:780px;margin:0 auto;background:#ffffff;border-radius:16px;padding:24px;border:1px solid #e5e7eb;\">' +\n  '<h1 style=\"font-size:24px;margin:0 0 4px;\">Automatenlager Check</h1>' +\n  '<div style=\"font-size:14px;color:#6b7280;margin-bottom:6px;\">Datum: ' + esc(dateText) + '</div>' +\n  '<div style=\"font-size:12px;color:#9ca3af;margin-bottom:18px;\">Datenquelle: PostgreSQL (live)</div>' +\n  errBanner +\n  '<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:separate;border-spacing:0;margin-bottom:18px;\">' +\n  '<tr>' + card('MHD abgelaufen', mhdExpired.length, '#b91c1c') + card('MHD lÃ¤uft bald ab', mhdSoon.length, '#b45309') + '</tr>' +\n  '<tr>' + card('Leere Slots (Automat)', emptySlots.length, '#1d4ed8') + card('Lager niedrig/leer', batchAlerts.length, '#b45309') + '</tr>' +\n  '<tr>' + card('Daten-/Workflowfehler', dataIssues.length, '#7f1d1d') + card('', '', '#ffffff') + '</tr>' +\n  '</table>' +\n  section('MHD abgelaufen', mhdExpired.map(mhdBlock).join('')) +\n  section('MHD lÃ¤uft bald ab', mhdSoon.map(mhdBlock).join('')) +\n  section('Leere Automaten-Slots', emptySlots.map(slotBlock).join('')) +\n  section('Lagerbestand niedrig/leer', batchAlerts.map(batchBlock).join('')) +\n  section('Daten-/Workflowfehler', dataIssues.map(issueBlock).join('')) +\n  '<h2 style=\"font-size:18px;margin:28px 0 10px;\">NÃ¤chste Schritte</h2>' +\n  '<ul style=\"margin:0;padding-left:20px;\">' +\n  nextSteps.map(function (s) { return '<li style=\"margin:6px 0;font-size:14px;line-height:1.35;\">' + esc(s) + '</li>'; }).join('') +\n  '</ul>' +\n  '<div style=\"font-size:12px;color:#6b7280;margin-top:28px;border-top:1px solid #e5e7eb;padding-top:12px;\">Automatisch erstellt durch n8n Â· Quelle: Dashboard /api/v2/alerts/digest (PostgreSQL).</div>' +\n  '</div></div>';\n\nconst text = [\n  'Automatenlager Check ' + dateText + ' (Quelle: PostgreSQL)',\n  '',\n  'MHD abgelaufen: ' + mhdExpired.length,\n  'MHD lÃ¤uft bald ab: ' + mhdSoon.length,\n  'Leere Slots (Automat): ' + emptySlots.length,\n  'Lager niedrig/leer: ' + batchAlerts.length,\n  'Daten-/Workflowfehler: ' + dataIssues.length\n].join('\\n');\n\nreturn [{\n  json: {\n    email_subject: subject,\n    email_body: html,\n    email_text: text,\n    source: 'postgres-digest',\n    mhd_expired_count: mhdExpired.length,\n    mhd_soon_count: mhdSoon.length,\n    empty_slots_count: emptySlots.length,\n    batch_alert_count: batchAlerts.length,\n    data_issue_count: dataIssues.length,\n    digest_error: digest._error || null\n  }\n}];\n",
+          "notice": ""
+        },
+        "id": "707bd02a-2473-40d0-a938-6357c809f715",
+        "name": "Code - Email Zusammenfassung erstellen",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          912,
+          384
+        ]
+      },
+      {
+        "parameters": {
+          "authentication": "oAuth2",
+          "resource": "message",
+          "operation": "send",
+          "sendTo": "patrickzinke@gmx.net",
+          "subject": "={{ $json.email_subject }}",
+          "emailType": "html",
+          "message": "={{ $json.email_body }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 2.2,
+        "position": [
+          1232,
+          480
+        ],
+        "id": "8917e3aa-7863-48f4-a181-86be49a62a2e",
+        "name": "Send a message",
+        "webhookId": "59e4e8ad-234e-4d38-a361-399e7b425c6c",
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "8zhryCRhHAc2OnKA",
+            "name": "Gmail account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "combine",
+          "combineBy": "combineByFields",
+          "advanced": false,
+          "fieldsToMatchString": "product_key",
+          "joinMode": "keepMatches",
+          "outputDataFrom": "both",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          208,
+          0
+        ],
+        "id": "20aac0d5-d5d5-43ac-9bec-9defeccfa09f",
+        "name": "Merge"
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const rows = $input.all().map(i => i.json);\n\nfunction clean(v) {\n  return String(v ?? '')\n    .replace(/\\n/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction isResolved(v) {\n  const s = clean(v).toUpperCase();\n  return ['TRUE', 'JA', 'YES', '1', 'ERLEDIGT', 'RESOLVED'].includes(s);\n}\n\nfunction parseDate(v) {\n  const raw = clean(v);\n  if (!raw) return null;\n  const d = new Date(raw);\n  if (!Number.isNaN(d.getTime())) return d;\n  return null;\n}\n\nfunction todayBerlinIso() {\n  const parts = new Intl.DateTimeFormat('en-CA', {\n    timeZone: 'Europe/Berlin',\n    year: 'numeric',\n    month: '2-digit',\n    day: '2-digit',\n  }).formatToParts(new Date());\n  return [\n    parts.find(p => p.type === 'year')?.value,\n    parts.find(p => p.type === 'month')?.value,\n    parts.find(p => p.type === 'day')?.value,\n  ].join('-');\n}\n\nfunction isFromToday(row) {\n  const raw = clean(row.created_at);\n  if (!raw) return true;\n  const d = parseDate(raw);\n  if (!d) return true;\n  const day = d.toLocaleDateString('en-CA', {\n    timeZone: 'Europe/Berlin',\n    year: 'numeric',\n    month: '2-digit',\n    day: '2-digit',\n  });\n  return day === todayBerlinIso();\n}\n\n// Typen die frisch berechnet werden - nicht aus Fehler_und_Hinweise lesen\nconst SKIP_TYPES = new Set(['LOW_STOCK', 'MHD_WARNING', 'MHD_EXPIRED']);\n\nconst seen = new Set();\n\nconst alerts = rows\n  .filter(row => !isResolved(row.resolved))\n  .filter(row => isFromToday(row))\n  .filter(row => !SKIP_TYPES.has(clean(row.type).toUpperCase()))\n  .filter(row => {\n    const key = `${clean(row.type)}|${clean(row.product_key)}`;\n    if (seen.has(key)) return false;\n    seen.add(key);\n    return true;\n  })\n  .map(row => ({\n    created_at: clean(row.created_at),\n    type: clean(row.type || 'OPEN_HINT'),\n    severity: clean(row.severity || 'warning'),\n    machine_id: clean(row.machine_id),\n    product_key: clean(row.product_key),\n    nayax_product_name: clean(row.nayax_product_name),\n    internal_product_name: clean(row.internal_product_name),\n    product_name: clean(row.product_name || row.nayax_product_name || row.internal_product_name || row.product_key),\n    mdb_code: clean(row.mdb_code || row.actual_mdb_code || row.expected_mdb_code),\n    message: clean(row.message),\n    resolved: clean(row.resolved),\n    change_id: clean(row.change_id),\n    source: 'Fehler_und_Hinweise'\n  }));\n\nreturn [{\n  json: {\n    alerts,\n    summary: {\n      checked_hint_rows: rows.length,\n      open_hints_today: alerts.length,\n      created_at: new Date().toISOString()\n    }\n  }\n}];",
+          "notice": ""
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          352,
+          240
+        ],
+        "id": "d0fbccae-0719-4e81-8716-2933d0478f86",
+        "name": "Code - Offene Hinweise vorbereiten"
+      },
+      {
+        "parameters": {
+          "mode": "append",
+          "numberInputs": 2
+        },
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          576,
+          208
+        ],
+        "id": "ab70ede3-eae0-40b9-af42-cb9257520e55",
+        "name": "Merge1"
+      },
+      {
+        "parameters": {
+          "multipleMethods": false,
+          "httpMethod": "GET",
+          "path": "357edb5f-d83d-4e9e-8033-9f3d099cd9c8",
+          "authentication": "none",
+          "responseMode": "onReceived",
+          "contentTypeNotice": "",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -496,
+          448
+        ],
+        "id": "91f70bbd-3f15-44f3-8aef-ae801ce2ce0c",
+        "name": "Webhook",
+        "webhookId": "357edb5f-d83d-4e9e-8033-9f3d099cd9c8"
+      },
+      {
+        "parameters": {
+          "authentication": "oAuth2",
+          "resource": "sheet",
+          "operation": "read",
+          "documentId": {
+            "__rl": true,
+            "value": "={{ $('Config - WF5').first().json.google_sheet_id }}",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "={{ $('Config - WF5').first().json.sheet_verarbeitete_transaktionen }}",
+            "mode": "name"
+          },
+          "filtersUI": {},
+          "combineFilters": "AND",
+          "options": {}
+        },
+        "id": "0a9b4948-0150-4c4d-888e-6593a663b1e8",
+        "name": "Google Sheets - Verarbeitete Transaktionen lesen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.5,
+        "position": [
+          48,
+          432
+        ],
+        "executeOnce": true,
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const rows = $input.all().map(i => i.json);\n\nfunction clean(value) {\n  return String(value ?? '')\n    .replace(/\\n/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction num(value) {\n  const n = Number(String(value ?? '').replace(',', '.'));\n  return Number.isFinite(n) ? n : 0;\n}\n\nfunction todayBerlinIso() {\n  const parts = new Intl.DateTimeFormat('en-CA', {\n    timeZone: 'Europe/Berlin',\n    year: 'numeric',\n    month: '2-digit',\n    day: '2-digit',\n  }).formatToParts(new Date());\n\n  return [\n    parts.find(p => p.type === 'year')?.value,\n    parts.find(p => p.type === 'month')?.value,\n    parts.find(p => p.type === 'day')?.value,\n  ].join('-');\n}\n\nfunction parseDate(value) {\n  const raw = clean(value);\n  if (!raw) return null;\n  const d = new Date(raw);\n  return Number.isNaN(d.getTime()) ? null : d;\n}\n\nfunction berlinDay(value) {\n  const d = parseDate(value);\n  if (!d) return '';\n  return d.toLocaleDateString('en-CA', {\n    timeZone: 'Europe/Berlin',\n    year: 'numeric',\n    month: '2-digit',\n    day: '2-digit',\n  });\n}\n\nfunction berlinTime(value) {\n  const d = parseDate(value);\n  if (!d) return '';\n  return d.toLocaleTimeString('de-DE', {\n    timeZone: 'Europe/Berlin',\n    hour: '2-digit',\n    minute: '2-digit',\n  });\n}\n\nfunction saleDate(row) {\n  return clean(row.settlement_datetime_gmt || row.SettlementDateTimeGMT || row.processed_at);\n}\n\nconst today = todayBerlinIso();\nconst salesByProduct = new Map();\nlet transactionsToday = 0;\nlet quantityToday = 0;\n\nfor (const row of rows) {\n  const status = clean(row.status).toUpperCase();\n  if (status.startsWith('SKIPPED')) continue;\n\n  const dateValue = saleDate(row);\n  if (berlinDay(dateValue) !== today) continue;\n\n  const productKey = clean(row.product_key) || 'UNBEKANNT';\n  const name = clean(row.nayax_product_name || row.product_name || productKey);\n  const qty = num(row.quantity || 1) || 1;\n  const key = `${productKey}|${name}`;\n\n  if (!salesByProduct.has(key)) {\n    salesByProduct.set(key, {\n      product_key: productKey,\n      product_name: name,\n      nayax_product_name: name,\n      quantity_sold_today: 0,\n      transactions_today: 0,\n      first_sale_time: '',\n      last_sale_time: '',\n      statuses: new Set(),\n      machine_ids: new Set(),\n    });\n  }\n\n  const entry = salesByProduct.get(key);\n  entry.quantity_sold_today += qty;\n  entry.transactions_today += 1;\n  if (!entry.first_sale_time) entry.first_sale_time = berlinTime(dateValue);\n  entry.last_sale_time = berlinTime(dateValue) || entry.last_sale_time;\n  if (status) entry.statuses.add(status);\n  if (clean(row.machine_id)) entry.machine_ids.add(clean(row.machine_id));\n\n  transactionsToday += 1;\n  quantityToday += qty;\n}\n\nconst daily_sales = [...salesByProduct.values()]\n  .map(entry => ({\n    ...entry,\n    statuses: [...entry.statuses].join(', '),\n    machine_ids: [...entry.machine_ids].join(', '),\n  }))\n  .sort((a, b) => b.quantity_sold_today - a.quantity_sold_today || a.product_name.localeCompare(b.product_name, 'de'));\n\nreturn [{\n  json: {\n    daily_sales,\n    daily_sales_totals: {\n      day: today,\n      products_sold_today: daily_sales.length,\n      transactions_today: transactionsToday,\n      quantity_sold_today: quantityToday,\n      checked_transaction_rows: rows.length,\n    },\n    summary: {\n      checked_transaction_rows: rows.length,\n      sales_today_products: daily_sales.length,\n      sales_today_transactions: transactionsToday,\n      sales_today_quantity: quantityToday,\n      created_at: new Date().toISOString()\n    }\n  }\n}];",
+          "notice": ""
+        },
+        "id": "9f21240e-6df2-4c46-a8d1-660f73d83b00",
+        "name": "Code - Tagesverkaeufe vorbereiten",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          352,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "append",
+          "numberInputs": 2
+        },
+        "id": "6de12b5a-ddeb-4aa5-8845-d23988fd4ad2",
+        "name": "Merge2 - Berichtsdaten sammeln",
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          768,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "// PATCH AUTO_RESOLVE_WF5: Gibt autoResolveHints als einzelne Items zurÃ¼ck.\n// Wenn keine EintrÃ¤ge vorhanden  kein Item  Google-Sheets-Update wird nicht ausgefÃ¼hrt.\nconst hints = ($input.first()?.json?.autoResolveHints) || [];\nif (!hints.length) return [];\nreturn hints.map(h => ({ json: h }));",
+          "notice": ""
+        },
+        "id": "3a31df9d-e961-46b6-a423-6c4a0dad88e4",
+        "name": "Extract - Auto-Resolve Hinweise",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1024,
+          320
+        ]
+      },
+      {
+        "parameters": {
+          "authentication": "oAuth2",
+          "resource": "sheet",
+          "operation": "update",
+          "documentId": {
+            "__rl": true,
+            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Fehler_und_Hinweise",
+            "mode": "name"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "created_at": "={{ $json.created_at }}",
+              "resolved": "={{ $json.resolved }}"
+            },
+            "matchingColumns": [
+              "created_at"
+            ],
+            "schema": [
+              {
+                "id": "created_at",
+                "displayName": "created_at",
+                "required": false,
+                "defaultMatch": true,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "resolved",
+                "displayName": "resolved",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "a072b25c-409f-42a3-922d-cb3eb8a7614b",
+        "name": "Google Sheets - Hinweise auflÃ¶sen",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.5,
+        "position": [
+          1248,
+          272
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "6GG86fWHw536Rk36",
+            "name": "Google Sheets API"
+          }
+        }
+      },
+      {
+        "id": "issue20-prepare-pgw-wf5-warnings",
+        "name": "Prepare PGW - WF5 Warnings",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1120,
+          24
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const batchRunId = \"wf5_\" + new Date().toISOString().slice(0, 10);\n\nfunction clean(value) {\n  return String(value ?? \"\").replace(/\\n/g, \" \").replace(/\\s+/g, \" \").trim();\n}\n\nfunction sanitize(value) {\n  return clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, \"_\").replace(/^_+|_+$/g, \"\");\n}\n\nfunction warningType(type) {\n  const normalized = clean(type).toUpperCase();\n  return normalized === \"MHD_WARNING\" ? \"MHD_NEAR\" : normalized || \"WF5_WARNING\";\n}\n\nfunction numericOrUndefined(value) {\n  const n = Number(String(value ?? \"\").replace(\",\", \".\"));\n  return Number.isFinite(n) ? n : undefined;\n}\n\nreturn $input.all().map((item) => {\n  const alert = item.json;\n  const type = warningType(alert.type);\n  const productKey = clean(alert.product_key);\n  const batchId = clean(alert.batch_id);\n  const mdb = clean(alert.mdb_code);\n  const data = {\n    warning_key: [\"WARN\", type, productKey || \"NO_PRODUCT\", batchId || mdb || \"NO_SLOT\"].map(sanitize).filter(Boolean).join(\"_\"),\n    warning_type: type,\n    severity: clean(alert.severity || \"warning\"),\n    machine_key: clean(alert.machine_id) || undefined,\n    product_key: productKey || undefined,\n    mdb_code: numericOrUndefined(mdb),\n    message: clean(alert.message),\n    source_workflow: \"wf5\",\n  };\n  return { json: { event_type: \"warning\", batch_run_id: batchRunId, data } };\n});",
+          "notice": ""
+        }
+      },
+      {
+        "id": "issue20-wf-pgw-wf5",
+        "name": "WF-PGW - WF5",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 2,
+        "position": [
+          1360,
+          24
+        ],
+        "parameters": {
+          "operation": "call_workflow",
+          "source": "database",
+          "workflowId": {
+            "__rl": true,
+            "value": "Sajezv8tJll0CLIv",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": null
+          },
+          "mode": "each",
+          "options": {
+            "waitForSubWorkflow": false
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Manual Trigger": {
+        "main": [
+          [
+            {
+              "node": "Config - WF5",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Schedule Trigger - taeglich 07:00": {
+        "main": [
+          [
+            {
+              "node": "Config - WF5",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Config - WF5": {
+        "main": [
+          [
+            {
+              "node": "PG - Lagerchargen lesen",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Google Sheets - Produkte lesen",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Google Sheets - Hinweise lesen",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Google Sheets - Verarbeitete Transaktionen lesen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Sheets - Produkte lesen": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Google Sheets - Hinweise lesen": {
+        "main": [
+          [
+            {
+              "node": "Code - Offene Hinweise vorbereiten",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - MHD und Lagercharge pruefen": {
+        "main": [
+          [
+            {
+              "node": "Merge1",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Extract - Auto-Resolve Hinweise",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract - Hinweise": {
+        "main": [
+          [
+            {
+              "node": "Google Sheets - Hinweise anhaengen",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Prepare PGW - WF5 Warnings",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - Email Zusammenfassung erstellen": {
+        "main": [
+          [
+            {
+              "node": "Send a message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge": {
+        "main": [
+          [
+            {
+              "node": "Code - MHD und Lagercharge pruefen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - Offene Hinweise vorbereiten": {
+        "main": [
+          [
+            {
+              "node": "Merge1",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Merge1": {
+        "main": [
+          [
+            {
+              "node": "Merge2 - Berichtsdaten sammeln",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Config - WF5",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Sheets - Verarbeitete Transaktionen lesen": {
+        "main": [
+          [
+            {
+              "node": "Code - Tagesverkaeufe vorbereiten",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - Tagesverkaeufe vorbereiten": {
+        "main": [
+          [
+            {
+              "node": "Merge2 - Berichtsdaten sammeln",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Merge2 - Berichtsdaten sammeln": {
+        "main": [
+          [
+            {
+              "node": "Extract - Hinweise",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Code - Email Zusammenfassung erstellen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract - Auto-Resolve Hinweise": {
+        "main": [
+          [
+            {
+              "node": "Google Sheets - Hinweise auflÃ¶sen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare PGW - WF5 Warnings": {
+        "main": [
+          [
+            {
+              "node": "WF-PGW - WF5",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "PG - Lagerchargen lesen": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "import",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": []
+  }
 }
