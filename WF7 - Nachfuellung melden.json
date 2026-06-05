@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-05-25T14:36:35.150Z",
+  "updatedAt": "2026-06-05T08:06:05.463Z",
   "createdAt": "2026-05-25T14:36:35.150Z",
   "id": "0oRIiVFr5Q7FF6ow",
   "name": "WF7 - Nachfuellung melden (Slot-Update ohne Verkauf)",
@@ -201,36 +201,24 @@
     {
       "id": "0f08710d-6f4d-495c-a775-b9cd5f316579",
       "name": "Google Sheets - Audit anhÃ¤ngen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [
         1320,
         120
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
         }
       },
       "parameters": {
-        "operation": "append",
-        "documentId": {
-          "__rl": true,
-          "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Fehler_und_Hinweise",
-          "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "autoMapInputData"
-        },
+        "operation": "executeQuery",
+        "query": "INSERT INTO automatenlager.warnings (\n  warning_key, warning_type, severity, message,\n  product_id, machine_id, resolved, resolved_at, created_at\n)\nVALUES (\n  '{{ $json.type }}_{{ $json.product_key }}_' || to_char(NOW() AT TIME ZONE 'UTC','YYYYMMDD_HH24MISS_US'),\n  '{{ $json.type }}',\n  'info',\n  '{{ $json.message }}',\n  (SELECT product_id FROM automatenlager.products WHERE product_key='{{ $json.product_key }}' LIMIT 1),\n  (SELECT machine_id FROM automatenlager.machines WHERE machine_key='{{ $json.machine_id }}' LIMIT 1),\n  TRUE,\n  NOW(),\n  NOW()\n)\nON CONFLICT (warning_key) DO NOTHING\nRETURNING warning_key",
         "options": {}
       },
-      "disabled": true
+      "disabled": false
     },
     {
       "id": "08ae5cf4-e701-476a-8c2f-2b7d34d992d7",
@@ -493,9 +481,9 @@
   "staticData": null,
   "meta": null,
   "pinData": null,
-  "versionId": "ffd124d8-40f9-4dfe-bf69-3fb0cb9862c6",
-  "activeVersionId": "ffd124d8-40f9-4dfe-bf69-3fb0cb9862c6",
-  "versionCounter": 5,
+  "versionId": "473b24c7-5a5b-45b1-98ca-44b80567f26f",
+  "activeVersionId": "473b24c7-5a5b-45b1-98ca-44b80567f26f",
+  "versionCounter": 7,
   "triggerCount": 1,
   "shared": [
     {
@@ -518,9 +506,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-05-25T14:36:35.150Z",
-    "createdAt": "2026-05-25T14:36:35.150Z",
-    "versionId": "ffd124d8-40f9-4dfe-bf69-3fb0cb9862c6",
+    "updatedAt": "2026-06-05T08:06:05.464Z",
+    "createdAt": "2026-06-05T08:06:05.464Z",
+    "versionId": "473b24c7-5a5b-45b1-98ca-44b80567f26f",
     "workflowId": "0oRIiVFr5Q7FF6ow",
     "nodes": [
       {
@@ -566,70 +554,42 @@
       {
         "id": "f7c434f4-0f4a-4072-bd8a-7e0dd62499a2",
         "name": "Google Sheets - Produkte lesen",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.5,
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
         "position": [
           440,
           -120
         ],
         "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
+          "postgres": {
+            "id": "Jept3990Uq8aN3Tr",
+            "name": "PostgreSQL"
           }
         },
         "parameters": {
-          "operation": "read",
-          "documentId": {
-            "__rl": true,
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Produkte",
-            "mode": "name"
-          },
-          "filtersUI": {
-            "values": [
-              {
-                "lookupColumn": "active",
-                "lookupValue": "TRUE"
-              }
-            ]
-          },
-          "options": {
-            "returnFirstMatch": false
-          }
+          "operation": "executeQuery",
+          "query": "SELECT p.product_key AS product_key, p.name AS internal_product_name,\n       COALESCE(na.alias,'') AS nayax_product_name,\n       COALESCE(sa.mdb_code::text,'') AS mdb_code,\n       m.machine_key AS machine_id,\n       CASE WHEN sa.active THEN 'TRUE' ELSE 'FALSE' END AS active,\n       sa.product_slot_key AS product_slot_id,\n       COALESCE(pr.sale_price_gross::text,'') AS sale_price_eur,\n       COALESCE(sa.current_machine_qty::text,'') AS current_machine_qty,\n       COALESCE(sa.machine_capacity::text,'') AS machine_capacity,\n       COALESCE(sa.target_stock::text,'') AS target_stock,\n       p.category AS produktart,\n       COALESCE(p.vat_rate_pct::text,'') AS mwst_satz,\n       COALESCE(sa.notes,'') AS notes\nFROM automatenlager.slot_assignments sa\nJOIN automatenlager.products p ON p.product_id = sa.product_id\nJOIN automatenlager.machines m ON m.machine_id = sa.machine_id\nLEFT JOIN LATERAL (SELECT pa.alias FROM automatenlager.product_aliases pa WHERE pa.product_id=p.product_id AND pa.source='nayax' AND pa.is_primary=TRUE ORDER BY pa.alias LIMIT 1) na ON TRUE\nLEFT JOIN LATERAL (SELECT pc.sale_price_gross FROM automatenlager.prices pc WHERE pc.slot_assignment_id=sa.slot_assignment_id AND pc.valid_to IS NULL ORDER BY pc.valid_from DESC LIMIT 1) pr ON TRUE\nORDER BY m.machine_key, sa.mdb_code, sa.active DESC",
+          "options": {}
         }
       },
       {
         "id": "98d18876-3ed2-4032-9334-18d0774156b4",
         "name": "Google Sheets - Hinweise lesen",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.5,
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
         "position": [
           440,
           120
         ],
         "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
+          "postgres": {
+            "id": "Jept3990Uq8aN3Tr",
+            "name": "PostgreSQL"
           }
         },
         "parameters": {
-          "operation": "read",
-          "documentId": {
-            "__rl": true,
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Fehler_und_Hinweise",
-            "mode": "name"
-          },
+          "operation": "executeQuery",
+          "query": "SELECT w.warning_key,\n       w.warning_type AS type,\n       w.severity,\n       w.message,\n       to_char(w.created_at AT TIME ZONE 'UTC','YYYY-MM-DDTHH24:MI:SS') || 'Z' AS created_at,\n       CASE WHEN w.resolved THEN 'TRUE' ELSE 'FALSE' END AS resolved,\n       COALESCE(to_char(w.resolved_at,'YYYY-MM-DDTHH24:MI:SS') || 'Z','') AS resolved_at,\n       COALESCE(w.mdb_code::text,'') AS mdb_code,\n       COALESCE(p.product_key,'') AS product_key,\n       COALESCE(m.machine_key,'') AS machine_id\nFROM automatenlager.warnings w\nLEFT JOIN automatenlager.products p ON p.product_id = w.product_id\nLEFT JOIN automatenlager.machines m ON m.machine_id = w.machine_id\nORDER BY w.created_at DESC\nLIMIT 500",
           "options": {}
         }
       },
@@ -703,175 +663,66 @@
       {
         "id": "cbaeecf4-6b59-4646-b2b3-6cf31def7f98",
         "name": "Google Sheets - Slot aktualisieren",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.5,
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
         "position": [
           1320,
           -120
         ],
         "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
+          "postgres": {
+            "id": "Jept3990Uq8aN3Tr",
+            "name": "PostgreSQL"
           }
         },
         "parameters": {
-          "operation": "update",
-          "documentId": {
-            "__rl": true,
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Produkte",
-            "mode": "name"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "product_slot_id": "={{ $json.product_slot_id }}",
-              "current_machine_qty": "={{ $json.current_machine_qty }}",
-              "last_stock_update_source": "={{ $json.last_stock_update_source }}",
-              "last_stock_update_at": "={{ $json.last_stock_update_at }}"
-            },
-            "matchingColumns": [
-              "product_slot_id"
-            ],
-            "schema": [
-              {
-                "id": "product_slot_id",
-                "displayName": "product_slot_id",
-                "required": false,
-                "defaultMatch": true,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "current_machine_qty",
-                "displayName": "current_machine_qty",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "number",
-                "canBeUsedToMatch": false
-              },
-              {
-                "id": "last_stock_update_source",
-                "displayName": "last_stock_update_source",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": false
-              },
-              {
-                "id": "last_stock_update_at",
-                "displayName": "last_stock_update_at",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": false
-              }
-            ]
-          },
+          "operation": "executeQuery",
+          "query": "UPDATE automatenlager.slot_assignments\nSET current_machine_qty = {{ $json.current_machine_qty }}\nWHERE product_slot_key = '{{ $json.product_slot_id }}'\nRETURNING product_slot_key, current_machine_qty",
           "options": {}
         }
       },
       {
         "id": "86e7954b-bfc4-43cc-8587-0e064049b3f1",
         "name": "Google Sheets - Hinweise auflÃ¶sen",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.5,
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
         "position": [
           1320,
           0
         ],
         "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
+          "postgres": {
+            "id": "Jept3990Uq8aN3Tr",
+            "name": "PostgreSQL"
           }
         },
         "parameters": {
-          "operation": "update",
-          "documentId": {
-            "__rl": true,
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Fehler_und_Hinweise",
-            "mode": "name"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "created_at": "={{ $json.created_at }}",
-              "resolved": "={{ $json.resolved }}"
-            },
-            "matchingColumns": [
-              "created_at"
-            ],
-            "schema": [
-              {
-                "id": "created_at",
-                "displayName": "created_at",
-                "required": false,
-                "defaultMatch": true,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "resolved",
-                "displayName": "resolved",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": false
-              }
-            ]
-          },
+          "operation": "executeQuery",
+          "query": "UPDATE automatenlager.warnings\nSET resolved = TRUE, resolved_at = NOW()\nWHERE to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DDTHH24:MI:SS') || 'Z' = '{{ $json.created_at }}'",
           "options": {}
         }
       },
       {
         "id": "0f08710d-6f4d-495c-a775-b9cd5f316579",
         "name": "Google Sheets - Audit anhÃ¤ngen",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.5,
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
         "position": [
           1320,
           120
         ],
         "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
+          "postgres": {
+            "id": "Jept3990Uq8aN3Tr",
+            "name": "PostgreSQL"
           }
         },
         "parameters": {
-          "operation": "append",
-          "documentId": {
-            "__rl": true,
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Fehler_und_Hinweise",
-            "mode": "name"
-          },
-          "columns": {
-            "mappingMode": "autoMapInputData"
-          },
+          "operation": "executeQuery",
+          "query": "INSERT INTO automatenlager.warnings (\n  warning_key, warning_type, severity, message,\n  product_id, machine_id, resolved, resolved_at, created_at\n)\nVALUES (\n  '{{ $json.type }}_{{ $json.product_key }}_' || to_char(NOW() AT TIME ZONE 'UTC','YYYYMMDD_HH24MISS_US'),\n  '{{ $json.type }}',\n  'info',\n  '{{ $json.message }}',\n  (SELECT product_id FROM automatenlager.products WHERE product_key='{{ $json.product_key }}' LIMIT 1),\n  (SELECT machine_id FROM automatenlager.machines WHERE machine_key='{{ $json.machine_id }}' LIMIT 1),\n  TRUE,\n  NOW(),\n  NOW()\n)\nON CONFLICT (warning_key) DO NOTHING\nRETURNING warning_key",
           "options": {}
-        }
+        },
+        "disabled": false
       },
       {
         "id": "08ae5cf4-e701-476a-8c2f-2b7d34d992d7",
@@ -890,30 +741,21 @@
       {
         "id": "issue20-wf7-lagerchargen-lesen",
         "name": "Google Sheets - Lagerchargen lesen",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.5,
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
         "position": [
           440,
           120
         ],
         "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
+          "postgres": {
+            "id": "Jept3990Uq8aN3Tr",
+            "name": "PostgreSQL"
           }
         },
         "parameters": {
-          "operation": "read",
-          "documentId": {
-            "__rl": true,
-            "value": "12KzLrJzZamaHNwDejQXdyBartHCoCbzN9PFK3tF9pSo",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Lagerchargen",
-            "mode": "name"
-          },
+          "operation": "executeQuery",
+          "query": "SELECT sb.batch_key AS batch_id, p.product_key AS product_key, p.name AS product_name,\n       'aktiv' AS status,\n       COALESCE(to_char(sb.mhd_date,'YYYY-MM-DD'),'') AS mhd,\n       sb.remaining_qty::text AS remaining_qty,\n       COALESCE(sb.unit_cost_net::text,'') AS unit_cost,\n       COALESCE(p.vat_rate_pct::text,'') AS mwst_satz\nFROM automatenlager.stock_batches sb\nJOIN automatenlager.products p ON p.product_id = sb.product_id\nWHERE sb.status IN ('aktiv','active','reserve')\nORDER BY p.name, sb.mhd_date ASC NULLS LAST",
           "options": {}
         }
       },
@@ -1143,10 +985,10 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-05-25T14:37:24.388Z",
-        "id": 78,
+        "createdAt": "2026-06-05T08:06:06.523Z",
+        "id": 288,
         "workflowId": "0oRIiVFr5Q7FF6ow",
-        "versionId": "ffd124d8-40f9-4dfe-bf69-3fb0cb9862c6",
+        "versionId": "473b24c7-5a5b-45b1-98ca-44b80567f26f",
         "event": "activated",
         "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }

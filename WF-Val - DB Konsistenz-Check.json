@@ -1,0 +1,429 @@
+{
+  "updatedAt": "2026-06-05T08:06:08.488Z",
+  "createdAt": "2026-05-25T14:36:35.576Z",
+  "id": "pdIjiyIfVIIPuJIt",
+  "name": "WF-Val - DB Konsistenz-Check",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "F236E30D",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 15 4 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "B7C53C5E",
+      "name": "DB - Konsistenzcheck",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT 'keine_preise' AS check_type,\n       sa.product_slot_key AS key,\n       p.name || ' (' || m.machine_key || ')' AS name,\n       'Aktiver Slot ohne Preis: ' || p.name AS message\nFROM automatenlager.slot_assignments sa\nJOIN automatenlager.products p ON p.product_id = sa.product_id\nJOIN automatenlager.machines m ON m.machine_id = sa.machine_id\nLEFT JOIN automatenlager.prices pr\n       ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL\nWHERE sa.active = TRUE AND pr.price_id IS NULL\n\nUNION ALL\n\nSELECT 'negative_qty',\n       sb.batch_key,\n       p.name,\n       'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name\nFROM automatenlager.stock_batches sb\nJOIN automatenlager.products p ON p.product_id = sb.product_id\nWHERE sb.remaining_qty < 0\n  AND sb.status IN ('aktiv','active','reserve')\n\nUNION ALL\n\nSELECT 'wf3_stale',\n       workflow_key,\n       workflow_key,\n       'WF3 seit ' || ROUND(EXTRACT(EPOCH FROM (NOW()-last_inventory_review_at))/3600,1) || 'h nicht gelaufen'\nFROM automatenlager.workflow_state\nWHERE workflow_key = 'WF3_NAYAX_FIFO'\n  AND (last_inventory_review_at IS NULL\n       OR last_inventory_review_at < NOW() - INTERVAL '3 hours')\n\nUNION ALL\n\nSELECT 'alte_warnungen',\n       warning_type || '_count',\n       warning_type,\n       COUNT(*) || ' ungeloeste Hinweise (Typ: ' || warning_type || ') aelter 7 Tage'\nFROM automatenlager.warnings\nWHERE resolved = FALSE\n  AND warning_type NOT LIKE 'NACHFUELLUNG%'\n  AND warning_type NOT LIKE 'PICKLISTE%'\n  AND created_at < NOW() - INTERVAL '7 days'\nGROUP BY warning_type\nHAVING COUNT(*) > 0\n\nUNION ALL\n\nSELECT 'pending_proposals',\n       proposal_key,\n       COALESCE(reason,'?'),\n       'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?')\nFROM automatenlager.product_change_proposals\nWHERE status = 'pending'\n  AND created_at < NOW() - INTERVAL '14 days'\n\nORDER BY check_type, key",
+        "options": {}
+      }
+    },
+    {
+      "id": "1F24F1F0",
+      "name": "Code - Ergebnisse aggregieren",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (!items.length) {\n  return [{ json: {\n    status: 'OK',\n    count: 0,\n    email_subject: null,\n    email_body: null,\n    summary: 'Alle DB-Konsistenzpruefungen bestanden.'\n  }}];\n}\nconst grouped = {};\nfor (const { json: row } of items) {\n  if (!grouped[row.check_type]) grouped[row.check_type] = [];\n  grouped[row.check_type].push(row.message);\n}\nconst lines = Object.entries(grouped).map(([type, msgs]) =>\n  '<h3>' + type + '</h3><ul>' + msgs.map(m => '<li>' + m + '</li>').join('') + '</ul>'\n).join('');\nconst count = items.length;\nconst ts = new Date().toISOString();\nreturn [{ json: {\n  status: 'FEHLER',\n  count,\n  grouped,\n  email_subject: '[DB-Check] ' + count + ' Konsistenzproblem' + (count !== 1 ? 'e' : '') + ' gefunden',\n  email_body: '<h2>DB-Konsistenzpruefung: ' + count + ' Problem' + (count !== 1 ? 'e' : '') + '</h2>' +\n    lines + '<p><small>WF-Val Check: ' + ts + '</small></p>'\n}}];",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "F52CEC61",
+      "name": "IF - Probleme gefunden",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "FEHLER",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "00C519EC",
+      "name": "Gmail - Alert senden",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        960,
+        -100
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8zhryCRhHAc2OnKA",
+          "name": "Gmail account"
+        }
+      },
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "patrickzinke@gmx.net",
+        "subject": "={{ $json.email_subject }}",
+        "emailType": "html",
+        "message": "={{ $json.email_body }}",
+        "options": {}
+      },
+      "webhookId": "daea2396-59b0-496a-9214-8c12cac554f6"
+    },
+    {
+      "id": "DFA09D17",
+      "name": "Alles OK",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        960,
+        100
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "DB - Konsistenzcheck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB - Konsistenzcheck": {
+      "main": [
+        [
+          {
+            "node": "Code - Ergebnisse aggregieren",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Ergebnisse aggregieren": {
+      "main": [
+        [
+          {
+            "node": "IF - Probleme gefunden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Probleme gefunden": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Alert senden",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alles OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Berlin"
+  },
+  "staticData": {
+    "node:Schedule Trigger - daily after 04:00": {
+      "recurrenceRules": []
+    },
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": null,
+  "pinData": null,
+  "versionId": "5419b3ac-1128-420f-a94d-5989f5af662d",
+  "activeVersionId": "5419b3ac-1128-420f-a94d-5989f5af662d",
+  "versionCounter": 8,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-05-25T14:36:35.576Z",
+      "createdAt": "2026-05-25T14:36:35.576Z",
+      "role": "workflow:owner",
+      "workflowId": "pdIjiyIfVIIPuJIt",
+      "projectId": "68wR1Q9zBUk0Gxhv",
+      "project": {
+        "updatedAt": "2026-05-19T17:59:53.408Z",
+        "createdAt": "2026-05-19T16:50:04.773Z",
+        "id": "68wR1Q9zBUk0Gxhv",
+        "name": "Patrick Matthes <patrickmatthes2609@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-06-05T08:06:08.489Z",
+    "createdAt": "2026-06-05T08:06:08.489Z",
+    "versionId": "5419b3ac-1128-420f-a94d-5989f5af662d",
+    "workflowId": "pdIjiyIfVIIPuJIt",
+    "nodes": [
+      {
+        "id": "F236E30D",
+        "name": "Schedule Trigger",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 15 4 * * *"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "B7C53C5E",
+        "name": "DB - Konsistenzcheck",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          240,
+          0
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Jept3990Uq8aN3Tr",
+            "name": "PostgreSQL"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT 'keine_preise' AS check_type,\n       sa.product_slot_key AS key,\n       p.name || ' (' || m.machine_key || ')' AS name,\n       'Aktiver Slot ohne Preis: ' || p.name AS message\nFROM automatenlager.slot_assignments sa\nJOIN automatenlager.products p ON p.product_id = sa.product_id\nJOIN automatenlager.machines m ON m.machine_id = sa.machine_id\nLEFT JOIN automatenlager.prices pr\n       ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL\nWHERE sa.active = TRUE AND pr.price_id IS NULL\n\nUNION ALL\n\nSELECT 'negative_qty',\n       sb.batch_key,\n       p.name,\n       'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name\nFROM automatenlager.stock_batches sb\nJOIN automatenlager.products p ON p.product_id = sb.product_id\nWHERE sb.remaining_qty < 0\n  AND sb.status IN ('aktiv','active','reserve')\n\nUNION ALL\n\nSELECT 'wf3_stale',\n       workflow_key,\n       workflow_key,\n       'WF3 seit ' || ROUND(EXTRACT(EPOCH FROM (NOW()-last_inventory_review_at))/3600,1) || 'h nicht gelaufen'\nFROM automatenlager.workflow_state\nWHERE workflow_key = 'WF3_NAYAX_FIFO'\n  AND (last_inventory_review_at IS NULL\n       OR last_inventory_review_at < NOW() - INTERVAL '3 hours')\n\nUNION ALL\n\nSELECT 'alte_warnungen',\n       warning_type || '_count',\n       warning_type,\n       COUNT(*) || ' ungeloeste Hinweise (Typ: ' || warning_type || ') aelter 7 Tage'\nFROM automatenlager.warnings\nWHERE resolved = FALSE\n  AND warning_type NOT LIKE 'NACHFUELLUNG%'\n  AND warning_type NOT LIKE 'PICKLISTE%'\n  AND created_at < NOW() - INTERVAL '7 days'\nGROUP BY warning_type\nHAVING COUNT(*) > 0\n\nUNION ALL\n\nSELECT 'pending_proposals',\n       proposal_key,\n       COALESCE(reason,'?'),\n       'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?')\nFROM automatenlager.product_change_proposals\nWHERE status = 'pending'\n  AND created_at < NOW() - INTERVAL '14 days'\n\nORDER BY check_type, key",
+          "options": {}
+        }
+      },
+      {
+        "id": "1F24F1F0",
+        "name": "Code - Ergebnisse aggregieren",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const items = $input.all();\nif (!items.length) {\n  return [{ json: {\n    status: 'OK',\n    count: 0,\n    email_subject: null,\n    email_body: null,\n    summary: 'Alle DB-Konsistenzpruefungen bestanden.'\n  }}];\n}\nconst grouped = {};\nfor (const { json: row } of items) {\n  if (!grouped[row.check_type]) grouped[row.check_type] = [];\n  grouped[row.check_type].push(row.message);\n}\nconst lines = Object.entries(grouped).map(([type, msgs]) =>\n  '<h3>' + type + '</h3><ul>' + msgs.map(m => '<li>' + m + '</li>').join('') + '</ul>'\n).join('');\nconst count = items.length;\nconst ts = new Date().toISOString();\nreturn [{ json: {\n  status: 'FEHLER',\n  count,\n  grouped,\n  email_subject: '[DB-Check] ' + count + ' Konsistenzproblem' + (count !== 1 ? 'e' : '') + ' gefunden',\n  email_body: '<h2>DB-Konsistenzpruefung: ' + count + ' Problem' + (count !== 1 ? 'e' : '') + '</h2>' +\n    lines + '<p><small>WF-Val Check: ' + ts + '</small></p>'\n}}];",
+          "mode": "runOnceForAllItems"
+        }
+      },
+      {
+        "id": "F52CEC61",
+        "name": "IF - Probleme gefunden",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          720,
+          0
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "1",
+                "leftValue": "={{ $json.status }}",
+                "rightValue": "FEHLER",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "00C519EC",
+        "name": "Gmail - Alert senden",
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 2.1,
+        "position": [
+          960,
+          -100
+        ],
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "8zhryCRhHAc2OnKA",
+            "name": "Gmail account"
+          }
+        },
+        "parameters": {
+          "authentication": "oAuth2",
+          "resource": "message",
+          "operation": "send",
+          "sendTo": "patrickzinke@gmx.net",
+          "subject": "={{ $json.email_subject }}",
+          "emailType": "html",
+          "message": "={{ $json.email_body }}",
+          "options": {}
+        },
+        "webhookId": "daea2396-59b0-496a-9214-8c12cac554f6"
+      },
+      {
+        "id": "DFA09D17",
+        "name": "Alles OK",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          960,
+          100
+        ],
+        "parameters": {}
+      }
+    ],
+    "connections": {
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "DB - Konsistenzcheck",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "DB - Konsistenzcheck": {
+        "main": [
+          [
+            {
+              "node": "Code - Ergebnisse aggregieren",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - Ergebnisse aggregieren": {
+        "main": [
+          [
+            {
+              "node": "IF - Probleme gefunden",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF - Probleme gefunden": {
+        "main": [
+          [
+            {
+              "node": "Gmail - Alert senden",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Alles OK",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Patrick Matthes",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-05T08:06:08.580Z",
+        "id": 291,
+        "workflowId": "pdIjiyIfVIIPuJIt",
+        "versionId": "5419b3ac-1128-420f-a94d-5989f5af662d",
+        "event": "activated",
+        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      }
+    ]
+  }
+}

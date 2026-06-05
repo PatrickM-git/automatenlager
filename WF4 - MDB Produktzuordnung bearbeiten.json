@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-01T18:55:27.534Z",
+  "updatedAt": "2026-06-05T08:06:03.977Z",
   "createdAt": "2026-05-25T14:36:34.940Z",
   "id": "6tOZnWsxBNzHaVqA",
   "name": "WF4 - MDB Produktzuordnung bearbeiten",
@@ -479,39 +479,25 @@
     },
     {
       "parameters": {
-        "operation": "append",
-        "documentId": {
-          "__rl": true,
-          "value": "={{ $('Config - WF4').first().json.google_sheet_id }}",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "={{ $('Config - WF4').first().json.sheet_hinweise }}",
-          "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "autoMapInputData",
-          "value": {},
-          "schema": []
-        },
+        "operation": "executeQuery",
+        "query": "INSERT INTO automatenlager.warnings (\n  warning_key, warning_type, severity, message,\n  product_id, machine_id, resolved, created_at\n)\nVALUES (\n  COALESCE(NULLIF('{{ $json.change_id }}',''),'WF4') || '_{{ $json.type }}',\n  '{{ $json.type }}',\n  COALESCE(NULLIF('{{ $json.severity }}',''),'info'),\n  '{{ $json.message }}',\n  (SELECT product_id FROM automatenlager.products WHERE product_key='{{ $json.product_key }}' LIMIT 1),\n  (SELECT machine_id FROM automatenlager.machines WHERE machine_key='{{ $json.machine_id }}' LIMIT 1),\n  CASE WHEN '{{ $json.resolved }}' = 'TRUE' THEN TRUE ELSE FALSE END,\n  NOW()\n)\nON CONFLICT (warning_key) DO NOTHING\nRETURNING warning_key",
         "options": {}
       },
       "id": "f0bd7baa-28a5-4dfe-98b6-a587537bdef1",
       "name": "Google Sheets - Hinweise anhÃ¤ngen",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [
         2912,
         784
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "6GG86fWHw536Rk36",
-          "name": "Google Sheets API"
+        "postgres": {
+          "id": "Jept3990Uq8aN3Tr",
+          "name": "PostgreSQL"
         }
       },
-      "disabled": true
+      "disabled": false
     },
     {
       "parameters": {
@@ -1374,9 +1360,9 @@
   "staticData": null,
   "meta": null,
   "pinData": null,
-  "versionId": "cf118e92-8867-447d-b301-d738e37396e9",
-  "activeVersionId": "cf118e92-8867-447d-b301-d738e37396e9",
-  "versionCounter": 13,
+  "versionId": "f7df9530-360f-41dd-bb89-4484963fa73e",
+  "activeVersionId": "f7df9530-360f-41dd-bb89-4484963fa73e",
+  "versionCounter": 15,
   "triggerCount": 2,
   "shared": [
     {
@@ -1399,9 +1385,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-06-01T18:55:27.537Z",
-    "createdAt": "2026-06-01T18:55:27.537Z",
-    "versionId": "cf118e92-8867-447d-b301-d738e37396e9",
+    "updatedAt": "2026-06-05T08:06:03.979Z",
+    "createdAt": "2026-06-05T08:06:03.979Z",
+    "versionId": "f7df9530-360f-41dd-bb89-4484963fa73e",
     "workflowId": "6tOZnWsxBNzHaVqA",
     "nodes": [
       {
@@ -1631,7 +1617,8 @@
             "id": "6GG86fWHw536Rk36",
             "name": "Google Sheets API"
           }
-        }
+        },
+        "disabled": true
       },
       {
         "parameters": {
@@ -1870,42 +1857,30 @@
             "id": "6GG86fWHw536Rk36",
             "name": "Google Sheets API"
           }
-        }
+        },
+        "disabled": true
       },
       {
         "parameters": {
-          "operation": "append",
-          "documentId": {
-            "__rl": true,
-            "value": "={{ $('Config - WF4').first().json.google_sheet_id }}",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "={{ $('Config - WF4').first().json.sheet_hinweise }}",
-            "mode": "name"
-          },
-          "columns": {
-            "mappingMode": "autoMapInputData",
-            "value": {},
-            "schema": []
-          },
+          "operation": "executeQuery",
+          "query": "INSERT INTO automatenlager.warnings (\n  warning_key, warning_type, severity, message,\n  product_id, machine_id, resolved, created_at\n)\nVALUES (\n  COALESCE(NULLIF('{{ $json.change_id }}',''),'WF4') || '_{{ $json.type }}',\n  '{{ $json.type }}',\n  COALESCE(NULLIF('{{ $json.severity }}',''),'info'),\n  '{{ $json.message }}',\n  (SELECT product_id FROM automatenlager.products WHERE product_key='{{ $json.product_key }}' LIMIT 1),\n  (SELECT machine_id FROM automatenlager.machines WHERE machine_key='{{ $json.machine_id }}' LIMIT 1),\n  CASE WHEN '{{ $json.resolved }}' = 'TRUE' THEN TRUE ELSE FALSE END,\n  NOW()\n)\nON CONFLICT (warning_key) DO NOTHING\nRETURNING warning_key",
           "options": {}
         },
         "id": "f0bd7baa-28a5-4dfe-98b6-a587537bdef1",
         "name": "Google Sheets - Hinweise anhÃ¤ngen",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4.5,
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
         "position": [
           2912,
           784
         ],
         "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "6GG86fWHw536Rk36",
-            "name": "Google Sheets API"
+          "postgres": {
+            "id": "Jept3990Uq8aN3Tr",
+            "name": "PostgreSQL"
           }
-        }
+        },
+        "disabled": false
       },
       {
         "parameters": {
@@ -2034,7 +2009,8 @@
             "id": "6GG86fWHw536Rk36",
             "name": "Google Sheets API"
           }
-        }
+        },
+        "disabled": true
       },
       {
         "parameters": {
@@ -2119,7 +2095,8 @@
             "id": "6GG86fWHw536Rk36",
             "name": "Google Sheets API"
           }
-        }
+        },
+        "disabled": true
       },
       {
         "parameters": {
@@ -2766,18 +2743,10 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-06-01T18:55:27.609Z",
-        "id": 214,
+        "createdAt": "2026-06-05T08:06:05.085Z",
+        "id": 286,
         "workflowId": "6tOZnWsxBNzHaVqA",
-        "versionId": "cf118e92-8867-447d-b301-d738e37396e9",
-        "event": "deactivated",
-        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
-      },
-      {
-        "createdAt": "2026-06-01T18:55:27.631Z",
-        "id": 215,
-        "workflowId": "6tOZnWsxBNzHaVqA",
-        "versionId": "cf118e92-8867-447d-b301-d738e37396e9",
+        "versionId": "f7df9530-360f-41dd-bb89-4484963fa73e",
         "event": "activated",
         "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }
