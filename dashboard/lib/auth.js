@@ -19,13 +19,16 @@ const ALL_CAPABILITIES = [
   'system.verwalten',
 ];
 
-// Drei Voreinstellungs-Rollen → Fähigkeits-Bündel.
+// Vier Voreinstellungs-Rollen → Fähigkeits-Bündel.
 //  - eigentuemer: alle (voller Admin)
+//  - partner:     Betrieb + Finanzen lesen (alles sehen, nichts schreiben);
+//                 via DASHBOARD_PARTNER_LOGIN konfiguriert
 //  - auffueller:  Betrieb lesen + Bestand/Slots schreiben + Workflows auslösen;
 //                 NICHT finanzen.lesen / nayax.schreiben / system.verwalten
 //  - gast:        nur betrieb.lesen
 const ROLE_CAPABILITIES = {
   eigentuemer: [...ALL_CAPABILITIES],
+  partner: ['betrieb.lesen', 'finanzen.lesen'],
   auffueller: ['betrieb.lesen', 'bestand.schreiben', 'workflows.starten'],
   gast: ['betrieb.lesen'],
 };
@@ -93,13 +96,17 @@ function parseLoginList(value) {
   return clean(value).split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
 }
 
-// Issue #28: Rolle (eigentuemer/auffueller/gast) aus der konfigurativen Login-
-// Zuordnung ableiten. Neue Logins werden ohne Code-Änderung über die Env
-// DASHBOARD_ADMIN_LOGIN (Eigentümer) bzw. DASHBOARD_OPERATOR_LOGIN (Auffüller)
-// zugewiesen. Default-Deny bleibt: alles andere ist Gast.
+// Issue #28: Rolle (eigentuemer/partner/auffueller/gast) aus der konfigurativen
+// Login-Zuordnung ableiten. Neue Logins werden ohne Code-Änderung über Env-Vars
+// zugewiesen. Reihenfolge: eigentuemer > partner > auffueller > gast.
+//  DASHBOARD_ADMIN_LOGIN   — Eigentümer (alle Rechte)
+//  DASHBOARD_PARTNER_LOGIN — Partner (betrieb.lesen + finanzen.lesen, kein Schreiben)
+//  DASHBOARD_OPERATOR_LOGIN — Auffüller (betrieb.lesen + bestand.schreiben + workflows)
+// Default-Deny bleibt: alles andere ist Gast.
 function resolveRole({ normalizedLogin, remoteAddress, env }) {
   if (normalizedLogin) {
     if (parseLoginList(env.DASHBOARD_ADMIN_LOGIN).includes(normalizedLogin)) return 'eigentuemer';
+    if (parseLoginList(env.DASHBOARD_PARTNER_LOGIN).includes(normalizedLogin)) return 'partner';
     if (parseLoginList(env.DASHBOARD_OPERATOR_LOGIN).includes(normalizedLogin)) return 'auffueller';
     return 'gast';
   }

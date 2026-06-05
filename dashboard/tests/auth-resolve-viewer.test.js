@@ -99,6 +99,36 @@ test('Rollen-Zuordnung ist konfigurativ (neuer Operator-Login ohne Code-Änderun
   assert.equal(v.roleKey, 'auffueller');
 });
 
+// ── Partner-Rolle (betrieb.lesen + finanzen.lesen, kein Schreiben) ───────────
+
+const PARTNER = 'kollege@example.com';
+const partnerEnv = { ...rbacEnv, DASHBOARD_PARTNER_LOGIN: PARTNER };
+
+test('Partner: betrieb.lesen + finanzen.lesen, KEIN Schreiben', () => {
+  const v = resolveViewer({ login: PARTNER, remoteAddress: '127.0.0.1', env: partnerEnv });
+  assert.equal(v.roleKey, 'partner');
+  assert.equal(v.role, 'guest', 'binär: Partner ist kein voller Admin');
+  assert.equal(v.can('betrieb.lesen'), true);
+  assert.equal(v.can('finanzen.lesen'), true);
+  assert.equal(v.can('bestand.schreiben'), false);
+  assert.equal(v.can('workflows.starten'), false);
+  assert.equal(v.can('nayax.schreiben'), false);
+  assert.equal(v.can('system.verwalten'), false);
+});
+
+test('Partner-Zuordnung konfigurativ via DASHBOARD_PARTNER_LOGIN', () => {
+  const env2 = { ...rbacEnv, DASHBOARD_PARTNER_LOGIN: `${PARTNER},zweit@example.com` };
+  const v = resolveViewer({ login: 'zweit@example.com', remoteAddress: '127.0.0.1', env: env2 });
+  assert.equal(v.roleKey, 'partner');
+  assert.equal(v.can('finanzen.lesen'), true);
+});
+
+test('Partner-Vorrang: Admin-Login schlägt Partner-Login', () => {
+  const env2 = { ...partnerEnv, DASHBOARD_PARTNER_LOGIN: ADMIN };
+  const v = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env: env2 });
+  assert.equal(v.roleKey, 'eigentuemer', 'eigentuemer-Liste hat Vorrang');
+});
+
 test('Dev-Notausgang gibt volle Eigentümer-Rolle', () => {
   const v = resolveViewer({ login: '', remoteAddress: '127.0.0.1', env: { ...rbacEnv, DASHBOARD_DEV_LOCAL_ADMIN: '1' } });
   assert.equal(v.roleKey, 'eigentuemer');
