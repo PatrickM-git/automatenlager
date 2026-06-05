@@ -2,7 +2,7 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-06-05 — Session abgeschlossen: WF3 Auto-Restart + Claude-Proposals
+## Stand: 2026-06-05 Mittag — Session abgeschlossen: WF3-Crash-Fix + WF8 Live-GuV + WF-Val-Restart-Fix
 
 Suite **847/847** (keine neuen Tests; Änderungen sind rein n8n-seitig).
 
@@ -10,82 +10,58 @@ Suite **847/847** (keine neuen Tests; Änderungen sind rein n8n-seitig).
 
 ### Heute erledigt
 
-#### WF-Val v3: WF3 Auto-Restart (Fan-out-Architektur)
+#### WF3-Crash — Root Cause & Fix
 
-**WF-Val** (`pdIjiyIfVIIPuJIt`) wurde von v2 auf v3 upgegradet:
+**Root Cause:** PostgreSQL `to_char`-Format-String `'YYYY-MM-DDTHH24:MI:SS'` hat einen subtilen Bug:
+- `DD` ist ein Muster für den Tag
+- `TH` DIREKT nach einer Zahl = Ordinal-Suffix-Modifier (macht `DD` zu `05TH`)
+- Der `T` in `DDTHH24` wird nicht als Literal behandelt, sondern als Teil des Ordinal-Suffixes `TH`
+- Ergebnis: `"2026-06-05THH24:58:56"` statt `"2026-06-05T06:58:56"` — kein gültiges ISO-Datum
+- `new Date("2026-06-05THH24:58:56.000Z")` → `Invalid Date` → `.toISOString()` wirft `RangeError` (Zeile 754 in Code - FIFO berechnen)
 
-**Neue Architektur (Fan-out):**
-```
-Schedule (04:15 UTC)
-  → PG: DB-Konsistenzcheck (5 UNION ALL)
-  → Code: Aggregieren + restart_flag setzen
-    ↓ Fan-out: BEIDE IFs parallel
-  IF: WF3 Neustart nötig?          IF: Probleme gefunden?
-    JA → HTTP: WF3 starten            JA → Gmail: Alert
-    NEIN → NoOp WF3 OK                NEIN → NoOp Alles OK
-```
+**Warum ab 07:50?** Davor war `last_inventory_review_at` in `workflow_state` NULL → COALESCE gab `''` → Fallback auf `inventory_cutover_datetime` (gültiger Wert). Um 07:50 wurde erstmals ein Watermark geschrieben, ab dann trug die buggy SQL-Ausgabe den Crash.
 
-**Key-Entscheidung:** Code-Node sendet seinen Output an BEIDE IF-Nodes gleichzeitig (n8n-Fan-out über ein Output-Port, zwei Ziel-Nodes). Kein Merge-Node nötig.
+**Fix:** `'YYYY-MM-DDTHH24:MI:SS'` → `'YYYY-MM-DD"T"HH24:MI:SS'` (T in Anführungszeichen = PostgreSQL Literal)
 
-**WF3 Restart-Mechanismus:**
-- HTTP Request POST `https://hp-mini-server.tail573a13.ts.net/api/v1/workflows/wbOhFKXQqBpJWB1w/execute`
-- Auth via n8n-Credential "n8n Mini API" (httpHeaderAuth, ID: `sk4oJ1b15NNHkyK3`, X-N8N-API-KEY)
-- Feuer-und-vergiss: kein Re-Check im selben Lauf (WF3 läuft sowieso alle 5 Min)
-- Email zeigt "WF3 haengt — Auto-Neustart ausgeloest" als orangene Sektion
+**Gefixt in:**
+- WF3 Node "Google Sheets - letzter Verkaufsworkflow lesen" (SQL)
+- WF8 Node "Read - Verarbeitete_Transaktionen" (selber Bug, präventiv gefixt)
 
-**SQL-Logik (unverändert ggü. v2):**
-- `wf3_stale`: `updated_at < NOW() - 30 Min` (nicht `last_inventory_review_at`)
-- `alte_warnungen`: `severity != 'info'` (schliesst BACKUP_OK aus)
-
-**Neue Datei:** `C:\tmp\fix_wfval_v3.py`
-**JSON im Repo:** `WF-Val - DB Konsistenz-Check.json` (9 Nodes)
+**Ergebnis:** WF3 läuft seit 11:10 UTC wieder erfolgreich. Alle 7 Transaktionen des Tages (inkl. 2 fehlende "kurz vor 12") sind jetzt in der DB.
 
 ---
 
-#### WF-Claude-Proposals: Stale Proposals automatisch bearbeiten
+#### WF8 — Live-GuV (alle 15 Min statt täglich 02:00)
 
-**Neuer Workflow** (`hU7Aev7G4MaMv2yR`, Name: "WF-Claude-Proposals") — **aktuell DEAKTIVIERT**:
-
-**Flow:**
-```
-Schedule (04:30 UTC täglich)
-  → PG: pending proposals > 14 Tage lesen (max 20)
-  → Code: für Claude formatieren (skip=true wenn leer)
-  → IF: Proposals vorhanden?
-    JA → HTTP: Claude Haiku (claude-haiku-4-5-20251001) bewerten
-         → Code: JSON parsen + Batch-UPDATE-SQL + Email bauen
-         → PG: Status UPDATE (approve/reject per CASE WHEN)
-         → IF: Eskalationen?
-           JA → Gmail: Bericht mit approve/reject/escalate
-           NEIN → NoOp
-    NEIN → NoOp
-```
-
-**Claude-Entscheidungslogik:**
-- `approve`: Produkt existiert im Katalog + aktiv + klarer Grund
-- `reject`: Produkt NICHT im Katalog + >21 Tage alt + unklarer Grund
-- `escalate`: Neue Produkte, große Änderungen, Unsicherheit → Email an User
-
-**Sicherheit:** Nur proposal_keys aus der DB-Antwort werden akzeptiert (Whitelist-Filter im Code-Node). SQL via CASE WHEN mit escaped Keys.
-
-**Claude-Credential:** `HykwFghdDuUDa2lu` (Name: "Claude API Key", httpHeaderAuth) — selbe wie WF1
-
-**Aktivieren (nach Prüfung in n8n UI):**
-```
-POST /api/v1/workflows/hU7Aev7G4MaMv2yR/activate
-```
-
-**Neue Dateien:**
-- `C:\tmp\create_wf_claude_proposals.py`
-- `WF-Claude-Proposals.json` (11 Nodes) — im Repo
+**Problem:** GuV-Dashboard zeigte nur gestrigen Stand; WF8 lief täglich um 02:00 UTC.
+**Analyse:** WF8's SQL liest bereits alle Transaktionen der letzten 120 Tage — auch von heute. Nur der Trigger war falsch (zu selten).
+**Fix:** Trigger von `triggerAtHour: 2` (täglich) auf `minutesInterval: 15` (alle 15 Min) geändert.
+**Neue WF8-ID:** `gyM9rnvUMfnv4x3G` (n8n aktualisierte auf 2.22.5, HANDOVER-Tabelle korrigiert).
 
 ---
 
-### Vorherige Session (2026-06-05): Vollständige Google-Sheets→PostgreSQL-Migration
+#### WF-Val Auto-Restart — Fix (deactivate + activate)
 
-(Archiv: `HANDOVER_ARCHIVE/HANDOVER_2026-06-05.md`)
+**Problem:** WF-Val v3 rief `POST /api/v1/workflows/{id}/execute` auf → HTTP 405 (nicht unterstützt in n8n 2.x).
+**Fix:** Zwei HTTP-Request-Nodes in Sequenz:
+1. `POST .../deactivate` (Node: "HTTP - WF3 starten", umbenannt)
+2. `POST .../activate` (neuer Node: "HTTP - WF3 aktivieren")
 
-Alle WF1–WF9 + WF-Val vollständig auf PostgreSQL migriert. WF4/WF7/WF9 Audit-Nodes aktiviert und auf `warnings`-Tabelle umgestellt. WF-Val v2 als DB-Konsistenz-Checker neu gebaut (5 UNION ALL Checks, BACKUP_OK-Fix, updated_at für WF3-Stale-Check).
+WF-Val reagiert korrekt auf echte WF3-Stagnation (updated_at > 30 Min alt).
+
+---
+
+#### n8n Container-Update (Nebeneffekt)
+
+Docker-Restart hat n8n von **2.21.4 → 2.22.5** aktualisiert. JS Task Runner ist jetzt in internal mode aktiv. Alle Workflows laufen korrekt.
+
+---
+
+### Vorherige Session (2026-06-05 Früh): WF3 Auto-Restart + Claude-Proposals
+
+(Archiv: `HANDOVER_ARCHIVE/HANDOVER_2026-06-05_morning.md`)
+
+WF-Val v3 (Fan-out), WF-Claude-Proposals erstellt+aktiviert.
 
 ---
 
@@ -94,16 +70,16 @@ Alle WF1–WF9 + WF-Val vollständig auf PostgreSQL migriert. WF4/WF7/WF9 Audit-
 | # | Inhalt | Warum offen |
 |---|--------|-------------|
 | **#9** | v2-Abschaltung | Strategische Entscheidung (wann/wie) |
-| homelab **#48** | Rückwirkende Umbuchung betroffener Verkäufe | Komplex, braucht User-Input |
-| **WF-Claude-Proposals** | Workflow prüfen + aktivieren | Erstmal deaktiviert — User soll in n8n UI reviewen |
+| homelab **#48** | Rückwirkende Umbuchung betroffener Verkäufe | Braucht 14-Tage-Drift, frühestens 2026-06-08 |
+| **WF-Claude-Proposals** | Workflow prüfen + aktivieren | Aktiv seit dieser Session — User soll Verhalten im UI beobachten |
 
 ---
 
 ### Bekannte Lücken / Folge-Issues
 
-- **WF-Claude-Proposals deaktiviert:** Muss manuell in n8n UI geprüft und dann aktiviert werden. Zum Testen: "Test workflow" Button in n8n nutzen.
-- **WF3 Restart-URL intern:** Die HTTP-Request-URL `https://hp-mini-server.tail573a13.ts.net/api/v1/...` wird von WF-Val FROM Mini heraus aufgerufen. Falls das Routing nicht funktioniert (Docker→Tailscale), Fallback auf `http://host.docker.internal:5678/api/v1/...`.
+- **WF-Val Stale-Check**: `updated_at < NOW() - 30 Min` — bei 0 Verkäufen > 30 Min würde WF3 fälschlich als stale erkannt. In der Praxis unkritisch (Verkäufe kommen regelmäßig).
 - **WF2 schreibt Preise noch nicht bei Neuanlage** (pgw_write kennt kein `price`-Event). Neue Produkte brauchen manuellen Preis-Insert.
+- **WF-Claude-Proposals**: Prüfen ob Email-Versand bei ersten Läufen korrekt funktioniert.
 
 ---
 
@@ -137,15 +113,15 @@ DASHBOARD_TRUSTED_SERVE_IP=172.18.0.1
 | WF | ID | Status |
 |----|----|--------|
 | WF1 Rechnungseingang | `wnGAwHhgfXq2ATM8` | aktiv |
-| WF2 Produktauswahl | `DPVPtNiByNhpFHzj` | aktiv |
+| WF2 Produktauswahl | `X2RU2cHm78rkIWMf` | aktiv |
 | WF3 Nayax FIFO | `wbOhFKXQqBpJWB1w` | aktiv, alle 5 Min |
 | WF4 MDB-Mapping | `6tOZnWsxBNzHaVqA` | aktiv |
-| WF5 MHD-Monitor | `9NJlEHCH3JJXHKOH` | aktiv |
+| WF5 MHD-Monitor | `3ceKeNWmdj455Tcr` | aktiv |
 | WF7 Nachfüllung | `0oRIiVFr5Q7FF6ow` | aktiv |
-| WF8 GuV-Aggregator | `WJ4VkGSgPbZZniG4` | aktiv |
+| WF8 GuV-Aggregator | `gyM9rnvUMfnv4x3G` | aktiv, **alle 15 Min** |
 | WF9 Pickliste | `nh8Tmg7klwGVjKui` | aktiv |
 | WF-Val DB-Check | `pdIjiyIfVIIPuJIt` | aktiv, 04:15 UTC |
-| WF-Claude-Proposals | `hU7Aev7G4MaMv2yR` | **DEAKTIVIERT** |
+| WF-Claude-Proposals | `hU7Aev7G4MaMv2yR` | aktiv, 04:30 UTC täglich |
 
 ### Deploy-Weg (Referenz)
 SSH: `ssh -i "C:\Users\patri\.ssh\miniserver_key" -o StrictHostKeyChecking=no patri@100.68.148.46`
@@ -171,6 +147,11 @@ FROM (
     AND (updated_at IS NULL OR updated_at < NOW() - INTERVAL '30 minutes')
 ) x;
 
+-- Heutige Transaktionen
+SELECT COUNT(*) AS heute, MAX(settlement_at)::timestamp(0) AS letzte
+FROM automatenlager.sales_transactions
+WHERE settlement_at::date = CURRENT_DATE;
+
 -- Pending Proposals (fuer Claude-Proposals)
 SELECT proposal_key, status, reason, created_at,
   EXTRACT(DAY FROM NOW()-created_at)::int AS days_pending
@@ -183,9 +164,10 @@ SELECT * FROM automatenlager.workflow_state;
 ```
 
 ### Lehren dieser Session
-- **n8n Fan-out:** Ein Output-Port kann zu mehreren Nodes verbinden — in `connections` einfach mehrere Einträge im Array: `[[{node:A},{node:B}]]`. Kein Merge-Node nötig.
-- **n8n Credential-API:** POST /credentials braucht `allowedDomains` im `data`-Objekt (auch als leerer String `''`).
-- **n8n POST /workflows body:** `active`-Feld ist read-only und darf nicht im Body sein.
-- **WF3-Restart:** HTTP POST /api/v1/workflows/{id}/execute startet WF3 direkt ohne ExecuteWorkflow-Trigger in WF3 zu benötigen.
+- **PostgreSQL `to_char` + `DDTH`-Falle:** `TH` nach einem Zahlmuster = Ordinal-Suffix-Modifier. `'YYYY-MM-DDTHH24:MI:SS'` → `TH` frisst den `T`-Literal, `H24` wird nicht als Pattern erkannt. Fix: `'YYYY-MM-DD"T"HH24:MI:SS'` (T in Anführungszeichen schützen).
+- **n8n /execute 405:** Das Endpoint `/api/v1/workflows/{id}/execute` existiert in n8n 2.x nicht. Alternativer Restart: `/deactivate` + `/activate` nacheinander.
+- **n8n Task Runner in 2.22.5:** Code-Nodes laufen im JS Task Runner (internal mode). `new Date()` ohne Argument funktioniert. Execution-Daten mit `?includeData=true` laden um vollständige Fehlerdetails zu sehen.
+- **`lastNodeExecuted: null` != "kein Node lief":** Auch bei fehlerhaften Runs kann die Execution-Liste `lastNodeExecuted=null` zeigen, obwohl Nodes liefen. Immer `?includeData=true` für echte Fehlerdiagnose nutzen.
+- **n8n-Versionsupdates bei Docker-Restart:** `docker restart` updated ggf. das Image. Vorher verifizieren ob das erwünscht ist.
 
 ---
