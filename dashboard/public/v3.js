@@ -1042,6 +1042,7 @@
         fetchJson('/api/dashboard').catch(function () { return {}; }),
       ]).then(function (results) {
         var slots   = (results[0] && results[0].data && results[0].data.slots) || [];
+        var lagerOhneSlot = (results[0] && results[0].data && results[0].data.lagerOhneSlot) || [];
         var search  = (results[1] && results[1].results) || [];
         var viewer  = (results[2] && results[2].viewer) || {};
         if (slots.length === 0) { return { status: 'empty' }; }
@@ -1050,6 +1051,7 @@
           slots: {
             machines: groupSlotsByMachine(slots),
             palette:  slotBuildPalette(search),
+            lagerOhneSlot: lagerOhneSlot,
             canEdit:  !!viewer.canTriggerActions,
           },
         };
@@ -1525,7 +1527,7 @@
         if (res.ok && res.json && res.json.ok) {
           modal.close();
           showSlotToast((res.json && res.json.message) || (info.product_name + ' ausgebucht.'));
-          renderRoute(ROUTE_BY_PATH['/lager']);
+          renderRoute(ROUTE_BY_PATH[info.reloadRoute || '/lager']);
         } else {
           errEl.textContent = (res.json && res.json.error && res.json.error.message) ||
             ('Ausbuchen fehlgeschlagen (' + res.status + ').');
@@ -3058,9 +3060,32 @@
     }).join('');
   }
 
+  /* "Im Lager, ohne Slot": ausgetauschte/ausgelistete Produkte mit Restbestand
+     ohne aktiven Slot — hier direkt aussortierbar (nutzt den write-off-Dialog). */
+  function renderLagerOhneSlot(items, canEdit) {
+    if (!canEdit || !items || !items.length) { return ''; }
+    var rows = items.map(function (it) {
+      return '<li class="v3-slots-orphan__row">' +
+        '<span class="v3-slots-orphan__name">' + esc(it.product_name) + '</span>' +
+        '<span class="v3-slots-orphan__qty">' + esc(String(it.remaining_qty)) + ' Stk. im Lager</span>' +
+        '<button type="button" class="v3-lager-row__writeoff" data-writeoff-btn' +
+          ' data-batch-key="' + esc(it.batch_key) + '"' +
+          ' data-product-name="' + esc(it.product_name) + '"' +
+          ' data-remaining="' + esc(String(it.remaining_qty)) + '"' +
+          ' title="Aussortieren">Aussortieren</button>' +
+      '</li>';
+    }).join('');
+    return '<section class="v3-slots-orphan" data-slots-orphan>' +
+      '<p class="v3-slots-orphan__title">Im Lager, ohne Slot</p>' +
+      '<p class="v3-slots-hint">Ausgetauschte Produkte mit Restbestand, die in keinem Automaten mehr stehen. Hier direkt aussortieren.</p>' +
+      '<ul class="v3-slots-orphan__list">' + rows + '</ul>' +
+    '</section>';
+  }
+
   function renderSlotsPage(data) {
     var machines = (data && data.machines) || [];
     var palette  = (data && data.palette)  || [];
+    var lagerOhneSlot = (data && data.lagerOhneSlot) || [];
     var canEdit  = !!(data && data.canEdit);
 
     var machineChips = machines.length > 1
@@ -3112,6 +3137,7 @@
         '</div>' +
         palettePanel +
       '</div>' +
+      renderLagerOhneSlot(lagerOhneSlot, canEdit) +
       '<div class="v3-slots-fillpanel" data-slots-fillpanel hidden></div>';
     // Dialog + Toast werden auf document.body portiert (mountSlotDialog/showSlotToast),
     // damit position:fixed am Viewport haftet (Vorfahren der View tragen ein transform).
@@ -3906,6 +3932,22 @@
     };
     var root = viewEl.querySelector('[data-slots-root]');
     if (!root) { return; }
+
+    // "Im Lager, ohne Slot": Aussortieren direkt aus dem Slot-Editor (nutzt den
+    // bestehenden write-off-Dialog; nach Erfolg die Slots-Ansicht neu laden).
+    var orphanSection = viewEl.querySelector('[data-slots-orphan]');
+    if (orphanSection && _slotsState.canEdit) {
+      orphanSection.addEventListener('click', function (ev) {
+        var btn = ev.target && ev.target.closest ? ev.target.closest('[data-writeoff-btn]') : null;
+        if (!btn) { return; }
+        openWriteOffDialog({
+          batch_key:    btn.getAttribute('data-batch-key') || '',
+          product_name: btn.getAttribute('data-product-name') || '',
+          remaining:    Number(btn.getAttribute('data-remaining')) || 0,
+          reloadRoute:  '/slots',
+        });
+      });
+    }
 
     // Drehzahl-Filter: setzt das data-turnover-filter-Attribut auf den (beim
     // Automatenwechsel bestehenbleibenden) Stage-Wrapper; CSS dimmt Nicht-Treffer.

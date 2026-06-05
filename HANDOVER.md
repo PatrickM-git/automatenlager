@@ -39,6 +39,9 @@ Der erweiterte Guard deckte sofort auf, dass das Mojibake nicht nur WF4 betraf:
 
 ---
 
+### 9. Aussortieren direkt im Slot-Editor ("Im Lager, ohne Slot")
+User-Report: ein per Drag-and-Drop ausgetauschtes Produkt liegt in der Produkt-Palette, ist dort aber nicht aussortierbar. Befund: Aussortieren (write-off) gab es nur in "Bestand & MHD" (+ Chargensuche) — die Palette ist eine Katalog-Suche (kein Lagerbezug). Neue Sektion **"Im Lager, ohne Slot"** im Slot-Editor: listet Produkte mit Restbestand ohne aktiven Slot (Backend `lagerOhneSlot` in `lib/assortment-slots.js`, chargen-basiert) und nutzt den bestehenden write-off-Dialog (`openWriteOffDialog` um `reloadRoute` erweitert → bleibt nach Erfolg im Slot-Editor). Live-DB-verifiziert (zeigt aktuell Sprite 21 + Capri Sun Zero 10). Test `AC-ORPHAN`. CSS `v3-slots-orphan*`. Suite 855/855.
+
 ### 8. Zwei Rand-Fixes (alert-digest self-healing + flaky Test)
 - **alert-digest self-healing:** Die tägliche Alert-Mail (`lib/alert-digest.js`) nutzte die reconcile-Logik NICHT → veraltete WF5-Warnungen wären in die Mail gelandet. Jetzt `liveWarningReconcileSql(mhdDays)` in die Warnungs-Query eingebaut (Alias `w`, mhdDays Default 30) — identisch zum Cockpit. Kein Import-Zyklus.
 - **Flaky config-secret-Test:** `req()`-Helper in `dashboard-config-secret.test.js` macht jetzt Retry (5×, backoff) gegen transiente `ECONNRESET` unter paralleler Last. Suite jetzt stabil **854/854** im Volllauf (vorher gelegentlich 1 Fail).

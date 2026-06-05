@@ -4,6 +4,7 @@ const { resolvePeriod, formatProductName } = require('./economics.js');
 const { classifyTurnover } = require('./slow-mover.js');
 const { buildEffectiveConfig, normalizeCategoryKey, loadEffectiveConfig, DEFAULT_MANDANT } = require('./category-config.js');
 const { getThresholds } = require('./settings-thresholds.js');
+const { availableBatchStatusSqlList } = require('./stock-status.js');
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -152,6 +153,9 @@ function buildAssortmentSlotsData(pgRows, query = {}) {
   return {
     slots,
     filters,
+    // Lagerware ohne aktiven Slot (ausgetauscht/ausgelistet, noch Restbestand) —
+    // unverändert durchgereicht für die "Im Lager"-Sektion im Slot-Editor.
+    lagerOhneSlot: pgRows.lagerOhneSlot || [],
     recommendations: [],
     indicatorLegend: [
       { code: 'db_strong', label: 'DB-stark', source: 'kpi' },
@@ -313,7 +317,28 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
         ORDER BY l.name, m.name, sa.mdb_code`,
       [locationFilter, machineFilter, dateFrom, dateTo],
     );
-    return { slots: result.rows, config };
+
+    // Lagerware OHNE aktiven Slot: ausgetauschte/ausgelistete Produkte, die noch
+    // Restbestand im Lager haben (kein aktiver Slot mehr). Im Slot-Editor sonst
+    // nirgends greifbar — der User soll sie hier direkt aussortieren können.
+    // Chargen-Ebene (batch_key), damit der bestehende write-off-Dialog passt.
+    const lagerOhneSlotResult = await client.query(
+      `SELECT sb.batch_key,
+              p.name AS product_name,
+              sb.remaining_qty,
+              sb.mhd_date::text AS mhd_date
+         FROM automatenlager.stock_batches sb
+         JOIN automatenlager.products p ON p.product_id = sb.product_id
+        WHERE sb.status IN (${availableBatchStatusSqlList()})
+          AND sb.remaining_qty > 0
+          AND NOT EXISTS (
+            SELECT 1 FROM automatenlager.slot_assignments sa
+             WHERE sa.product_id = p.product_id AND sa.active = TRUE
+          )
+        ORDER BY p.name, sb.batch_key`,
+    );
+
+    return { slots: result.rows, config, lagerOhneSlot: lagerOhneSlotResult.rows };
   } finally {
     await client.end();
   }

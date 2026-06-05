@@ -114,6 +114,19 @@ test('AC1: assortment slots expose transparent indicators from KPI and stock dat
   assert.ok(slot.indicators.some((item) => item.code === 'mhd_risk' && item.source === 'stock'));
 });
 
+test('AC-ORPHAN: lagerOhneSlot (ausgetauschte Produkte mit Restbestand) wird durchgereicht', () => {
+  // Slot-Editor zeigt Lagerware ohne aktiven Slot zum direkten Aussortieren.
+  const orphan = [
+    { batch_key: 'B_SPRITE_1', product_name: 'Sprite', remaining_qty: 21 },
+    { batch_key: 'B_CAPRI_1', product_name: 'Capri Sun Zero', remaining_qty: 10 },
+  ];
+  const result = buildAssortmentSlotsData({ slots: SLOT_ROWS, lagerOhneSlot: orphan }, {});
+  assert.deepEqual(result.lagerOhneSlot, orphan, 'lagerOhneSlot muss unverändert durchgereicht werden');
+  // Fehlt das Feld (alte Datenquelle), darf es nicht crashen, sondern leeres Array sein.
+  const empty = buildAssortmentSlotsData({ slots: SLOT_ROWS }, {});
+  assert.deepEqual(empty.lagerOhneSlot, [], 'ohne Quelle -> leeres Array (kein undefined/Crash)');
+});
+
 test('AC1b: nur EINE Renner/Langsam-Definition — kein hartcodiertes runner/slow_mover-Indikator-Badge mehr', () => {
   const result = buildAssortmentSlotsData({ slots: SLOT_ROWS }, {});
   const allIndicators = result.slots.flatMap((slot) => slot.indicators);
