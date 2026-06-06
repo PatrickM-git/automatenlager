@@ -11,7 +11,8 @@ const test = require('node:test');
 
 const { inSandbox, applyMigration } = require('./helpers/migration-sandbox.js');
 
-const ADMIN = 'patrickmatthes2609@gmail.com'; // Default-Eigentuemer (= Mini-Serve-Login)
+const ADMIN = 'patrickmatthes2609@gmail.com'; // Eigentuemer 1 (Mini-Serve-Login)
+const OWNER2 = 'lantspeku@gmail.com';        // Eigentuemer 2 (zweiter GbR-Geschaeftsfuehrer)
 
 async function setup(client) {
   for (let n = 7; n <= 18; n++) await applyMigration(client, n);
@@ -23,20 +24,22 @@ async function tenantUser(client, login) {
   return r.rows;
 }
 
-test('#115 LIVE-Sandbox: Eigentuemer-Default -> t_faltrix in tenant_users + platform_admins', async (t) => {
+test('#115 LIVE-Sandbox: beide Eigentuemer-Defaults -> t_faltrix in tenant_users + platform_admins', async (t) => {
   await inSandbox(t, async (client) => {
     await setup(client);
 
-    const rows = await tenantUser(client, ADMIN);
-    assert.equal(rows.length, 1, 'genau eine tenant_users-Zeile fuer den Eigentuemer');
-    assert.equal(rows[0].tenant_id, 't_faltrix', 'Eigentuemer -> t_faltrix');
-    assert.equal(rows[0].role, 'eigentuemer', 'role eigentuemer');
-    assert.equal(rows[0].active, true, 'active=true');
+    for (const owner of [ADMIN, OWNER2]) {
+      const rows = await tenantUser(client, owner);
+      assert.equal(rows.length, 1, `genau eine tenant_users-Zeile fuer ${owner}`);
+      assert.equal(rows[0].tenant_id, 't_faltrix', `${owner} -> t_faltrix`);
+      assert.equal(rows[0].role, 'eigentuemer', `${owner} role eigentuemer`);
+      assert.equal(rows[0].active, true, 'active=true');
 
-    const pa = await client.query(
-      `SELECT active FROM automatenlager.platform_admins WHERE login = $1`, [ADMIN]);
-    assert.equal(pa.rowCount, 1, 'Eigentuemer-Login als platform_admin');
-    assert.equal(pa.rows[0].active, true, 'platform_admin active=true');
+      const pa = await client.query(
+        `SELECT active FROM automatenlager.platform_admins WHERE login = $1`, [owner]);
+      assert.equal(pa.rowCount, 1, `${owner} als platform_admin`);
+      assert.equal(pa.rows[0].active, true, 'platform_admin active=true');
+    }
   });
 });
 
@@ -57,21 +60,21 @@ test('#115 LIVE-Sandbox: Partner/Auffueller per GUC -> t_faltrix mit Rollen', as
     assert.equal(op.length, 1, 'Auffueller-Zeile lowercase normalisiert');
     assert.equal(op[0].role, 'auffueller');
 
-    // Partner/Auffueller sind KEINE platform_admins.
+    // Partner/Auffueller sind KEINE platform_admins (nur die beiden Eigentuemer).
     const pa = await client.query(
-      `SELECT count(*)::int c FROM automatenlager.platform_admins WHERE login <> $1`, [ADMIN]);
-    assert.equal(pa.rows[0].c, 0, 'nur der Eigentuemer ist platform_admin');
+      `SELECT count(*)::int c FROM automatenlager.platform_admins WHERE login NOT IN ($1, $2)`, [ADMIN, OWNER2]);
+    assert.equal(pa.rows[0].c, 0, 'nur die Eigentuemer sind platform_admins');
   });
 });
 
-test('#115 LIVE-Sandbox: ohne GUC werden Partner/Auffueller NICHT geraten (uebersprungen)', async (t) => {
+test('#115 LIVE-Sandbox: ohne GUC nur die beiden Eigentuemer (Partner/Auffueller NICHT geraten)', async (t) => {
   await inSandbox(t, async (client) => {
     await setup(client);
-    // Nur der Eigentuemer ist in tenant_users (keine erratenen Logins).
+    // Nur die beiden Eigentuemer-Defaults sind in tenant_users (keine erratenen Logins).
     const all = await client.query(
-      `SELECT login FROM automatenlager.tenant_users WHERE tenant_id='t_faltrix'`);
-    assert.equal(all.rowCount, 1, 'ohne GUC genau ein tenant_user (Eigentuemer)');
-    assert.equal(all.rows[0].login, ADMIN);
+      `SELECT login FROM automatenlager.tenant_users WHERE tenant_id='t_faltrix' ORDER BY login`);
+    const logins = all.rows.map((r) => r.login).sort();
+    assert.deepEqual(logins, [ADMIN, OWNER2].sort(), 'ohne GUC genau die zwei Eigentuemer');
   });
 });
 

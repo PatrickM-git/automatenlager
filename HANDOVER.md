@@ -9,8 +9,10 @@ Branch `feat/auth-scharf-stufe-2` (4 Commits), Suite **946/946 grün**. SPEC:
 erstmals real wirksam: echter Mandant aus der DB statt Konstante `TENANT_OWNER`.
 
 - **#115** Seed-Migration `0018-seed-tenant-users-platform-admins.sql` — befüllt
-  `tenant_users`/`platform_admins` mit den Faltrix-Logins (Eigentümer-Default
-  `patrickmatthes2609@gmail.com`; Partner/Auffüller optional via Session-GUC).
+  `tenant_users`/`platform_admins` mit den Faltrix-Logins. Default = **beide
+  GbR-Geschäftsführer als Eigentümer** (`patrickmatthes2609@gmail.com` +
+  `lantspeku@gmail.com`), beide auch als `platform_admins`; Liste via GUC
+  `seed_admin_logins` überschreibbar, Partner/Auffüller optional via GUC.
 - **#116** `dashboard/lib/tenant-directory.js` — Mandanten-Registry (In-Memory-Cache,
   `loginTenant`/`isPlatformAdmin`/`tenantExists` synchron, `machineTenant` async mit
   Miss-Recheck + Negative-Caching; fail-closed).
@@ -25,22 +27,24 @@ erstmals real wirksam: echter Mandant aus der DB statt Konstante `TENANT_OWNER`.
 ### ⚠️ DEPLOY-RUNBOOK (Reihenfolge ZWINGEND — Seed VOR Code, sonst Owner-Lockout)
 
 Der Stufe-2-Code löst Login→Mandant aus `tenant_users` auf. Auf dem Mini ist diese
-Tabelle aktuell **leer** → ohne Seed liefert `resolveViewer` `tenantId=null` und der
-Eigentümer wird aus seinen eigenen Maschinen ausgesperrt (404). Deshalb:
+Tabelle aktuell **leer** → ohne Seed liefert `resolveViewer` `tenantId=null` und die
+Eigentümer werden aus ihren eigenen Maschinen ausgesperrt (404). Deshalb:
 
-1. **Seed-Migration 0018 ZUERST** (Partner/Auffüller-Zeilen weglassen, wenn deren
-   Mini-Logins unbekannt/nicht vorhanden — der Eigentümer-Default genügt fürs Scharf-
-   schalten):
+1. **Seed-Migration 0018 ZUERST.** Der Default legt bereits BEIDE Eigentümer
+   (`patrickmatthes2609@gmail.com` + `lantspeku@gmail.com`) als `eigentuemer` +
+   `platform_admins` an — für das Scharfschalten genügt also der Default. Partner/
+   Auffüller optional (Zeile setzen, wenn deren Mini-Logins bekannt sind):
    ```bash
    psql "$DASHBOARD_V2_PG_URL" -v ON_ERROR_STOP=1 <<'SQL'
-   -- optional, nur wenn die echten Mini-Logins bekannt sind:
+   -- optional, ueberschreibt die Eigentuemer-Liste (z. B. aus DASHBOARD_ADMIN_LOGIN):
+   -- SET automatenlager.seed_admin_logins   = 'owner1@x.de,owner2@x.de';
    -- SET automatenlager.seed_partner_login  = '<partner-login>';
    -- SET automatenlager.seed_operator_login = '<auffueller-login>';
    \i dashboard/db-migrations/0018-seed-tenant-users-platform-admins.sql
    SQL
    ```
    Verifikation: `SELECT login,tenant_id,role FROM automatenlager.tenant_users;`
-   (Eigentümer → `t_faltrix`) und `SELECT login FROM automatenlager.platform_admins;`.
+   (beide Eigentümer → `t_faltrix`) und `SELECT login FROM automatenlager.platform_admins;`.
 2. **DANN Code-Deploy:** `git pull --ff-only` auf dem Mini + Container-Restart
    (`homelab-dashboard`). Optional `DASHBOARD_TENANT_DIR_TTL_MS` setzen (Default 60000).
 3. **Mini-Live-Smoke (Pflicht nach Deploy):**
