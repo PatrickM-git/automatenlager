@@ -29,9 +29,11 @@ BEGIN
   END IF;
 END $$;
 
--- Verkaufs-Idempotenz provider-aware: (tenant_id, nayax_transaction_id) [0012] ->
--- (tenant_id, provider, nayax_transaction_id).
-ALTER TABLE automatenlager.sales_transactions DROP CONSTRAINT IF EXISTS sales_transactions_tenant_uk;
+-- Verkaufs-Idempotenz provider-aware: (tenant_id, provider, nayax_transaction_id)
+-- ADDITIV. Der bestehende globale Unique sales_transactions_nayax_transaction_id_key
+-- (nayax_transaction_id) BLEIBT, damit der laufende Schreibpfad (pgw_write nutzt
+-- `ON CONFLICT (nayax_transaction_id)`) nicht mit 42P10 bricht — Story 23. Drop des
+-- alten globalen Unique + Schreibpfad-Umstellung erst in Stufe 6 (n8n-Abloesung).
 DO $$
 BEGIN
   IF NOT EXISTS (

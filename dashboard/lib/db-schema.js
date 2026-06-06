@@ -82,7 +82,10 @@ const TENANT_REQUIRED_TABLES = [
   'stock_batches', 'stock_movements', 'sales_transactions', 'guv_daily',
   'warnings', 'invoices', 'invoice_items', 'suppliers',
   'nayax_devices', 'workflow_state', 'prices',
-  'settings_thresholds', 'classification_settings', 'warehouses',
+  'settings_thresholds', 'warehouses',
+  // classification_settings BEWUSST AUSGENOMMEN: trägt seine Mandanten-Dimension
+  // in Stufe 1 weiter als `mandant_id` (Umbenennung auf tenant_id erst Stufe 6,
+  // sonst bräche WF8). Der Code liest sie über category-config.js::tenantColumn().
 ];
 
 // pg_catalog statt information_schema, DAMIT materialized views (relkind 'm')
