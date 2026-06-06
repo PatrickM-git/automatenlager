@@ -7,7 +7,10 @@
 // folgt in #28/#29; hier liegt das Fundament: Default-Deny, exakte Allowlist,
 // Fähigkeiten + can(), tenantId, abwärtskompatibles canTriggerActions.
 
-const TENANT_OWNER = 'eigentuemer';
+// Issue #117 (Stufe 2): Die hartcodierte Konstante TENANT_OWNER='eigentuemer' als
+// Default-Mandant ist ENTFERNT. Der reale Mandant kommt jetzt aus der Mandanten-
+// Registry (lib/tenant-directory.js) via `directory.loginTenant(login)` — kein
+// Default mehr (fehlt der Mandant ⇒ null ⇒ deny).
 
 // Issue #28: kanonisches Fähigkeiten-Vokabular (6 Verben, SPEC Säule 3).
 const ALL_CAPABILITIES = [
@@ -117,10 +120,15 @@ function resolveRole({ normalizedLogin, remoteAddress, env }) {
   return 'gast';
 }
 
-// Liefert {login, role, roleKey, capabilities:Set, tenantId, can(cap), canTriggerActions}.
+// Liefert {login, role, roleKey, capabilities:Set, homeTenantId, tenantId,
+// isPlatformAdmin, requestId, can(cap), canTriggerActions}.
 // `role` bleibt binär ('admin'|'guest') für Abwärtskompatibilität (is_admin, UI);
 // `roleKey` trägt die 3 Rollen; `capabilities`/`can` sind die eigentliche Autorität.
-function resolveViewer({ login, remoteAddress, host, env = {} } = {}) {
+//
+// Issue #117 (Stufe 2): `directory` (Mandanten-Registry, optional injiziert) liefert
+// den realen Heimat-Mandanten synchron aus dem Cache. resolveViewer BLEIBT synchron.
+// Ohne directory oder ohne Mapping ⇒ tenantId=null (KEIN TENANT_OWNER-Default mehr).
+function resolveViewer({ login, remoteAddress, host, env = {}, directory = null, requestId = null } = {}) {
   void host; // Rolle hängt an der nicht-fälschbaren Quelladresse, nicht am Host-Header.
   const headerTrusted = isTrustedIdentityPath(remoteAddress, env);
   // F1: über einen nicht vertrauenswürdigen Pfad wird der Header verworfen.
@@ -132,12 +140,33 @@ function resolveViewer({ login, remoteAddress, host, env = {} } = {}) {
   const can = (capability) => capabilities.has(capability);
   const isAdmin = roleKey === 'eigentuemer';
 
+  const dirLoginTenant = directory && typeof directory.loginTenant === 'function'
+    ? (l) => directory.loginTenant(l) : null;
+  const dirIsPlatformAdmin = directory && typeof directory.isPlatformAdmin === 'function'
+    ? (l) => directory.isPlatformAdmin(l) : null;
+
+  // Login für die Mandanten-Auflösung. Beim Dev-Notausgang (Loopback + Flag, kein
+  // Header-Login, aber roleKey=eigentuemer) den ersten konfigurierten Admin-Login
+  // nehmen, damit der Eigentümer-Mandant (t_faltrix) aufgelöst wird — die
+  // Lockout-Recovery auf dem Mini bleibt erhalten (User Story 16).
+  let lookupLogin = normalizedLogin;
+  if (!lookupLogin && isAdmin) {
+    lookupLogin = parseLoginList(env.DASHBOARD_ADMIN_LOGIN)[0] || '';
+  }
+
+  const homeTenantId = (dirLoginTenant && lookupLogin) ? dirLoginTenant(lookupLogin) : null;
+  const isPlatformAdmin = !!(dirIsPlatformAdmin && lookupLogin && dirIsPlatformAdmin(lookupLogin));
+  const tenantId = homeTenantId; // effektiver Mandant; Break-Glass-Override erst in #118
+
   return {
     login: effectiveLogin || (isAdmin ? 'local-admin' : 'guest'),
     role: isAdmin ? 'admin' : 'guest',
     roleKey,
     capabilities,
-    tenantId: TENANT_OWNER,
+    homeTenantId,
+    tenantId,
+    isPlatformAdmin,
+    requestId: requestId || null,
     can,
     canTriggerActions: can('workflows.starten'),
   };
@@ -149,17 +178,19 @@ function viewerCan(viewer, capability) {
   return !!(viewer && typeof viewer.can === 'function' && viewer.can(capability));
 }
 
-// Issue #33 (IDOR / Objekt-Ebene): Darf dieser Viewer auf ein Objekt zugreifen,
+// Issue #33/#117 (IDOR / Objekt-Ebene): Darf dieser Viewer auf ein Objekt zugreifen,
 // das dem Mandanten `objectTenantId` gehört? Zweite Hälfte der Zugriffskontrolle
 // neben RBAC (requireCapability prüft die VERB-Ebene, das hier die OBJEKT-Ebene).
-// Single-Tenant: alle Objekte gehören dem Eigentümer; fehlt der Objekt-Mandant,
-// wird TENANT_OWNER angenommen → der Eigentümer kommt durch, Fremd-Mandanten nicht.
-// Sobald echte Tenancy existiert, wird objectTenantId aus der DB-Zeile gelesen
-// (z. B. machines.tenant_id) — das bildet später Supabase-RLS ab.
+//
+// Gehärtet in Stufe 2 (#117): liefert NUR dann true, wenn `viewer.tenantId`
+// nicht-null ist UND exakt `objectTenantId` entspricht. Ein fehlender/leerer/null
+// Objekt-Mandant ⇒ false (deny). Die frühere „null ⇒ Eigentümer"-Annahme entfällt
+// — sonst würde der null-Rückgabewert von machineTenant (unbekannte Maschine)
+// zurück in „gehört dem Eigentümer" gerettet (IDOR-Leck).
 function objectAccessAllowed(viewer, objectTenantId) {
   if (!viewer || !viewer.tenantId) return false;
-  const owner = objectTenantId == null || objectTenantId === '' ? TENANT_OWNER : objectTenantId;
-  return viewer.tenantId === owner;
+  if (objectTenantId == null || objectTenantId === '') return false; // kein Default mehr
+  return viewer.tenantId === objectTenantId;
 }
 
 module.exports = {
@@ -169,7 +200,6 @@ module.exports = {
   isTrustedIdentityPath,
   isLoopback,
   ipInCidr,
-  TENANT_OWNER,
   ALL_CAPABILITIES,
   ROLE_CAPABILITIES,
   GUEST_CAPABILITIES,

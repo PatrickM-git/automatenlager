@@ -10,12 +10,22 @@ const { resolveViewer, isTrustedIdentityPath, ipInCidr } = require('../lib/auth.
 const ADMIN = 'patrickmatthes2609@gmail.com';
 const adminEnv = { DASHBOARD_ADMIN_LOGIN: ADMIN };
 
+// #117 (Stufe 2): Mandanten-Registry-Stub (synchron) für resolveViewer — bildet den
+// Eigentümer-Login auf den realen Mandanten t_faltrix ab (ersetzt die alte
+// hartcodierte Konstante TENANT_OWNER='eigentuemer').
+const FALTRIX = 't_faltrix';
+const dirFaltrix = {
+  loginTenant: (l) => (String(l).toLowerCase() === ADMIN ? FALTRIX : null),
+  isPlatformAdmin: (l) => String(l).toLowerCase() === ADMIN,
+  tenantExists: (tid) => tid === FALTRIX,
+};
+
 test('Header mit exaktem Admin-Login (vertrauenswürdiger Pfad) -> Admin', () => {
-  const v = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env: adminEnv });
+  const v = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env: adminEnv, directory: dirFaltrix });
   assert.equal(v.role, 'admin');
   assert.equal(v.canTriggerActions, true);
   assert.equal(v.can('system.verwalten'), true);
-  assert.equal(v.tenantId, 'eigentuemer');
+  assert.equal(v.tenantId, FALTRIX, '#117: realer Mandant aus der Registry, kein Konstanten-Default');
 });
 
 test('Header mit fremdem/unbekanntem Login -> Gast', () => {
@@ -193,19 +203,21 @@ test('ipInCidr: Basisfälle inkl. ::ffff:-Präfix und Mehrfach-CIDR', () => {
 const { objectAccessAllowed } = require('../lib/auth.js');
 
 test('#33 objectAccessAllowed: eigener Mandant darf, fremder nicht', () => {
-  const owner = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env: adminEnv });
-  assert.equal(owner.tenantId, 'eigentuemer');
-  assert.equal(objectAccessAllowed(owner, 'eigentuemer'), true);
+  const owner = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env: adminEnv, directory: dirFaltrix });
+  assert.equal(owner.tenantId, FALTRIX);
+  assert.equal(objectAccessAllowed(owner, FALTRIX), true);
   assert.equal(objectAccessAllowed(owner, 'fremder-mandant'), false, 'Fremd-Mandant-Objekt verweigert (IDOR)');
 });
 
-test('#33 objectAccessAllowed: fehlender Objekt-Mandant = Eigentümer (Single-Tenant durchlassen)', () => {
-  const owner = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env: adminEnv });
-  assert.equal(objectAccessAllowed(owner, null), true);
-  assert.equal(objectAccessAllowed(owner, ''), true);
+test('#117 objectAccessAllowed: fehlender/leerer Objekt-Mandant -> DENY (kein Eigentümer-Default mehr)', () => {
+  const owner = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env: adminEnv, directory: dirFaltrix });
+  // Gehärtet in #117: null/'' ist NICHT mehr „gehört dem Eigentümer", sondern deny —
+  // sonst würde der null-Rückgabewert von machineTenant (unbekannte Maschine) zum Leck.
+  assert.equal(objectAccessAllowed(owner, null), false);
+  assert.equal(objectAccessAllowed(owner, ''), false);
 });
 
 test('#33 objectAccessAllowed: kein/ungültiger Viewer = verweigert', () => {
-  assert.equal(objectAccessAllowed(null, 'eigentuemer'), false);
-  assert.equal(objectAccessAllowed({}, 'eigentuemer'), false);
+  assert.equal(objectAccessAllowed(null, FALTRIX), false);
+  assert.equal(objectAccessAllowed({}, FALTRIX), false);
 });
