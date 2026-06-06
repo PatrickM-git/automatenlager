@@ -62,8 +62,12 @@ test('#95 LIVE-Sandbox: zwei Mandanten duerfen je ein eigenes Zentrallager haben
     await setup(client);
     await client.query(`SELECT automatenlager.fn_create_tenant('t_a', 'A', NULL)`);
     await client.query(`SELECT automatenlager.fn_create_tenant('t_b', 'B', NULL)`);
+    // tenant-gefiltert auf die zwei in dieser Sandbox angelegten Mandanten — ein
+    // globaler Count braeche, sobald die committed DB ein Default-Zentrallager
+    // (z. B. t_faltrix seit 0010) enthaelt.
     const n = await client.query(
-      `SELECT count(*) c FROM automatenlager.warehouses WHERE name='Zentrallager' AND is_default`);
+      `SELECT count(*) c FROM automatenlager.warehouses
+        WHERE name='Zentrallager' AND is_default AND tenant_id IN ('t_a','t_b')`);
     assert.equal(Number(n.rows[0].c), 2, 'beide Mandanten haben ihr eigenes Zentrallager');
   });
 });

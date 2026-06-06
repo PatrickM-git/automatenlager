@@ -3,6 +3,7 @@ const http = require('http');
 const path = require('path');
 const url = require('url');
 const zlib = require('zlib');
+const crypto = require('crypto');
 const { buildEconomicsData, queryEconomicsPg, queryEconomicsProvisionalPg, formatProductName } = require('./lib/economics.js');
 const { buildInventoryMhdData, queryInventoryMhdPg, toIsoDate } = require('./lib/inventory-mhd.js');
 const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/assortment-slots.js');
@@ -26,7 +27,8 @@ const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buil
 const { buildProductCatalog } = require('./lib/product-catalog.js');
 const { queryEconomicsScopePg } = require('./lib/automaten-view.js');
 const { queryEconomicsLivePg } = require('./lib/economics-live.js');
-const { resolveViewer, objectAccessAllowed, TENANT_OWNER } = require('./lib/auth.js');
+const { resolveViewer, objectAccessAllowed, breakGlassDecision } = require('./lib/auth.js');
+const { createTenantDirectory } = require('./lib/tenant-directory.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
 const { runStockCostCheck } = require('./lib/stock-cost-invariant.js');
@@ -218,7 +220,24 @@ function getViewer(req) {
     remoteAddress: req.socket && req.socket.remoteAddress,
     host: req.headers.host,
     env: process.env,
+    directory: tenantDirectory,        // #117: reale Mandanten-Auflösung aus der Registry
+    requestId: req._requestId || null, // #117: per-Request-id (Audit-Korrelation, #118)
+    supportTenant: req.headers['x-support-tenant'], // #118: Break-Glass-Override (untraut)
   });
+}
+
+// #118: Break-Glass-Audit-Pflichtfelder (an die bestehende Senke andocken). auditAction
+// ergänzt timestamp + login(=viewer) + outcome; hier die übrigen SPEC-Pflichtfelder.
+function breakGlassAuditFields(viewer, req, parsed) {
+  return {
+    homeTenant: (viewer && viewer.homeTenantId) || null,
+    targetTenant: (viewer && viewer.supportSession && viewer.supportSession.targetTenant) || null,
+    endpoint: parsed && parsed.pathname,
+    method: req.method,
+    sourceAddress: (req.socket && req.socket.remoteAddress) || null,
+    requestId: (viewer && viewer.requestId) || req._requestId || null,
+    denyReason: (viewer && viewer.supportSession && viewer.supportSession.denyReason) || null,
+  };
 }
 
 // Issue #28: zentrale serverseitige Fähigkeits-Durchsetzung. Liefert true, wenn
@@ -234,15 +253,12 @@ function requireCapability(viewer, capability, res) {
   return false;
 }
 
-// Issue #33 (IDOR / Objekt-Ebene): VERBINDLICHES PATTERN für jeden Endpunkt, der
-// eine Objekt-ID (machine_id, Standort, Charge …) entgegennimmt — zweite Hälfte der
-// Zugriffskontrolle neben requireCapability (Verb-Ebene). Prüft, dass das Objekt zum
-// Mandanten des Viewers gehört; fremd → 404 (kein Existenz-Leak) + Audit.
-// Single-Tenant: machineTenant() liefert TENANT_OWNER → der Eigentümer kommt durch.
-// Bei echter Tenancy hier die Mandanten-Zuordnung aus der DB lesen (machines.tenant_id).
-function machineTenant(/* machineId */) {
-  return TENANT_OWNER; // Single-Tenant; später: SELECT tenant_id FROM machines WHERE machine_key = …
-}
+// Issue #33/#117 (IDOR / Objekt-Ebene): VERBINDLICHES PATTERN für jeden Endpunkt,
+// der eine Objekt-ID (machine_id, Standort, Charge …) entgegennimmt — zweite Hälfte
+// der Zugriffskontrolle neben requireCapability (Verb-Ebene). Prüft, dass das Objekt
+// zum Mandanten des Viewers gehört; fremd/unbekannt → 404 (kein Existenz-Leak) + Audit.
+// Der Mandant einer Maschine wird über requireMachineAccess (async, Registry) real
+// aufgelöst; objectAccessAllowed behandelt null (unbekannte Maschine) als deny.
 function requireObjectAccess(viewer, objectTenantId, res, event) {
   if (objectAccessAllowed(viewer, objectTenantId)) return true;
   auditDenied(viewer, event || 'object_access_denied', { objectTenantId });
@@ -320,6 +336,73 @@ function formatBerlinDateTime(date) {
 function dashboardV2PgUrl() {
   // Priorität: echte Prozess-Umgebung > .env.local (wie bei der n8n-Konfiguration).
   return resolvePgUrl(process.env, loadLocalEnv());
+}
+
+// ── #117 (Stufe 2): Mandanten-Registry verkabeln ──────────────────────────────
+// Eine langlebige, Pool-gestützte Registry-Instanz ist die einzige Quelle der
+// Mandanten-Auflösung (lib/tenant-directory.js). Ohne konfiguriertes PG bleibt sie
+// `null` (Dev/Test): die PG-abhängigen Endpunkte liefern ohnehin ihr eigenes
+// PG_UNCONFIGURED-503, und die IDOR-Hooks reagieren fail-closed (siehe
+// requireMachineAccess). Initialer Load-Fehler ⇒ Instanz bleibt „nicht bereit"
+// (isReady()===false) ⇒ Health-Check 503, IDOR-Hooks 503 (fail-closed) — es wird
+// NIE mit leerem Verzeichnis serviert und NIE auf einen Default-Mandanten gefallen.
+function buildTenantDirectory() {
+  const pgUrl = dashboardV2PgUrl();
+  if (!pgUrl) return null;
+  const { Pool } = require('pg');
+  const pool = new Pool({ connectionString: pgUrl, max: 2, connectionTimeoutMillis: 3000 });
+  pool.on('error', (err) => console.error('[tenant-directory] Pool-Fehler:', err && err.message));
+  const ttlEnv = Number(process.env.DASHBOARD_TENANT_DIR_TTL_MS);
+  return createTenantDirectory({
+    query: (sql, params) => pool.query(sql, params),
+    ttlMs: Number.isFinite(ttlEnv) && ttlEnv > 0 ? ttlEnv : undefined,
+    logger: (...a) => console.error('[tenant-directory]', ...a),
+  });
+}
+
+const tenantDirectory = buildTenantDirectory();
+
+// Initialer Snapshot (non-blocking, wie die übrigen Startup-Checks). Erfolg ⇒
+// TTL-Auto-Refresh starten; Fehler ⇒ fail-closed (Instanz bleibt unready).
+async function initTenantDirectory() {
+  if (!tenantDirectory) return;
+  try {
+    await tenantDirectory.init();
+    tenantDirectory.startAutoRefresh();
+    console.log('[tenant-directory] bereit.');
+  } catch (err) {
+    console.error('[tenant-directory] initialer Load fehlgeschlagen — fail-closed:', err && err.message);
+  }
+}
+
+function tenantDirectoryHealthy() {
+  // Ohne konfiguriertes PG ist die Registry „nicht anwendbar" ⇒ gesund (Dev/Test).
+  // Mit PG hängt die Gesundheit an der Registry-Bereitschaft (fail-closed sichtbar).
+  if (!tenantDirectory) return true;
+  return tenantDirectory.isReady();
+}
+
+// #117 (IDOR-Objektprüfung, async): löst den Mandanten der Maschine über die
+// Registry auf und wendet die Statuscode-Taxonomie an:
+//   * Registry nicht bereit / technischer Lookup-Fehler ⇒ 503 (kein Default-Fallback)
+//   * Maschine unbekannt / fremder Mandant ⇒ 404 (über requireObjectAccess, kein Leak)
+//   * eigener Mandant ⇒ allow
+// Liefert true (Zugriff erlaubt) oder false (Antwort bereits gesendet).
+async function requireMachineAccess(viewer, machineKey, res, event) {
+  if (!tenantDirectory || !tenantDirectory.isReady()) {
+    auditDenied(viewer, event, { machineKey, reason: 'tenant_directory_unready' });
+    sendJson(res, 503, { ok: false, error: { code: 'TENANT_DIRECTORY_UNAVAILABLE', message: 'Mandanten-Verzeichnis nicht bereit. Bitte später erneut.' } });
+    return false;
+  }
+  let objectTenantId;
+  try {
+    objectTenantId = await tenantDirectory.machineTenant(machineKey);
+  } catch (err) {
+    auditDenied(viewer, event, { machineKey, reason: 'tenant_lookup_failed' });
+    sendJson(res, 503, { ok: false, error: { code: 'TENANT_LOOKUP_FAILED', message: 'Mandanten-Auflösung fehlgeschlagen. Bitte später erneut.' } });
+    return false;
+  }
+  return requireObjectAccess(viewer, objectTenantId, res, event);
 }
 
 // Effektive Kategorie-/Schwellwert-Config (#63) für /einstellungen. Ohne erreichbare
@@ -1877,8 +1960,40 @@ function sendFile(res, filePath) {
 }
 
 const server = http.createServer(async (req, res) => {
+  req._requestId = crypto.randomUUID(); // #117: per-Request-id für Audit-Korrelation (#118)
   const parsed = url.parse(req.url, true);
   try {
+    // #117: Health-Check — spiegelt die Bereitschaft der Mandanten-Registry.
+    // Initialer Registry-Load-Fehler ⇒ 503 (fail-closed sichtbar); ohne PG (Dev/Test)
+    // gilt die Registry als „nicht anwendbar" ⇒ gesund.
+    if (parsed.pathname === '/health') {
+      const healthy = tenantDirectoryHealthy();
+      sendJson(res, healthy ? 200 : 503, {
+        ok: healthy,
+        tenantDirectoryReady: !!(tenantDirectory && tenantDirectory.isReady()),
+        pgConfigured: !!dashboardV2PgUrl(),
+      });
+      return;
+    }
+
+    // #118: Break-Glass-Durchsetzung — zentral VOR allen Endpunkten. Greift nur,
+    // wenn der X-Support-Tenant-Header gesetzt ist; auditiert jeden Fall an die
+    // bestehende Senke. Aktiver Override + Schreibmethode ⇒ 403 (read-only);
+    // nicht-existenter Ziel-Mandant ⇒ 404; ungültiger Header (kein Admin / untrauter
+    // Pfad) ⇒ ignoriert (Heimat-Mandant), aber auditiert.
+    if (req.headers['x-support-tenant']) {
+      const bgViewer = getViewer(req);
+      const bg = breakGlassDecision(bgViewer, req.method);
+      if (bg.kind !== 'none') {
+        auditAction(bgViewer, bg.auditEvent, breakGlassAuditFields(bgViewer, req, parsed), bg.outcome);
+        if (bg.kind === 'block') {
+          sendJson(res, bg.status, { ok: false, error: { code: bg.code, message: bg.status === 404 ? 'Mandant nicht gefunden.' : 'Support-Sitzung ist nur-lesend.' } });
+          return;
+        }
+        // 'allow' (lesender Override) / 'ignore' (entwerteter Header): Request läuft weiter.
+      }
+    }
+
     if (parsed.pathname === '/api/dashboard') {
       const viewer = getViewer(req);
       auditGuestAccess(viewer, 'dashboard_view');
@@ -2345,8 +2460,6 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const { slot_assignment_id, machine_id, mdb_code, new_product_id, new_qty, start_date } = body || {};
-      // #33 (IDOR): Automat muss zum Mandanten des Viewers gehören (Single-Tenant: No-Op-Guard).
-      if (machine_id && !requireObjectAccess(viewer, machineTenant(machine_id), res, 'idor:slot-change')) return;
       if (!machine_id || !mdb_code || !new_product_id || !start_date) {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: 'machine_id, mdb_code, new_product_id, start_date erforderlich.' } });
         return;
@@ -2356,6 +2469,10 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'VALIDATION_ERROR', message: validation.errors.map((e) => e.message).join(' '), errors: validation.errors } });
         return;
       }
+      // #33/#117 (IDOR): Automat muss real zum Mandanten des Viewers gehören. Nach
+      // der Eingabe-Validierung (malformte Requests ⇒ 400, kein Mandanten-Lookup;
+      // 400 leakt nichts über Objekt-Existenz). machine_id ist hier garantiert da.
+      if (!(await requireMachineAccess(viewer, machine_id, res, 'idor:slot-change'))) return;
       const slotRow = { slot_assignment_id, machine_id, mdb_code: Number(mdb_code), product_id: 0 };
       const payload = buildSlotChangePayload(slotRow, { new_product_id, new_qty: Number(new_qty ?? 0), start_date });
       const webhookUrl = process.env.SLOT_CHANGE_WEBHOOK_URL;
@@ -3533,8 +3650,6 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const machineKey = clean((body && (body.machine || body.machine_id)) || '');
-      // #33 (IDOR): Automat muss zum Mandanten des Viewers gehören (Single-Tenant: No-Op-Guard).
-      if (machineKey && !requireObjectAccess(viewer, machineTenant(machineKey), res, 'idor:nayax-apply')) return;
       if (!machineKey) {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: 'machine (Nayax-Nummer) erforderlich.' } });
         return;
@@ -3544,6 +3659,9 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
+      // #33/#117 (IDOR): Automat muss real zum Mandanten des Viewers gehören. Nach
+      // der Pflichtfeld-/PG-Prüfung; machineKey ist hier garantiert vorhanden.
+      if (!(await requireMachineAccess(viewer, machineKey, res, 'idor:nayax-apply'))) return;
       const webhookUrl = process.env.NAYAX_ABGLEICH_WEBHOOK_URL;
       if (!webhookUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'NAYAX_WEBHOOK_UNCONFIGURED', message: 'NAYAX_ABGLEICH_WEBHOOK_URL nicht gesetzt.' } });
@@ -3851,6 +3969,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`Automatenlager dashboard running at http://localhost:${PORT}`);
   // Nicht awaiten: Startup nicht blockieren, nur informativ loggen.
+  initTenantDirectory(); // #117: Mandanten-Registry laden (non-blocking, fail-closed)
   logStartupSchemaCheck();
   logStartupStockCostCheck();
 });
