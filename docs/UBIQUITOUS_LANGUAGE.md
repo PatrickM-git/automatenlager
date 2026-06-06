@@ -215,6 +215,32 @@ Support-Sitzung **setzt** den effektiven Mandanten ≠ Heimat-Mandant **und** er
 
 ---
 
+## Mandantenfähigkeit: Query-Filter / Lese-Isolation (Stufe 3) *(neu)*
+
+> Quelle: SPEC `docs/specs/multi-tenant-query-filter-stufe-3-v1.md`. Stufe 3 trennt die
+> **Lese-Pfade** flächendeckend nach Mandant — über **eine** zentrale Tür statt 40 einzelner
+> Filter. Baut auf dem **effektiven Mandanten** aus dem „Auth scharf"-Cluster (Stufe 2) auf.
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **Lese-Isolation** | Mandanten-Trennung der Lese-Pfade: jede Abfrage liefert nur Daten des **effektiven Mandanten**. | „Filter" pauschal |
+| **Mandanten-Tür** | Der zentrale, **fail-closed**, mandanten-bewusste Datenzugriffs-Helfer — die **einzige** legitime Stelle für mandanten-bezogene Lese-Queries; ohne gesetzten Mandanten führt sie nichts aus; bündelt den DB-Zugriff und ist der Haken für RLS (Stufe 5). | „DB-Wrapper" pauschal; „jeder filtert selbst" |
+| **No-Bypass-Invariante** | Direkte DB-Reads **außerhalb** der Tür (eigener `pg.Client`/`client.query`) sind **verboten** und werden vom Wächter als Verstoß markiert. | „bitte die Tür nutzen" (zu weich) |
+| **Query-Filter-Contract-Guard (`#107`-Wächter)** | Automatischer Suite-Test, der mandanten-bezogene Reads **ohne** `tenant_id`-Bindung, **an der Tür vorbei** oder als **ungefiltertes Aggregat** fängt. | „Linter"; „Warnung" |
+| **Melde-Modus → build-blocking** | Transienter Berichts-Zustand des Wächters (listet ungefilterte Reads) vs. scharfer Endzustand, der den **Build bricht**; die Ausnahmeliste **schrumpft** pro Slice. | Wächter dauerhaft „nur warnend" lassen |
+| **Echt-globale Tabelle** | Tabelle **ohne** kundenspezifische Information, bewusst mandantenübergreifend (Verzeichnis `tenants`/`tenant_users`/`platform_admins`, reine Provider-/Lookup-Tabellen) — von der Filterung ausgenommen. | `machines`/`locations`/`settings_thresholds` als „global" |
+| **Mandantenpflichtige Tabelle** | Default: jede Tabelle mit kundenspezifischem Inhalt (u. a. `machines`, `locations`, `settings_thresholds`, `nayax_devices`-**Zuordnung**) **muss** tenant-gefiltert werden. | „ist ja nur Stammdaten" |
+| **Aggregations-Leck** | Ein ungefiltertes Aggregat (`SUM`/`COUNT`/`AVG`/`MIN`/`MAX`) leckt genauso wie `SELECT *` — fremde Summen sind ein vollwertiges Datenleck. | Aggregate als „harmlos" einstufen |
+| **(Mat)View-Bypass** | Eine (Mat)View muss `tenant_id` **enthalten** **oder** nur über eine tenant-filternde View/die Tür gelesen werden — **nie roh**, sonst Umgehungspfad. | MatView „ist ja schon getrennt" |
+| **Vertikaler Slice (Häppchen)** | Bereichsweiser Rollout-Schritt: Queries eines Bereichs durch die Tür + Test gegen synthetische Mandanten `acme`/`globex` (#94-Sandbox) + Live-Check, dann Wächter für den Bereich scharf. | „Big-Bang-Migration" |
+| **Hintergrund-/zeitgesteuerter Lesepfad** | Lesepfad **ohne** Viewer (z. B. `alert-digest`, Monitoring-Jobs); braucht eine **explizite Mandanten-Quelle**, läuft **pro Mandant**, fällt **nie** auf einen Default zurück. | Job „ohne Mandant"/mit Default laufen lassen |
+
+Beziehungen: Jeder Lese-Pfad **liest durch** die Mandanten-Tür · Tür **erzwingt** den effektiven Mandanten
+(kein Mandant ⇒ 0 Zeilen, kein Default) · Wächter **bewacht** No-Bypass-Invariante + Filter-Vollständigkeit (inkl. Aggregate & (Mat)Views) ·
+Tür **setzt** in Stufe 5 zusätzlich die RLS-Sitzungsvariable · Lese-Isolation (Stufe 3) **schützt** das Sehen, Schreib-Isolation (Stufe 4) das Verändern.
+
+---
+
 ## Anbieter-Integration: `provider` & Vending Data Integration Layer *(neu)*
 
 > Nayax ist der **erste**, nicht der einzige Daten-Eingang. Stufe 0 nimmt nur die `provider`-Dimension mit;
@@ -274,6 +300,19 @@ Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
 > **Dev:** „Wie wird read-only erzwungen — blocke ich einfach POST?"
 > **Domain Expert:** „Primär über **Capability-Stripping**: in der Support-Sitzung bleiben nur die Lese-Fähigkeiten, also liefern die bestehenden Guards bei Schreibzugriff automatisch `403`. Der Methoden-Block ist nur der zweite Riegel."
 
+## Beispiel-Dialog (Query-Filter / Stufe 3) *(neu)*
+
+> **Dev:** „Ich häng an jede Query ein `WHERE tenant_id = …` — reicht das?"
+> **Domain Expert:** „Nein, genau das vergisst man unter 40 Modulen einmal. Alles geht durch **eine Mandanten-Tür**, und die **No-Bypass-Invariante** verbietet jeden direkten DB-Read außerhalb — der **Wächter** markiert ihn."
+> **Dev:** „`SELECT SUM(revenue) FROM sales` ist doch nur eine Zahl, kein Leck?"
+> **Domain Expert:** „Doch — ein **Aggregations-Leck**. Eine fremde Summe ist genauso schlimm wie fremde Einzelzeilen."
+> **Dev:** „`machines` sind doch Stammdaten — die kann ich global lassen?"
+> **Domain Expert:** „Nein, **mandantenpflichtig**. Global ist nur, was **keine** Kundendaten trägt — Verzeichnis und reine Lookups. Sobald Kundeninfo drin ist, wird gefiltert."
+> **Dev:** „Die Alert-Mail läuft nachts ohne eingeloggten Nutzer — welchen Mandanten nimmt die?"
+> **Domain Expert:** „Eine **explizite** Quelle, **pro Mandant** eine Mail — nie einen Default. Sonst mailt sie fremde Warnungen."
+> **Dev:** „Und der Wächter — bleibt der eine Warnung?"
+> **Domain Expert:** „Am Ende **build-blocking**: ein neuer ungefilterter Read bricht den Build."
+
 ## Markierte Unklarheiten *(neu)*
 
 - **Slot-Zahl pro Automat** für die Latten-Ableitung (Umsatz-Norm ÷ Slot-Zahl): Quelle aus den
@@ -288,6 +327,11 @@ Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
   (proxy-resilient) vs. striktes `403` — SPEC empfiehlt ignorieren + `denied`-Audit; finale Wahl in der Umsetzung bestätigen.
 - **Exakte Lese-Teilmenge für Capability-Stripping** (Stufe 2): welche der sechs Fähigkeiten als „lesen" gelten —
   in der Umsetzung (TDD) fixieren; Empfehlung: genau `betrieb.lesen` + `finanzen.lesen`.
+- **Konkreter Modulname der Mandanten-Tür** (Stufe 3): z. B. `lib/tenant-db.js` — in der Umsetzung (TDD) festziehen.
+- **Pool-Zentralisierung vs. eigener Slice** (Stufe 3): ob der geteilte DB-Pool Teil des Tür-Fundaments oder ein
+  separater Schritt ist — Empfehlung: gemeinsam im Fundament-Slice (Tür bringt den Pool gleich mit).
+- **Finale Liste der echt-globalen Tabellen** (Stufe 3): Default ist mandantenpflichtig; die Allowlist (Verzeichnis +
+  reine Lookups) in der Umsetzung **explizit reviewen** und je Eintrag begründen.
 
 ## Secret-Handling & Audit
 
