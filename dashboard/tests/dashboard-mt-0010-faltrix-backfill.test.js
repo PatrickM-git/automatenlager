@@ -17,10 +17,6 @@ const DATA_TABLES = [
   'warnings', 'invoices', 'invoice_items', 'suppliers',
   'nayax_devices', 'workflow_state', 'prices',
 ];
-const ROOT_TABLES = ['machines', 'locations', 'suppliers', 'products', 'invoices', 'nayax_devices', 'workflow_state'];
-const DEP_TABLES = ['slot_assignments', 'machine_profiles', 'stock_batches', 'stock_movements',
-  'sales_transactions', 'guv_daily', 'warnings', 'invoice_items', 'prices', 'product_aliases', 'product_change_proposals'];
-
 async function setup(client) {
   for (const n of [7, 8, 9, 10]) await applyMigration(client, n);
 }
@@ -77,16 +73,15 @@ test('#97 LIVE-Sandbox: Config-Tabellen kopiert auf t_faltrix, __default__-Vorla
   });
 });
 
-test('#97 LIVE-Sandbox: Default-Strategie — Root setzt t_faltrix, abhaengige entfernen Default', async (t) => {
+test('#97 LIVE-Sandbox: nach 0010 trägt JEDE Daten-Tabelle DEFAULT t_faltrix (kein __default__, kein Insert-Bruch)', async (t) => {
   await inSandbox(t, async (client) => {
     await setup(client);
-    for (const table of ROOT_TABLES) {
+    // Revidiert nach Review: 0010 setzt ueberall den transienten Default; das
+    // DROP DEFAULT bei den abhaengigen Tabellen passiert erst in 0014 (nach
+    // Trigger-Anlage) -> kein Fenster ohne Default UND ohne Trigger.
+    for (const table of DATA_TABLES) {
       const d = await columnDefault(client, table);
-      assert.match(String(d), /t_faltrix/, `${table}.tenant_id DEFAULT zeigt auf t_faltrix`);
-    }
-    for (const table of DEP_TABLES) {
-      const d = await columnDefault(client, table);
-      assert.equal(d, null, `${table}.tenant_id DEFAULT entfernt (Trigger fuellt in 0014)`);
+      assert.match(String(d), /t_faltrix/, `${table}.tenant_id DEFAULT zeigt nach 0010 auf t_faltrix`);
     }
   });
 });

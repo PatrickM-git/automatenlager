@@ -2,8 +2,10 @@
 -- + die bestehenden Trigger 0003/0005 mandantenrein nachziehen. Damit laeuft der
 -- heutige n8n-Schreibpfad ohne Aenderung weiter (kein NULL-/Falsch-Tenant).
 -- Stufe 1. Issue #101. Idempotent. Setzt 0010-0013 voraus.
--- WICHTIG: zusammen mit 0010-0013 deployen (DROP DEFAULT aus 0010 + dieser Trigger
--- gehoeren zusammen, sonst brechen Schreiber abhaengiger Tabellen).
+-- Diese Migration legt erst die Auto-Fill-Trigger an und entfernt DANACH (Schritt 4
+-- unten) den transienten DEFAULT der abhaengigen Tabellen — beides in EINER
+-- Migration, daher kein Fenster, in dem ein Schreiber ohne Default UND ohne Trigger
+-- braeche. (Der gesamte Block 0007-0017 sollte ohnehin atomar deployt werden.)
 -- Anwenden: psql $PGURL -f dashboard/db-migrations/0014-bridge-trigger-tenant-inheritance.sql
 
 -- ──────────────────────────────────────────────────────────────────────────────
@@ -62,10 +64,14 @@ DECLARE
     {"t":"guv_daily",                "args":["machine_id","machines","machine_id"]},
     {"t":"invoice_items",            "args":["invoice_id","invoices","invoice_id"]},
     {"t":"prices",                   "args":["slot_assignment_id","slot_assignments","slot_assignment_id"]},
-    {"t":"product_aliases",          "args":["product_id","products","product_id"]},
-    {"t":"warnings",                 "args":["machine_id","machines","machine_id","product_id","products","product_id","slot_assignment_id","slot_assignments","slot_assignment_id"]},
-    {"t":"product_change_proposals", "args":["machine_id","machines","machine_id","product_id","products","product_id"]}
+    {"t":"product_aliases",          "args":["product_id","products","product_id"]}
   ]';
+  -- BEWUSST OHNE warnings + product_change_proposals: ihre Eltern-FK-Spalten sind
+  -- nullable und bleiben bei "nackten" Schreibpfaden leer (System-Warnungen vom
+  -- Monitor/Backup; WF1-Rechnungsvorschlaege ohne machine/product). Ein Auto-Fill-
+  -- Trigger fuende dort keinen Eltern -> NULL -> 23502. Sie behalten daher den
+  -- transienten DEFAULT 't_faltrix' aus 0010 (root-artig) und werden NICHT DROP-
+  -- DEFAULTed (siehe unten).
   argstr TEXT;
 BEGIN
   FOR spec IN SELECT value FROM jsonb_array_elements(specs) LOOP
@@ -174,3 +180,24 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- 4. Transienten DEFAULT (aus 0010) bei den ABHAENGIGEN Tabellen ENTFERNEN —
+--    JETZT (nach Trigger-Anlage), nicht in 0010. Dadurch gibt es kein Fenster, in
+--    dem ein Schreiber ohne Default UND ohne Trigger braeche: bis hierher fuellt
+--    der DEFAULT 't_faltrix', ab hier der Auto-Fill-Trigger (aus dem Eltern).
+--    Nur Tabellen mit einem NOT-NULL-Eltern-FK (Trigger greift immer) stehen hier;
+--    warnings/product_change_proposals (nackte Schreibpfade) behalten den Default.
+-- ──────────────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE
+  t TEXT;
+  dep_tables TEXT[] := ARRAY[
+    'slot_assignments', 'machine_profiles', 'stock_batches', 'stock_movements',
+    'sales_transactions', 'guv_daily', 'invoice_items', 'prices', 'product_aliases'
+  ];
+BEGIN
+  FOREACH t IN ARRAY dep_tables LOOP
+    EXECUTE format('ALTER TABLE automatenlager.%I ALTER COLUMN tenant_id DROP DEFAULT', t);
+  END LOOP;
+END $$;

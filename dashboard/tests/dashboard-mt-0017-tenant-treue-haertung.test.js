@@ -63,7 +63,10 @@ test('#105 LIVE-Sandbox: alle neuen composite FKs existieren und sind tenant-fue
     for (const name of ['guv_daily_machine_tenant_fk', 'guv_daily_product_tenant_fk',
       'warnings_machine_tenant_fk', 'warnings_product_tenant_fk', 'warnings_slot_tenant_fk',
       'product_aliases_product_tenant_fk', 'product_change_proposals_machine_tenant_fk',
-      'product_change_proposals_product_tenant_fk', 'stock_movements_batch_tenant_fk']) {
+      'product_change_proposals_product_tenant_fk', 'stock_movements_batch_tenant_fk',
+      'invoice_items_product_tenant_fk', 'sales_transactions_product_tenant_fk',
+      'stock_batches_invoice_item_tenant_fk', 'stock_movements_slot_tenant_fk',
+      'stock_movements_source_txn_tenant_fk', 'invoices_supplier_tenant_fk']) {
       const r = await client.query(`SELECT pg_get_constraintdef(oid) d FROM pg_constraint WHERE conname=$1`, [name]);
       assert.equal(r.rowCount, 1, `${name} existiert`);
       assert.match(r.rows[0].d, /FOREIGN KEY \(tenant_id,/, `${name} ist composite`);

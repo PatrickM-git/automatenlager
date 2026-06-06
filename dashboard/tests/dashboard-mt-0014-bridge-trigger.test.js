@@ -92,6 +92,44 @@ test('#101 LIVE-Sandbox: FIFO-Trigger bucht funktional + mandantenrein ab', asyn
   });
 });
 
+test('#101 LIVE-Sandbox: Default-Strategie nach 0014 — abhaengige DROP, nackte behalten t_faltrix', async (t) => {
+  await inSandbox(t, async (client) => {
+    await setup(client);
+    const colDefault = async (table) => (await client.query(
+      `SELECT column_default FROM information_schema.columns
+        WHERE table_schema='automatenlager' AND table_name=$1 AND column_name='tenant_id'`, [table])).rows[0].column_default;
+
+    // Abhaengige (NOT-NULL-Eltern, Auto-Fill-Trigger greift) -> Default entfernt.
+    for (const table of ['slot_assignments', 'stock_batches', 'sales_transactions', 'guv_daily',
+      'invoice_items', 'prices', 'product_aliases', 'stock_movements', 'machine_profiles']) {
+      assert.equal(await colDefault(table), null, `${table}: DEFAULT entfernt (Trigger uebernimmt)`);
+    }
+    // Nackte Schreibpfade -> Default t_faltrix bleibt (kein Trigger, kein Bruch).
+    for (const table of ['warnings', 'product_change_proposals']) {
+      assert.match(String(await colDefault(table)), /t_faltrix/, `${table}: behaelt DEFAULT t_faltrix`);
+    }
+  });
+});
+
+test('#101 LIVE-Sandbox: NACKTE Schreibpfade ohne Eltern brechen NICHT (Regression Review-Befund)', async (t) => {
+  await inSandbox(t, async (client) => {
+    await setup(client);
+    // System-Warnung (Monitor/Backup): kein machine/product/slot, keine tenant_id.
+    await client.query(
+      `INSERT INTO automatenlager.warnings (warning_key, warning_type, message, source_workflow)
+       VALUES ('w_sys', 'BACKUP_OK', 'ok', 'monitor')`);
+    const w = await client.query(`SELECT tenant_id FROM automatenlager.warnings WHERE warning_key='w_sys'`);
+    assert.equal(w.rows[0].tenant_id, 't_faltrix', 'nackte System-Warnung bekommt t_faltrix (kein 23502)');
+
+    // WF1-Rechnungsvorschlag: kein machine/product, keine tenant_id.
+    await client.query(
+      `INSERT INTO automatenlager.product_change_proposals (proposal_key, proposal_type, reason)
+       VALUES ('p_wf1', 'new_product', 'Rechnung')`);
+    const p = await client.query(`SELECT tenant_id FROM automatenlager.product_change_proposals WHERE proposal_key='p_wf1'`);
+    assert.equal(p.rows[0].tenant_id, 't_faltrix', 'nackter WF1-Vorschlag bekommt t_faltrix (kein 23502)');
+  });
+});
+
 test('#101 LIVE-Sandbox: Migration idempotent', async (t) => {
   await inSandbox(t, async (client) => {
     await setup(client);

@@ -2,8 +2,11 @@
 -- Issue #105. Idempotent. Setzt 0013 voraus.
 --   (a) machine_profiles tenant-treu per Validierungs-Trigger (kein composite FK
 --       moeglich: machine_id ist TEXT=machine_key, kein bigint-FK auf machines).
---   (b) composite Kind-FKs fuer die in 0013 ausgelassenen Pfade: guv_daily,
---       warnings, product_aliases, product_change_proposals, stock_movements.
+--   (b) composite Kind-FKs fuer ALLE in 0013 ausgelassenen tenant-relevanten
+--       Pfade: guv_daily, warnings, product_aliases, product_change_proposals,
+--       stock_movements (batch/slot/source-txn), invoice_items (product),
+--       sales_transactions (product), stock_batches (invoice_item), invoices
+--       (supplier). Danach ist JEDE tenant-relevante FK composite (tenant-treu).
 -- Anwenden: psql $PGURL -f dashboard/db-migrations/0017-tenant-treue-haertung-vervollstaendigen.sql
 
 -- ── (a) machine_profiles: Validierungs-Trigger ────────────────────────────────
@@ -36,14 +39,24 @@ CREATE TRIGGER trg_validate_tenant_machine_profiles
   BEFORE INSERT OR UPDATE ON automatenlager.machine_profiles
   FOR EACH ROW EXECUTE FUNCTION automatenlager.fn_assert_machine_profile_tenant();
 
--- ── (b) Eltern-Anker fuer stock_batches (fuer stock_movements-FK) ─────────────
+-- ── (b) Eltern-Unique-Anker (tenant_id, parent_pk) fuer die neuen Kind-FKs ────
 DO $$
+DECLARE
+  spec JSONB;
+  anchors JSONB := '[
+    {"t":"stock_batches",      "new":"stock_batches_tenant_pk_uk",      "cols":"tenant_id, batch_id"},
+    {"t":"invoice_items",      "new":"invoice_items_tenant_pk_uk",      "cols":"tenant_id, invoice_item_id"},
+    {"t":"sales_transactions", "new":"sales_transactions_tenant_pk_uk", "cols":"tenant_id, transaction_id"},
+    {"t":"suppliers",          "new":"suppliers_tenant_pk_uk",          "cols":"tenant_id, supplier_id"}
+  ]';
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='stock_batches_tenant_pk_uk'
-                   AND conrelid='automatenlager.stock_batches'::regclass) THEN
-    ALTER TABLE automatenlager.stock_batches
-      ADD CONSTRAINT stock_batches_tenant_pk_uk UNIQUE (tenant_id, batch_id);
-  END IF;
+  FOR spec IN SELECT value FROM jsonb_array_elements(anchors) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = spec->>'new'
+                     AND conrelid = ('automatenlager.' || (spec->>'t'))::regclass) THEN
+      EXECUTE format('ALTER TABLE automatenlager.%I ADD CONSTRAINT %I UNIQUE (%s)',
+                     spec->>'t', spec->>'new', spec->>'cols');
+    END IF;
+  END LOOP;
 END $$;
 
 -- ── (b) composite Kind-FKs (NO ACTION wie die bestehenden Single-FKs) ─────────
@@ -59,7 +72,13 @@ DECLARE
     {"t":"product_aliases",          "old":"product_aliases_product_id_fkey",            "new":"product_aliases_product_tenant_fk",   "cols":"tenant_id, product_id",         "ref":"products",         "rcols":"tenant_id, product_id"},
     {"t":"product_change_proposals", "old":"product_change_proposals_machine_id_fkey",   "new":"product_change_proposals_machine_tenant_fk","cols":"tenant_id, machine_id",   "ref":"machines",         "rcols":"tenant_id, machine_id"},
     {"t":"product_change_proposals", "old":"product_change_proposals_product_id_fkey",   "new":"product_change_proposals_product_tenant_fk","cols":"tenant_id, product_id",   "ref":"products",         "rcols":"tenant_id, product_id"},
-    {"t":"stock_movements",          "old":"stock_movements_batch_id_fkey",              "new":"stock_movements_batch_tenant_fk",     "cols":"tenant_id, batch_id",           "ref":"stock_batches",    "rcols":"tenant_id, batch_id"}
+    {"t":"stock_movements",          "old":"stock_movements_batch_id_fkey",              "new":"stock_movements_batch_tenant_fk",     "cols":"tenant_id, batch_id",           "ref":"stock_batches",    "rcols":"tenant_id, batch_id"},
+    {"t":"invoice_items",            "old":"invoice_items_product_id_fkey",              "new":"invoice_items_product_tenant_fk",     "cols":"tenant_id, product_id",         "ref":"products",         "rcols":"tenant_id, product_id"},
+    {"t":"sales_transactions",       "old":"sales_transactions_product_id_fkey",         "new":"sales_transactions_product_tenant_fk","cols":"tenant_id, product_id",         "ref":"products",         "rcols":"tenant_id, product_id"},
+    {"t":"stock_batches",            "old":"stock_batches_invoice_item_id_fkey",         "new":"stock_batches_invoice_item_tenant_fk","cols":"tenant_id, invoice_item_id",    "ref":"invoice_items",    "rcols":"tenant_id, invoice_item_id"},
+    {"t":"stock_movements",          "old":"stock_movements_slot_assignment_id_fkey",    "new":"stock_movements_slot_tenant_fk",      "cols":"tenant_id, slot_assignment_id", "ref":"slot_assignments", "rcols":"tenant_id, slot_assignment_id"},
+    {"t":"stock_movements",          "old":"stock_movements_source_transaction_id_fkey", "new":"stock_movements_source_txn_tenant_fk","cols":"tenant_id, source_transaction_id","ref":"sales_transactions","rcols":"tenant_id, transaction_id"},
+    {"t":"invoices",                 "old":"invoices_supplier_id_fkey",                  "new":"invoices_supplier_tenant_fk",         "cols":"tenant_id, supplier_id",        "ref":"suppliers",        "rcols":"tenant_id, supplier_id"}
   ]';
 BEGIN
   FOR spec IN SELECT value FROM jsonb_array_elements(fks) LOOP

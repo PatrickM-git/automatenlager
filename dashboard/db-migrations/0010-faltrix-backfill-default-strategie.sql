@@ -17,6 +17,14 @@
 --     GuV). Das deckt sich mit der SPEC-Notiz "'__default__' bleibt als System-
 --     Default-Vorlage erhalten, nie als Besitzer echter Daten".
 --
+-- DEFAULT-STRATEGIE (revidiert nach Review): ALLE Daten-Tabellen bekommen hier
+-- einen TRANSIENTEN DEFAULT auf 't_faltrix' (kein '__default__', kein Insert-Bruch
+-- im Bridge-Zustand). Das urspruengliche "DROP DEFAULT bei abhaengigen Tabellen"
+-- wandert nach 0014 — DIREKT NACH der Auto-Fill-Trigger-Anlage, damit kein Fenster
+-- entsteht, in dem ein Schreiber ohne Default UND ohne Trigger braeche. Die zwei
+-- "nackten" Schreibpfad-Tabellen warnings + product_change_proposals (System-/WF1-
+-- Inserts ohne ableitbaren Eltern) behalten den Default und werden NICHT ge-DROPt.
+--
 -- Anwenden: psql $PGURL -f dashboard/db-migrations/0010-faltrix-backfill-default-strategie.sql
 
 DO $$
@@ -33,20 +41,6 @@ DECLARE
     'stock_batches', 'stock_movements', 'sales_transactions', 'guv_daily',
     'warnings', 'invoices', 'invoice_items', 'suppliers',
     'nayax_devices', 'workflow_state', 'prices'
-  ];
-  -- Root-/Stammtabellen (kein tenant-tragender Eltern): DEFAULT -> realer Mandant
-  -- (transient bis Stufe 2/3 die Schreiber viewer.tenantId explizit mitgeben).
-  root_tables TEXT[] := ARRAY[
-    'machines', 'locations', 'suppliers', 'products', 'invoices',
-    'nayax_devices', 'workflow_state'
-  ];
-  -- Abhaengige Tabellen (tenant-tragender Eltern): DEFAULT ENTFERNEN — der Bruecken-
-  -- Trigger (0014, #101) fuellt tenant_id aus dem Eltern. WICHTIG: 0010-0014
-  -- zusammen deployen, damit kein Schreiber im Fenster ohne Default/Trigger bricht.
-  dep_tables TEXT[] := ARRAY[
-    'slot_assignments', 'machine_profiles', 'stock_batches', 'stock_movements',
-    'sales_transactions', 'guv_daily', 'warnings', 'invoice_items',
-    'prices', 'product_aliases', 'product_change_proposals'
   ];
 BEGIN
   -- 1. Realen Mandanten + Default-Zentrallager (idempotent).
@@ -68,14 +62,18 @@ BEGIN
        SELECT %L, machine_id, key, value, now() FROM automatenlager.settings_thresholds WHERE tenant_id = %L
      ON CONFLICT ON CONSTRAINT settings_thresholds_unique DO NOTHING', v_tenant, v_old);
 
-  -- 4a. Root-/Stammtabellen: DEFAULT auf realen Mandanten (transient).
-  FOREACH t IN ARRAY root_tables LOOP
+  -- 4. ALLE Daten-Tabellen bekommen einen TRANSIENTEN DEFAULT auf den realen
+  --    Mandanten. So gibt es im Bridge-Zustand (Single-Tenant) NIE einen Insert-
+  --    Bruch und NIE eine '__default__'-Zeile — egal ob ein Schreiber tenant_id
+  --    weglaesst und keinen ableitbaren Eltern hat (z. B. System-Warnungen,
+  --    WF1-Rechnungsvorschlaege ohne machine/product). Die ABHAENGIGEN Tabellen
+  --    verlieren diesen Default wieder in 0014, NACHDEM ihr Auto-Fill-Trigger
+  --    steht (Default-Entfernung + Trigger in DERSELBEN Migration -> kein Fenster,
+  --    in dem ein Schreiber ohne Default UND ohne Trigger braeche). Reine Root-/
+  --    Stammtabellen sowie die "nackten" warnings/product_change_proposals
+  --    behalten den Default bis Stufe 2/3 (dann setzt der Code tenant_id explizit).
+  FOREACH t IN ARRAY data_tables LOOP
     EXECUTE format('ALTER TABLE automatenlager.%I ALTER COLUMN tenant_id SET DEFAULT %L',
                    t, v_tenant);
-  END LOOP;
-
-  -- 4b. Abhaengige Tabellen: DEFAULT entfernen (Trigger 0014 uebernimmt).
-  FOREACH t IN ARRAY dep_tables LOOP
-    EXECUTE format('ALTER TABLE automatenlager.%I ALTER COLUMN tenant_id DROP DEFAULT', t);
   END LOOP;
 END $$;
