@@ -1,6 +1,11 @@
 {
+  "updatedAt": "2026-06-06T05:49:02.382Z",
+  "createdAt": "2026-05-25T14:36:35.576Z",
+  "id": "pdIjiyIfVIIPuJIt",
   "name": "WF-Val - DB Konsistenz-Check",
+  "description": null,
   "active": true,
+  "isArchived": false,
   "nodes": [
     {
       "id": "82262E16",
@@ -39,9 +44,10 @@
       },
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT 'keine_preise' AS check_type, sa.product_slot_key AS key, p.name || ' (' || m.machine_key || ')' AS name, 'Aktiver Slot ohne Preis: ' || p.name AS message FROM automatenlager.slot_assignments sa JOIN automatenlager.products p ON p.product_id = sa.product_id JOIN automatenlager.machines m ON m.machine_id = sa.machine_id LEFT JOIN automatenlager.prices pr   ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL WHERE sa.active = TRUE AND pr.price_id IS NULL UNION ALL SELECT 'negative_qty', sb.batch_key, p.name, 'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name FROM automatenlager.stock_batches sb JOIN automatenlager.products p ON p.product_id = sb.product_id WHERE sb.remaining_qty < 0 AND sb.status IN ('aktiv','active','reserve') UNION ALL SELECT 'wf3_stale', workflow_key, workflow_key, 'WF3 seit ' || ROUND(EXTRACT(EPOCH FROM (NOW()-updated_at))/60,1) || ' Min nicht gelaufen' FROM automatenlager.workflow_state WHERE workflow_key = 'WF3_NAYAX_FIFO'   AND (updated_at IS NULL OR updated_at < NOW() - INTERVAL '30 minutes') UNION ALL SELECT 'alte_warnungen', warning_type || '_count', warning_type, COUNT(*) || ' ungeloeste Warnungen (Typ: ' || warning_type || ') aelter 7 Tage' FROM automatenlager.warnings WHERE resolved = FALSE AND severity != 'info'   AND created_at < NOW() - INTERVAL '7 days' GROUP BY warning_type HAVING COUNT(*) > 0 UNION ALL SELECT 'pending_proposals', proposal_key, COALESCE(reason,'?'), 'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?') FROM automatenlager.product_change_proposals WHERE status = 'pending' AND created_at < NOW() - INTERVAL '14 days' ORDER BY check_type, key",
+        "query": "SELECT 'keine_preise' AS check_type, sa.product_slot_key AS key, p.name || ' (' || m.machine_key || ')' AS name, 'Aktiver Slot ohne Preis: ' || p.name AS message FROM automatenlager.slot_assignments sa JOIN automatenlager.products p ON p.product_id = sa.product_id JOIN automatenlager.machines m ON m.machine_id = sa.machine_id LEFT JOIN automatenlager.prices pr   ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL WHERE sa.active = TRUE AND pr.price_id IS NULL UNION ALL SELECT 'negative_qty', sb.batch_key, p.name, 'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name FROM automatenlager.stock_batches sb JOIN automatenlager.products p ON p.product_id = sb.product_id WHERE sb.remaining_qty < 0 AND sb.status IN ('aktiv','active','reserve') UNION ALL SELECT 'alte_warnungen', warning_type || '_count', warning_type, COUNT(*) || ' ungeloeste Warnungen (Typ: ' || warning_type || ') aelter 7 Tage' FROM automatenlager.warnings WHERE resolved = FALSE AND severity != 'info'   AND created_at < NOW() - INTERVAL '7 days' GROUP BY warning_type HAVING COUNT(*) > 0 UNION ALL SELECT 'pending_proposals', proposal_key, COALESCE(reason,'?'), 'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?') FROM automatenlager.product_change_proposals WHERE status = 'pending' AND created_at < NOW() - INTERVAL '14 days' ORDER BY check_type, key",
         "options": {}
-      }
+      },
+      "alwaysOutputData": true
     },
     {
       "id": "B2DA9D4B",
@@ -53,7 +59,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "const items = $input.all();\n\nconst CHECK_LABELS = {\n  keine_preise:     'Aktive Slots ohne Preis',\n  negative_qty:     'Negative Lagermengen',\n  wf3_stale:        'WF3 Verkaufsworkflow haengt',\n  alte_warnungen:   'Alte ungeloeste Warnungen (>7 Tage)',\n  pending_proposals:'Offene Rechnungsvorschlaege (>14 Tage)',\n};\n\nconst wf3Items   = items.filter(i => i.json.check_type === 'wf3_stale');\nconst otherItems = items.filter(i => i.json.check_type !== 'wf3_stale');\nconst hasWf3Stale    = wf3Items.length > 0;\nconst hasOtherIssues = otherItems.length > 0;\nconst hasIssues      = hasWf3Stale || hasOtherIssues;\n\nif (!hasIssues) {\n  return [{ json: {\n    status: 'OK', count: 0, has_issues: false,\n    restart_flag: 'NEIN',\n    email_subject: null, email_body: null,\n    summary: 'Alle DB-Konsistenzpruefungen bestanden.'\n  }}];\n}\n\nconst grouped = {};\nfor (const { json: row } of otherItems) {\n  if (!grouped[row.check_type]) grouped[row.check_type] = [];\n  grouped[row.check_type].push(row.message);\n}\n\nconst otherLines = Object.entries(grouped).map(([type, msgs]) => {\n  const label = CHECK_LABELS[type] || type;\n  return '<h3 style=\"color:#c0392b\">' + label + ' (' + msgs.length + ')</h3><ul>' +\n    msgs.map(m => '<li>' + m + '</li>').join('') + '</ul>';\n}).join('');\n\nconst wf3Section = hasWf3Stale\n  ? '<h3 style=\"color:#e67e22\">WF3 Verkaufsworkflow haengt — Auto-Neustart ausgeloest</h3><ul>' +\n    wf3Items.map(i => '<li>' + i.json.message + '</li>').join('') + '</ul>'\n  : '';\n\nconst ts = new Date().toISOString();\nconst totalCount = otherItems.length + (hasWf3Stale ? 1 : 0);\n\nreturn [{ json: {\n  status: 'FEHLER',\n  count: totalCount,\n  has_issues: hasIssues,\n  restart_flag: hasWf3Stale ? 'JA' : 'NEIN',\n  email_subject: '[DB-Check] ' + totalCount + ' Problem' + (totalCount !== 1 ? 'e' : '') + ' — Automatenlager',\n  email_body: '<h2 style=\"color:#c0392b\">DB-Konsistenzpruefung: ' + totalCount + ' Problem' +\n    (totalCount !== 1 ? 'e' : '') + '</h2>' + wf3Section + otherLines +\n    '<hr><p style=\"color:#888;font-size:12px\">WF-Val Check: ' + ts + '</p>'\n}}];",
+        "jsCode": "// WF-Val Aggregation: DB-Konsistenz + WF3-Liveness (execution-basiert, nicht verkaufs-basiert)\n// WF3 laeuft alle 5 Min und liefert auch ohne Verkaeufe 'success' -> kein Fehlalarm nachts/Wochenende.\nconst WF3_MAX_SUCCESS_AGE_MIN = 30;  // gesund: letzter ERFOLGREICHER WF3-Lauf juenger als 30 Min\n\nconst CHECK_LABELS = {\n  keine_preise:     'Aktive Slots ohne Preis',\n  negative_qty:     'Negative Lagermengen',\n  alte_warnungen:   'Alte ungeloeste Warnungen (>7 Tage)',\n  pending_proposals:'Offene Rechnungsvorschlaege (>14 Tage)',\n};\n\n// --- DB-Konsistenz-Befunde (leere alwaysOutputData-Items rausfiltern) ---\nconst otherItems = $('DB - Konsistenzcheck').all().filter(i => i.json && i.json.check_type);\nconst hasOtherIssues = otherItems.length > 0;\n\n// --- WF3-Liveness aus n8n execution_entity ---\nlet wf3Unhealthy = false;\nlet wf3Reason = '';\nlet wf3Determined = false;\ntry {\n  const row = $('PG n8n - WF3 Execution-Check').first().json;\n  const ageRaw = (row && row.wf3_last_success_age_min != null) ? Number(row.wf3_last_success_age_min) : null;\n  const lastStatus = (row && row.wf3_last_status) ? row.wf3_last_status : '?';\n  if (ageRaw != null && Number.isFinite(ageRaw)) {\n    wf3Determined = true;\n    if (ageRaw > WF3_MAX_SUCCESS_AGE_MIN) {\n      wf3Unhealthy = true;\n      wf3Reason = 'Letzter erfolgreicher WF3-Lauf vor ' + Math.round(ageRaw) + ' Min (Limit ' + WF3_MAX_SUCCESS_AGE_MIN + ' Min). Letzter Lauf-Status: ' + lastStatus + '.';\n    }\n  }\n  // ageRaw == null -> Health nicht bestimmbar -> KEINE Aktion (kein Fehlalarm, kein Neustart)\n} catch (e) {\n  // Execution-Check nicht verfuegbar -> unbestimmt -> keine Aktion\n}\n\nconst hasIssues = wf3Unhealthy || hasOtherIssues;\n\nif (!hasIssues) {\n  return [{ json: {\n    status: 'OK', count: 0, has_issues: false,\n    restart_flag: 'NEIN',\n    wf3_determined: wf3Determined,\n    email_subject: null, email_body: null,\n    summary: 'Alle Pruefungen bestanden (DB-Konsistenz ok; WF3 ' + (wf3Determined ? 'laeuft' : 'Status unbestimmt') + ').'\n  }}];\n}\n\nconst grouped = {};\nfor (const { json: r } of otherItems) {\n  if (!grouped[r.check_type]) grouped[r.check_type] = [];\n  grouped[r.check_type].push(r.message);\n}\nconst otherLines = Object.entries(grouped).map(([type, msgs]) => {\n  const label = CHECK_LABELS[type] || type;\n  return '<h3 style=\"color:#c0392b\">' + label + ' (' + msgs.length + ')</h3><ul>' +\n    msgs.map(m => '<li>' + m + '</li>').join('') + '</ul>';\n}).join('');\n\nconst wf3Section = wf3Unhealthy\n  ? '<h3 style=\"color:#e67e22\">WF3 Verkaufsworkflow haengt - Auto-Neustart ausgeloest</h3><ul><li>' + wf3Reason + '</li></ul>'\n  : '';\n\nconst ts = new Date().toISOString();\nconst totalCount = otherItems.length + (wf3Unhealthy ? 1 : 0);\n\nreturn [{ json: {\n  status: 'FEHLER',\n  count: totalCount,\n  has_issues: true,\n  restart_flag: wf3Unhealthy ? 'JA' : 'NEIN',\n  wf3_determined: wf3Determined,\n  email_subject: '[DB-Check] ' + totalCount + ' Problem' + (totalCount !== 1 ? 'e' : '') + ' - Automatenlager',\n  email_body: '<h2 style=\"color:#c0392b\">WF-Val Pruefung: ' + totalCount + ' Problem' + (totalCount !== 1 ? 'e' : '') + '</h2>' + wf3Section + otherLines + '<hr><p style=\"color:#888;font-size:12px\">WF-Val Check: ' + ts + '</p>'\n}}];",
         "mode": "runOnceForAllItems"
       }
     },
@@ -217,6 +223,29 @@
         "genericAuthType": "httpHeaderAuth",
         "options": {}
       }
+    },
+    {
+      "id": "wfval-wf3-livecheck-1",
+      "name": "PG n8n - WF3 Execution-Check",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        160
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "gN8QyJ99aeXsLiUK",
+          "name": "PostgreSQL n8n DB"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT \"stoppedAt\" FROM execution_entity WHERE \"workflowId\" = 'wbOhFKXQqBpJWB1w' AND status = 'success' ORDER BY \"stoppedAt\" DESC LIMIT 1) AS wf3_last_success,\n  (SELECT status FROM execution_entity WHERE \"workflowId\" = 'wbOhFKXQqBpJWB1w' ORDER BY \"startedAt\" DESC LIMIT 1) AS wf3_last_status,\n  ROUND(EXTRACT(EPOCH FROM (NOW() - (SELECT \"stoppedAt\" FROM execution_entity WHERE \"workflowId\" = 'wbOhFKXQqBpJWB1w' AND status = 'success' ORDER BY \"stoppedAt\" DESC LIMIT 1)))/60, 1) AS wf3_last_success_age_min",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
     }
   ],
   "connections": {
@@ -224,7 +253,7 @@
       "main": [
         [
           {
-            "node": "DB - Konsistenzcheck",
+            "node": "PG n8n - WF3 Execution-Check",
             "type": "main",
             "index": 0
           }
@@ -304,6 +333,17 @@
           }
         ]
       ]
+    },
+    "PG n8n - WF3 Execution-Check": {
+      "main": [
+        [
+          {
+            "node": "DB - Konsistenzcheck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -318,6 +358,398 @@
       "recurrenceRules": []
     }
   },
+  "meta": null,
   "pinData": null,
-  "tags": []
+  "versionId": "20d96fac-c480-42fd-ba0a-e5e103ed11fa",
+  "activeVersionId": "20d96fac-c480-42fd-ba0a-e5e103ed11fa",
+  "versionCounter": 16,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-05-25T14:36:35.576Z",
+      "createdAt": "2026-05-25T14:36:35.576Z",
+      "role": "workflow:owner",
+      "workflowId": "pdIjiyIfVIIPuJIt",
+      "projectId": "68wR1Q9zBUk0Gxhv",
+      "project": {
+        "updatedAt": "2026-05-19T17:59:53.408Z",
+        "createdAt": "2026-05-19T16:50:04.773Z",
+        "id": "68wR1Q9zBUk0Gxhv",
+        "name": "Patrick Matthes <patrickmatthes2609@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-06-06T05:49:02.383Z",
+    "createdAt": "2026-06-06T05:49:02.383Z",
+    "versionId": "20d96fac-c480-42fd-ba0a-e5e103ed11fa",
+    "workflowId": "pdIjiyIfVIIPuJIt",
+    "nodes": [
+      {
+        "id": "82262E16",
+        "name": "Schedule Trigger",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 15 4 * * *"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "AED5A4FA",
+        "name": "DB - Konsistenzcheck",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          240,
+          0
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Jept3990Uq8aN3Tr",
+            "name": "PostgreSQL"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT 'keine_preise' AS check_type, sa.product_slot_key AS key, p.name || ' (' || m.machine_key || ')' AS name, 'Aktiver Slot ohne Preis: ' || p.name AS message FROM automatenlager.slot_assignments sa JOIN automatenlager.products p ON p.product_id = sa.product_id JOIN automatenlager.machines m ON m.machine_id = sa.machine_id LEFT JOIN automatenlager.prices pr   ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL WHERE sa.active = TRUE AND pr.price_id IS NULL UNION ALL SELECT 'negative_qty', sb.batch_key, p.name, 'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name FROM automatenlager.stock_batches sb JOIN automatenlager.products p ON p.product_id = sb.product_id WHERE sb.remaining_qty < 0 AND sb.status IN ('aktiv','active','reserve') UNION ALL SELECT 'alte_warnungen', warning_type || '_count', warning_type, COUNT(*) || ' ungeloeste Warnungen (Typ: ' || warning_type || ') aelter 7 Tage' FROM automatenlager.warnings WHERE resolved = FALSE AND severity != 'info'   AND created_at < NOW() - INTERVAL '7 days' GROUP BY warning_type HAVING COUNT(*) > 0 UNION ALL SELECT 'pending_proposals', proposal_key, COALESCE(reason,'?'), 'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?') FROM automatenlager.product_change_proposals WHERE status = 'pending' AND created_at < NOW() - INTERVAL '14 days' ORDER BY check_type, key",
+          "options": {}
+        },
+        "alwaysOutputData": true
+      },
+      {
+        "id": "B2DA9D4B",
+        "name": "Code - Ergebnisse aggregieren",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          0
+        ],
+        "parameters": {
+          "jsCode": "// WF-Val Aggregation: DB-Konsistenz + WF3-Liveness (execution-basiert, nicht verkaufs-basiert)\n// WF3 laeuft alle 5 Min und liefert auch ohne Verkaeufe 'success' -> kein Fehlalarm nachts/Wochenende.\nconst WF3_MAX_SUCCESS_AGE_MIN = 30;  // gesund: letzter ERFOLGREICHER WF3-Lauf juenger als 30 Min\n\nconst CHECK_LABELS = {\n  keine_preise:     'Aktive Slots ohne Preis',\n  negative_qty:     'Negative Lagermengen',\n  alte_warnungen:   'Alte ungeloeste Warnungen (>7 Tage)',\n  pending_proposals:'Offene Rechnungsvorschlaege (>14 Tage)',\n};\n\n// --- DB-Konsistenz-Befunde (leere alwaysOutputData-Items rausfiltern) ---\nconst otherItems = $('DB - Konsistenzcheck').all().filter(i => i.json && i.json.check_type);\nconst hasOtherIssues = otherItems.length > 0;\n\n// --- WF3-Liveness aus n8n execution_entity ---\nlet wf3Unhealthy = false;\nlet wf3Reason = '';\nlet wf3Determined = false;\ntry {\n  const row = $('PG n8n - WF3 Execution-Check').first().json;\n  const ageRaw = (row && row.wf3_last_success_age_min != null) ? Number(row.wf3_last_success_age_min) : null;\n  const lastStatus = (row && row.wf3_last_status) ? row.wf3_last_status : '?';\n  if (ageRaw != null && Number.isFinite(ageRaw)) {\n    wf3Determined = true;\n    if (ageRaw > WF3_MAX_SUCCESS_AGE_MIN) {\n      wf3Unhealthy = true;\n      wf3Reason = 'Letzter erfolgreicher WF3-Lauf vor ' + Math.round(ageRaw) + ' Min (Limit ' + WF3_MAX_SUCCESS_AGE_MIN + ' Min). Letzter Lauf-Status: ' + lastStatus + '.';\n    }\n  }\n  // ageRaw == null -> Health nicht bestimmbar -> KEINE Aktion (kein Fehlalarm, kein Neustart)\n} catch (e) {\n  // Execution-Check nicht verfuegbar -> unbestimmt -> keine Aktion\n}\n\nconst hasIssues = wf3Unhealthy || hasOtherIssues;\n\nif (!hasIssues) {\n  return [{ json: {\n    status: 'OK', count: 0, has_issues: false,\n    restart_flag: 'NEIN',\n    wf3_determined: wf3Determined,\n    email_subject: null, email_body: null,\n    summary: 'Alle Pruefungen bestanden (DB-Konsistenz ok; WF3 ' + (wf3Determined ? 'laeuft' : 'Status unbestimmt') + ').'\n  }}];\n}\n\nconst grouped = {};\nfor (const { json: r } of otherItems) {\n  if (!grouped[r.check_type]) grouped[r.check_type] = [];\n  grouped[r.check_type].push(r.message);\n}\nconst otherLines = Object.entries(grouped).map(([type, msgs]) => {\n  const label = CHECK_LABELS[type] || type;\n  return '<h3 style=\"color:#c0392b\">' + label + ' (' + msgs.length + ')</h3><ul>' +\n    msgs.map(m => '<li>' + m + '</li>').join('') + '</ul>';\n}).join('');\n\nconst wf3Section = wf3Unhealthy\n  ? '<h3 style=\"color:#e67e22\">WF3 Verkaufsworkflow haengt - Auto-Neustart ausgeloest</h3><ul><li>' + wf3Reason + '</li></ul>'\n  : '';\n\nconst ts = new Date().toISOString();\nconst totalCount = otherItems.length + (wf3Unhealthy ? 1 : 0);\n\nreturn [{ json: {\n  status: 'FEHLER',\n  count: totalCount,\n  has_issues: true,\n  restart_flag: wf3Unhealthy ? 'JA' : 'NEIN',\n  wf3_determined: wf3Determined,\n  email_subject: '[DB-Check] ' + totalCount + ' Problem' + (totalCount !== 1 ? 'e' : '') + ' - Automatenlager',\n  email_body: '<h2 style=\"color:#c0392b\">WF-Val Pruefung: ' + totalCount + ' Problem' + (totalCount !== 1 ? 'e' : '') + '</h2>' + wf3Section + otherLines + '<hr><p style=\"color:#888;font-size:12px\">WF-Val Check: ' + ts + '</p>'\n}}];",
+          "mode": "runOnceForAllItems"
+        }
+      },
+      {
+        "id": "E512AE8E",
+        "name": "IF - WF3 Neustart noetig?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          720,
+          -200
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "1",
+                "leftValue": "={{ $json.restart_flag }}",
+                "rightValue": "JA",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "3BA27DB1",
+        "name": "HTTP - WF3 starten",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          980,
+          -320
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "sk4oJ1b15NNHkyK3",
+            "name": "n8n Mini API"
+          }
+        },
+        "parameters": {
+          "method": "POST",
+          "url": "https://hp-mini-server.tail573a13.ts.net/api/v1/workflows/wbOhFKXQqBpJWB1w/deactivate",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "options": {}
+        }
+      },
+      {
+        "id": "01161202",
+        "name": "NoOp - WF3 laeuft",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          980,
+          -120
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "F8168B3A",
+        "name": "IF - Probleme gefunden?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          720,
+          200
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "1",
+                "leftValue": "={{ $json.status }}",
+                "rightValue": "FEHLER",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "F39168CB",
+        "name": "Gmail - Alert senden",
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 2.1,
+        "position": [
+          980,
+          80
+        ],
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "8zhryCRhHAc2OnKA",
+            "name": "Gmail account"
+          }
+        },
+        "parameters": {
+          "authentication": "oAuth2",
+          "resource": "message",
+          "operation": "send",
+          "sendTo": "patrickzinke@gmx.net",
+          "subject": "={{ $json.email_subject }}",
+          "emailType": "html",
+          "message": "={{ $json.email_body }}",
+          "options": {}
+        },
+        "webhookId": "9c271be8-33b1-46e0-a9e2-3764fb6ea122"
+      },
+      {
+        "id": "132F414E",
+        "name": "Alles OK",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          980,
+          300
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "1dbf7030-ab62-4f62-9489-269f06069b66",
+        "name": "HTTP - WF3 aktivieren",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1240,
+          -320
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "sk4oJ1b15NNHkyK3",
+            "name": "n8n Mini API"
+          }
+        },
+        "parameters": {
+          "method": "POST",
+          "url": "https://hp-mini-server.tail573a13.ts.net/api/v1/workflows/wbOhFKXQqBpJWB1w/activate",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "options": {}
+        }
+      },
+      {
+        "id": "wfval-wf3-livecheck-1",
+        "name": "PG n8n - WF3 Execution-Check",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          220,
+          160
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "gN8QyJ99aeXsLiUK",
+            "name": "PostgreSQL n8n DB"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT\n  (SELECT \"stoppedAt\" FROM execution_entity WHERE \"workflowId\" = 'wbOhFKXQqBpJWB1w' AND status = 'success' ORDER BY \"stoppedAt\" DESC LIMIT 1) AS wf3_last_success,\n  (SELECT status FROM execution_entity WHERE \"workflowId\" = 'wbOhFKXQqBpJWB1w' ORDER BY \"startedAt\" DESC LIMIT 1) AS wf3_last_status,\n  ROUND(EXTRACT(EPOCH FROM (NOW() - (SELECT \"stoppedAt\" FROM execution_entity WHERE \"workflowId\" = 'wbOhFKXQqBpJWB1w' AND status = 'success' ORDER BY \"stoppedAt\" DESC LIMIT 1)))/60, 1) AS wf3_last_success_age_min",
+          "options": {}
+        },
+        "onError": "continueRegularOutput",
+        "alwaysOutputData": true
+      }
+    ],
+    "connections": {
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "PG n8n - WF3 Execution-Check",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "DB - Konsistenzcheck": {
+        "main": [
+          [
+            {
+              "node": "Code - Ergebnisse aggregieren",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - Ergebnisse aggregieren": {
+        "main": [
+          [
+            {
+              "node": "IF - WF3 Neustart noetig?",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "IF - Probleme gefunden?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF - WF3 Neustart noetig?": {
+        "main": [
+          [
+            {
+              "node": "HTTP - WF3 starten",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "NoOp - WF3 laeuft",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF - Probleme gefunden?": {
+        "main": [
+          [
+            {
+              "node": "Gmail - Alert senden",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Alles OK",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP - WF3 starten": {
+        "main": [
+          [
+            {
+              "node": "HTTP - WF3 aktivieren",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "PG n8n - WF3 Execution-Check": {
+        "main": [
+          [
+            {
+              "node": "DB - Konsistenzcheck",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Patrick Matthes",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-06T05:49:02.401Z",
+        "id": 355,
+        "workflowId": "pdIjiyIfVIIPuJIt",
+        "versionId": "20d96fac-c480-42fd-ba0a-e5e103ed11fa",
+        "event": "deactivated",
+        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      },
+      {
+        "createdAt": "2026-06-06T05:49:02.413Z",
+        "id": 356,
+        "workflowId": "pdIjiyIfVIIPuJIt",
+        "versionId": "20d96fac-c480-42fd-ba0a-e5e103ed11fa",
+        "event": "activated",
+        "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
+      }
+    ]
+  }
 }
