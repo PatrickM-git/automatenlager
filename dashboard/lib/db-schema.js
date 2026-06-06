@@ -68,6 +68,8 @@ const EXPECTED_RELATIONS = [
   { name: 'v_warnings_open',          kind: 'view',    note: 'Offene Warnungen (View)' },
   { name: 'v_slot_turnover',          kind: 'view',    note: 'Slot-Umschlag (View)' },
   { name: 'mv_inventory_value_daily', kind: 'matview', note: 'Inventarwert (Materialized View)' },
+  { name: 'mv_db_per_product_monthly', kind: 'matview', note: 'DB je Produkt/Monat, tenant_id-führend (#106)' },
+  { name: 'mv_db_per_slot_monthly',    kind: 'matview', note: 'DB je Slot/Monat, tenant_id-führend (#106)' },
 ];
 
 // Tenant-Pflicht-Liste (#96): operative Tabellen, die eine `tenant_id`-Spalte
