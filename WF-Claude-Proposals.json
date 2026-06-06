@@ -44,7 +44,7 @@
       },
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT pcp.proposal_key, pcp.status, pcp.reason, pcp.product_key,       EXTRACT(DAY FROM NOW()-pcp.created_at)::int AS days_pending,       p.name AS product_name, p.active AS product_active, p.category FROM automatenlager.product_change_proposals pcp LEFT JOIN automatenlager.products p ON p.product_key = pcp.product_key WHERE pcp.status = 'pending'   AND pcp.created_at < NOW() - INTERVAL '14 days' ORDER BY pcp.created_at ASC LIMIT 20",
+        "query": "SELECT pcp.proposal_key, pcp.status, pcp.reason, pcp.product_id,       p.product_key AS product_key,       EXTRACT(DAY FROM NOW()-pcp.created_at)::int AS days_pending,       p.name AS product_name,       EXISTS (SELECT 1 FROM automatenlager.slot_assignments sa WHERE sa.product_id = pcp.product_id AND sa.active = TRUE) AS product_active,       p.category FROM automatenlager.product_change_proposals pcp LEFT JOIN automatenlager.products p ON p.product_id = pcp.product_id WHERE pcp.status = 'pending'   AND pcp.created_at < NOW() - INTERVAL '14 days' ORDER BY pcp.created_at ASC LIMIT 20",
         "options": {}
       }
     },
