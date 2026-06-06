@@ -129,10 +129,16 @@ Read-Only guest access (Default-Deny seit #27, `dashboard/lib/auth.js` → `reso
 
 ## Current Next Step
 
+**Geplant (2026-06-06) — Mandantenfähigkeit STUFE 3 „Query-Filter" (Lese-Isolation):**
+- SPEC: `docs/specs/multi-tenant-query-filter-stufe-3-v1.md` (32 User Stories, 14 Pflicht-Testfälle). Grundlage: `docs/specs/mandantenfaehigkeit-audit-2026-06-05.md` (Schritt 3 der Stufenkette 0→8).
+- Kern: flächendeckende Mandanten-Filter auf ALLEN ~40 Lese-Pfaden über EINE zentrale, fail-closed „Mandanten-Tür" (Weg B; zentralisiert den DB-Zugriff; ist der Haken für RLS in Stufe 5). Begleitend #107-Wächter: Melde-Modus → bereichsweise scharf (schrumpfende Allowlist) → Endzustand **build-blocking**. **No-Bypass** (kein Read an der Tür vorbei). Aggregate (SUM/COUNT) wie Einzelzeilen. (Mat)Views als Bypass behandelt. Global-Allowlist EXTREM eng (`machines`/`locations`/`settings_thresholds`/`nayax_devices`-Zuordnung sind mandantenpflichtig; nur Verzeichnis + reine Lookups global). Kein Mandant ⇒ leeres Dashboard; Break-Glass liest Ziel-Mandant read-only; Hintergrund-Jobs (`alert-digest`) brauchen explizite Mandanten-Quelle, kein Default.
+- Rollout HÄPPCHENWEISE (Finanzen zuerst), je Slice Test gegen acme/globex (#94-Sandbox) + Live-Check. Scope: NUR Lesen; Schreiben=Stufe 4, RLS=Stufe 5, n8n=Stufe 6, kein UI. NICHT verkaufsfähig für 2. Kunden vor Stufe 3+4+5.
+- **Nächster Schritt: `ubiquitous-language` (Domänenbegriffe) → dann neuer Chat `spec-to-issue`** (SPEC in Issues zerlegen, #107 = Begleit-Guard).
+
 **Umgesetzt (2026-06-06) — Auth scharf setzen (Stufe 2), Issues #115–#118 KOMPLETT (Code):**
 - Branch `feat/auth-scharf-stufe-2` (4 Commits), Suite **946/946**. SPEC: `docs/specs/multi-tenant-auth-scharf-stufe-2-v1.md`.
 - #115 Seed-Migration `0018` (tenant_users/platform_admins, GUC-parametrisierbar, idempotent); #116 `lib/tenant-directory.js` (Mandanten-Registry, Cache + async machineTenant + Negative-Caching, fail-closed); #117 `resolveViewer`/`objectAccessAllowed` real aus der Registry (kein TENANT_OWNER-Default), IDOR-Hooks async, `GET /health`, request-id, Taxonomie 404/503; #118 Break-Glass `X-Support-Tenant` (read-only, auditiert, nicht-klebrig). Trust-Header-Invariante: `docs/security/trust-header-invariante.md`.
-- **Nächster Schritt: Mini-Deploy nach Runbook in `HANDOVER.md`** — ZWINGEND Seed-Migration `0018` VOR dem Code-Rollout (sonst Owner-Lockout, da `tenant_users` auf dem Mini leer), danach Container-Restart + Live-Smoke (`/health` 200, Owner erreicht Faltrix-Maschine, Break-Glass GET=Lesen/POST=403). PR `feat/auth-scharf-stufe-2` mergen.
+- **Stufe 2 LIVE + VERIFIZIERT (2026-06-06):** PR #119 gemergt (+#120), Mini auf `e8469bc`; Seed `0018` lief (beide Eigentümer→`t_faltrix`); `/health`={ok,tenantDirectoryReady,pgConfigured}; Audit zeigt Break-Glass-Block live; kein Owner-Lockout. Read-only per SSH/Tunnel geprüft.
 - Scope-Grenze: KEINE flächendeckenden Query-Filter (Stufe 3), KEINE RLS (Stufe 5), kein UI (Stufe 8). Stufe 2 = Verkabelung + Verifizierbarkeit, NICHT verkaufsfähig für 2. realen Kunden.
 
 **Davor umgesetzt (2026-06-03) — Feature „Branchen-Anker" (Drehgeschwindigkeits-Klassifikation), Issues #62–#66:**
