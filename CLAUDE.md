@@ -129,7 +129,13 @@ Read-Only guest access (Default-Deny seit #27, `dashboard/lib/auth.js` → `reso
 
 ## Current Next Step
 
-**Umgesetzt (2026-06-03) — Feature „Branchen-Anker" (Drehgeschwindigkeits-Klassifikation), Issues #62–#66:**
+**Planung abgeschlossen (2026-06-05) — Multi-Tenant-Datenmodell (Stufe 0):**
+- SPEC: `docs/specs/multi-tenant-datenmodell-v1.md` — Fundament für Mandanten + Standorte + Lager (reines Datenmodell, KEIN Scharfschalten).
+- Grundlage: `docs/specs/mandantenfaehigkeit-audit-2026-06-05.md` (Stufenkette 0→8; diese SPEC = Stufe 0).
+- Kernentscheidungen: EINE Regel (`tenant_id` auf allen operativen Tabellen, denormalisiert, RLS-fertig); Stammdaten pro Mandant (eigener Katalog); neue Tabellen `tenants` / `tenant_users` / `warehouses` (+ `platform_admins` für Break-Glass-Support); `stock_batches.warehouse_id` (Charge in Automat ODER Lager); mandanten-treue composite FKs `(tenant_id, parent_id)`; Backfill Altdaten → realer Mandant (`__default__` nur transient); `provider`-Dimension (Nayax = erster Anbieter, voller VDIL später).
+- **Nächster Schritt: `spec-to-issue`** (neuer Chat) — SPEC in GitHub-Issues für die Schema-Migration (Stufe 1) zerlegen. Kritisch: DDL läuft VOR Code-Rollout/Mini-Deploy.
+
+**Davor umgesetzt (2026-06-03) — Feature „Branchen-Anker" (Drehgeschwindigkeits-Klassifikation), Issues #62–#66:**
 - SPEC: `docs/specs/branchen-anker-drehgeschwindigkeit-v1.md`.
 - #62: `produktart` ist die echte SQL-Spalte `products.category` (kanonisch lowercase, Daten-/Schema-Guard `tests/dashboard-produktart-contract.test.js`); WF2-Hardcode `'Snack'`→`'snack'`. Doku `docs/data-model/produktart-semantics.md`.
 - #63: `dashboard/lib/category-config.js` — mandantenfähige, editierbare Config (Defaults Getränke 43 %/Snack 52 %/Fallback 50 %, Branchen-Norm 800 €, graceDays 14, ladenhueterDays 30), Latten-Ableitung, effektive Config = Defaults+Override; Persistenz `automatenlager.classification_settings` (JSONB je `mandant_id`, Default `__default__`).

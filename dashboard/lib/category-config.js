@@ -195,21 +195,43 @@ function buildEffectiveConfig(override = {}, defaults = DEFAULT_CONFIG) {
 
 const SETTINGS_TABLE = 'automatenlager.classification_settings';
 
+// Frische DBs bekommen die Tabelle direkt mit der angeglichenen Spalte `tenant_id`
+// (#96). Bestehende DBs vor dem Deploy von Migration 0009 tragen noch `mandant_id`
+// — CREATE IF NOT EXISTS ist dort ein No-Op, und tenantColumn() unten erkennt den
+// realen Spaltennamen. So bleibt der Code gegen beide Schema-Zustände korrekt,
+// ohne die Produktions-DB anzufassen.
 const CREATE_SETTINGS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS automatenlager.classification_settings (
-    mandant_id text PRIMARY KEY,
+    tenant_id text PRIMARY KEY,
     config jsonb NOT NULL DEFAULT '{}'::jsonb,
     updated_at timestamptz NOT NULL DEFAULT now()
   )
 `;
 
+// Übergangsbrücke (#96): liefert den real existierenden Mandanten-Spaltennamen.
+// Ziel ist `tenant_id`; `mandant_id` ist der Legacy-Name bis Migration 0009
+// deployt ist. Strikt auf diese zwei Whitelist-Werte beschränkt (keine Injection).
+// Nach dem Deploy liefert die Funktion immer 'tenant_id' — der Fallback ist dann
+// toter Code und kann in einer Folgestufe entfernt werden.
+async function tenantColumn(client) {
+  const res = await client.query(
+    `SELECT column_name FROM information_schema.columns
+      WHERE table_schema = 'automatenlager' AND table_name = 'classification_settings'
+        AND column_name IN ('tenant_id', 'mandant_id')
+      ORDER BY (column_name = 'tenant_id') DESC
+      LIMIT 1`,
+  );
+  return (res.rows[0] && res.rows[0].column_name) === 'mandant_id' ? 'mandant_id' : 'tenant_id';
+}
+
 /**
  * Liest den rohen Override eines Mandanten (leeres Objekt, wenn keiner existiert).
- * Mandant-Isolation: liest exakt die Zeile dieses mandant_id, nie eine fremde.
+ * Mandant-Isolation: liest exakt die Zeile dieses Mandanten, nie eine fremde.
  */
 async function readOverride(client, mandantId = DEFAULT_MANDANT) {
+  const col = await tenantColumn(client);
   const res = await client.query(
-    `SELECT config FROM automatenlager.classification_settings WHERE mandant_id = $1`,
+    `SELECT config FROM automatenlager.classification_settings WHERE ${col} = $1`,
     [String(mandantId || DEFAULT_MANDANT)],
   );
   if (!res.rows.length) return {};
@@ -222,10 +244,11 @@ async function readOverride(client, mandantId = DEFAULT_MANDANT) {
  */
 async function writeOverride(client, mandantId, override) {
   const clean = sanitizeOverride(override);
+  const col = await tenantColumn(client);
   await client.query(
-    `INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
+    `INSERT INTO automatenlager.classification_settings (${col}, config, updated_at)
      VALUES ($1, $2::jsonb, now())
-     ON CONFLICT (mandant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+     ON CONFLICT (${col}) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
     [String(mandantId || DEFAULT_MANDANT), JSON.stringify(clean)],
   );
   return buildEffectiveConfig(clean);
@@ -289,4 +312,5 @@ module.exports = {
   readOverride,
   writeOverride,
   loadEffectiveConfig,
+  tenantColumn,
 };

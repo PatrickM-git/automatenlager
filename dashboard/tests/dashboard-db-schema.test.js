@@ -119,12 +119,21 @@ function resolvePgUrlForTest() {
   return (merged.DASHBOARD_V2_PG_URL || merged.POSTGRES_URL || merged.DATABASE_URL || '').trim();
 }
 
-test('LIVE: Dashboard-SQL passt zum echten automatenlager-Schema (skip wenn PG offline)', async (t) => {
+// Migrations-aware: Solange die Stufe-1-Migrationen (0007+) noch nicht auf der DB
+// deployt sind, prueft der Guard den POST-MIGRATIONS-Zustand — er wendet die
+// Repo-Migrationen in EINER Transaktion an, prueft das Schema gegen den Code und
+// macht per ROLLBACK garantiert nichts persistent. Nach dem Deploy sind die
+// Migrationen idempotent (No-Op in der Transaktion) und der Guard prueft die
+// echte DB unveraendert. So bleibt "Code <-> Schema deckungsgleich" gruen, ohne
+// die Produktions-DB anzufassen.
+test('LIVE: Dashboard-SQL passt zum echten automatenlager-Schema inkl. Repo-Migrationen (skip wenn PG offline)', async (t) => {
   const pgUrl = resolvePgUrlForTest();
   if (!pgUrl) { t.skip('Kein DASHBOARD_V2_PG_URL — Drift-Check übersprungen.'); return; }
 
   let Client;
   try { ({ Client } = require('pg')); } catch { t.skip('pg nicht installiert.'); return; }
+
+  const { applyMigrationsFrom, withRollback } = require('./helpers/migration-sandbox.js');
 
   const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 3000 });
   try {
@@ -135,14 +144,17 @@ test('LIVE: Dashboard-SQL passt zum echten automatenlager-Schema (skip wenn PG o
   }
 
   try {
-    const report = await runSchemaCheck(client, ROOT_DIR);
+    const report = await withRollback(client, async (c) => {
+      await applyMigrationsFrom(c, 7); // ausstehende Stufe-1-Migrationen simulieren
+      return runSchemaCheck(c, ROOT_DIR);
+    });
     const detail = JSON.stringify({
       missingRelations: report.missingRelations,
       missingReferencedRelations: report.missingReferencedRelations,
       missingColumns: report.missingColumns,
     }, null, 2);
     assert.equal(report.healthy, true,
-      `Schema-Drift erkannt — Code erwartet etwas, das die DB nicht hat:\n${detail}`);
+      `Schema-Drift erkannt — Code erwartet etwas, das die DB (inkl. Repo-Migrationen) nicht hat:\n${detail}`);
     assert.equal(report.missingRelations.length, 0);
     assert.equal(report.missingColumns.length, 0);
   } finally {

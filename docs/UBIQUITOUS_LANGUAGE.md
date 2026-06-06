@@ -152,9 +152,12 @@ Viewer **hat** genau eine Rolle (und damit deren Fähigkeiten).
 
 ## Mandant & editierbare Schwellwerte
 
-- **Mandant / `tenant_id`:** Logische Eigentümer-Einheit der Daten. Aktuell **ein** Mandant
-  (der Eigentümer), das Datenmodell ist aber durchgängig `tenant_id`/`machine_id`-**parametrisch**
-  — Fundament für spätere Mandantenfähigkeit und Supabase-RLS. *Zu vermeiden: „Kunde" als Code-Begriff.*
+- **Mandant / `tenant_id`** *(aktualisiert)***:** Ein **Betrieb/eine Firma** als logische Eigentümer-Einheit
+  der Daten — **nicht** eine Person; mehrere Logins können zu einem Mandanten gehören (z. B. eine Firma
+  mit zwei Eigentümern = zwei Logins, **ein** Mandant). `tenant_id` ist der **einheitliche, kanonische
+  Spaltenname auf jeder operativen Tabelle** (denormalisiert, RLS-fertig); die frühere Abweichung
+  `classification_settings.mandant_id` wird darauf angeglichen. Im UI/Fachsprech bleibt „Mandant".
+  *Zu vermeiden: „Kunde" als Code-Begriff; „Mandant = Login".*
 - **Schwellwert (editierbar):** In `/einstellungen` (`system.verwalten`) änderbarer Wert. Kanonisch:
   **Ladenhüter-Tage** (Default 30, vgl. Slow-Mover-Cluster) und **MHD-Risiko-Fenster** (Default 30 Tage).
 - **Globaler Default vs. Pro-Automat-Override:** Ein Schwellwert gilt **global**, solange kein
@@ -164,6 +167,44 @@ Viewer **hat** genau eine Rolle (und damit deren Fähigkeiten).
   und als **globale** Aktion (alles zurücksetzen).
 - **Editierbar je Mandant** sind neben den Schwellwerten auch **Kategorien**, **Kategorie-Margen** und
   die **Latten** der Drehgeschwindigkeit (siehe Branchen-Anker-Cluster).
+
+---
+
+## Mandantenfähigkeit: Standort, Lager & Mitgliedschaft *(neu)*
+
+> Quelle: SPEC `docs/specs/multi-tenant-datenmodell-v1.md` (Stufe 0). Grundsatz: **eine** Isolations-Regel —
+> jede operative Tabelle trägt `tenant_id` (denormalisiert, RLS-fertig), keine geteilten Zeilen.
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **Standort (`locations`)** | Aufstellort von Automaten; gehört genau einem Mandanten, ein Automat hängt an genau einem Standort. Wird **nie** über Mandanten geteilt (gleiches Gebäude, zwei Betreiber = zwei Einträge). | „Lager" (ein Standort ist kein Backstock-Ort) |
+| **Lager (`warehouses`)** | Benannter Backstock-Ort, der dem Mandanten gehört (eigene Tabelle), optional einem Standort zuordenbar. | „Standort"; „Zentrallager" als Oberbegriff |
+| **Zentrallager** | Das automatisch beim Mandanten-Anlegen erzeugte Default-Lager (`is_default = TRUE`, genau eines je Mandant). Löst das frühere namenlose „`machine_id = NULL`" ab. | „Hauptlager" |
+| **Mitgliedschaft (`tenant_users`)** | Zuordnung Login + Mandant + Rolle (Eigentümer/Auffüller/Gast); ein Mandant kann mehrere Mitglieder haben (zwei Eigentümer = zwei Mitgliedschaften). | „Benutzerkonto", „Account" |
+| **Notfall-Schlüssel / Break-Glass (`platform_admins`)** | MandantenÜBERGREIFENDER Support-Zugriff (Plattform-Betreiber), als eigene Tabelle modelliert (keine Rolle *innerhalb* eines Mandanten); standardmäßig **leer = niemand übergreift**, jeder Zugriff protokolliert. Das Modell ermöglicht ihn, schaltet ihn aber erst in der Auth-Stufe scharf. | mit Rolle „Eigentümer/Auffüller/Gast" verwechseln; „Superadmin-Rolle" |
+| **Mandanten-treuer Fremdschlüssel (composite FK)** | Zusammengesetzter FK `(tenant_id, parent_id)` statt nur `parent_id`; die DB garantiert, dass ein Kind nur auf einen Eltern **desselben** Mandanten zeigt. | „normaler Fremdschlüssel" als Schutz |
+| **`__default__`** | Transienter Platzhalter-Mandant **nur** während der Migration — nie Besitzer echter Daten; Altdaten ziehen auf den realen Mandanten um. | als echten Mandanten/Besitzer verwenden |
+
+Beziehungen: Mandant **hat** 1..n Mitgliedschaften · Mandant **hat** 1..n Standorte, 1..n Lager (mind. 1 Zentrallager),
+1..n Automaten · Automat **steht an** genau einem Standort · Lager **kann** einem Standort zugeordnet sein ·
+Charge **liegt in** höchstens einem Ort (**Automat ODER Lager**; aktive Charge: genau einem, verbrauchte/ausgesonderte darf ortlos sein).
+
+---
+
+## Anbieter-Integration: `provider` & Vending Data Integration Layer *(neu)*
+
+> Nayax ist der **erste**, nicht der einzige Daten-Eingang. Stufe 0 nimmt nur die `provider`-Dimension mit;
+> die volle anbieter-agnostische Schicht ist eine eigene spätere SPEC.
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **Anbieter (`provider`)** | Quelle der eingespeisten Vending-Daten (heute nur `'nayax'`, Default); Dimension auf `sales_transactions` und `nayax_devices`. | „Nayax" als Synonym für „Anbieter" |
+| **Vending Data Integration Layer (VDIL)** | Zielbild einer anbieter-agnostischen Schicht, in die Nayax als erster Adapter mündet (volle Schicht = spätere SPEC). | — (Synonym „PPAL" nur informell) |
+| **Geräte-Claiming** | Ein physisches Gerät gehört **genau einem** Mandanten — systemweite Eindeutigkeit `nayax_devices UNIQUE(provider, nayax_machine_id)`. | „Geräte-Zuordnung" (zu schwach) |
+| **Externe Transaktions-ID (`external_transaction_id`)** | Anbieter-agnostischer Idempotenz-Schlüssel eines Verkaufs (verallgemeinert `nayax_transaction_id`), eindeutig je `(tenant_id, provider, external_transaction_id)`. | „Nayax-Transaktions-ID" als Code-Feld |
+
+Beziehungen: Anbieter **speist** Verkäufe und Geräte ein · Gerät **gehört** genau einem Mandanten (Claiming) ·
+Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
 
 ---
 
@@ -179,12 +220,34 @@ Viewer **hat** genau eine Rolle (und damit deren Fähigkeiten).
 > **Domain Expert:** „Aus dem **Branchen-Anker** — Umsatz-Norm × Kategorie-Marge — nicht aus unseren
 > eigenen schwachen Zahlen. Deshalb darf unser Automat ehrlich überwiegend Langsam-Dreher zeigen."
 
+## Beispiel-Dialog (Mandantenfähigkeit) *(neu)*
+
+> **Dev:** „Deine Firma hat zwei Eigentümer — sind das zwei Mandanten?"
+> **Domain Expert:** „Nein. Ein **Mandant ist der Betrieb**, nicht die Person. Zwei Eigentümer sind zwei
+> **Mitgliedschaften** im selben Mandanten, beide sehen alles."
+> **Dev:** „Eine Charge liegt im Zentrallager — wie speichere ich den Ort?"
+> **Domain Expert:** „Über `warehouse_id`, das aufs **Zentrallager** zeigt. Eine Charge ist **entweder** im
+> Automaten **oder** im Lager — nie beides."
+> **Dev:** „Ein Standort und ein Lager — ist das nicht dasselbe?"
+> **Domain Expert:** „Nein. Der **Standort** ist, wo Automaten stehen; das **Lager** ist, wo Backstock liegt.
+> Manchmal am selben Ort — dann hängt man das Lager optional an den Standort, muss man aber nicht."
+> **Dev:** „Wenn ein Kunde Hilfe braucht, schaue ich einfach in seine Daten?"
+> **Domain Expert:** „Nur über den **Notfall-Schlüssel** (`platform_admins`) — standardmäßig aus, jeder Zugriff
+> protokolliert. Das ist keine normale Rolle, sondern bewusst der Ausnahmeweg."
+> **Dev:** „Zwei Kunden haben denselben Nayax-Automaten in der Liste — erlaubt?"
+> **Domain Expert:** „Nein, **Geräte-Claiming**: ein Gerät gehört genau einem Mandanten, systemweit eindeutig.
+> Der zweite läuft in einen Konflikt."
+
 ## Markierte Unklarheiten *(neu)*
 
 - **Slot-Zahl pro Automat** für die Latten-Ableitung (Umsatz-Norm ÷ Slot-Zahl): Quelle aus den
   Stammdaten ist in der Umsetzung (TDD) zu fixieren — Empfehlung: aktive Slots je `machine_id`.
 - **Persistenzort der Mandanten-Konfiguration** (Kategorien/Margen/Latten): DB-Tabelle vs. bestehende
   Settings-Datei — Empfehlung: DB-Tabelle mit `tenant_id`, konsistent zum Single-source-of-truth-Ziel.
+- **Format der `tenant_id`** (opaker Slug vs. UUID): in der Schema-Migration (TDD) zu fixieren —
+  Empfehlung: opake, **stabile** ID (unveränderlich), Anzeigename strikt getrennt.
+- **Physische Umbenennung `nayax_transaction_id` → `external_transaction_id`:** in Stufe 1 optional,
+  um heutige Schreiber (n8n) nicht sofort zu brechen — Zeitpunkt der Umbenennung festlegen.
 
 ## Secret-Handling & Audit
 
