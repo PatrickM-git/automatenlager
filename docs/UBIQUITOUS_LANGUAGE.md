@@ -121,8 +121,9 @@ Mandant **kann** eigene Kategorien anlegen, zuordnen und deren Marge setzen.
   - **Auffüller** (*Synonym Operator; bevorzugt: Auffüller*) — `betrieb.lesen` + `bestand.schreiben`
     (optional `workflows.starten`); **kein** `finanzen.lesen`, `system.verwalten`, `nayax.schreiben`.
   - **Gast** — nur `betrieb.lesen` (read-only). *Zu vermeiden: „Read-Only-Benutzer" als Rollenname.*
-- **Viewer:** Das vom Server pro Anfrage aufgelöste Subjekt (`getViewer`) mit Login,
-  Rolle, Fähigkeiten und `tenantId`. Einziger Knotenpunkt der Identitätsauflösung.
+- **Viewer** *(aktualisiert)***:** Das vom Server pro Anfrage aufgelöste Subjekt (`getViewer`) mit Login,
+  Rolle, Fähigkeiten, **Heimat-Mandant** und **effektivem** `tenantId` (Trennung siehe Cluster „Auth scharf").
+  Einziger Knotenpunkt der Identitätsauflösung.
 
 Beziehungen: Rolle **bündelt** 1..n Fähigkeiten · Reiter/Endpunkt **fordert** 1..n Fähigkeiten ·
 Viewer **hat** genau eine Rolle (und damit deren Fähigkeiten).
@@ -181,13 +182,36 @@ Viewer **hat** genau eine Rolle (und damit deren Fähigkeiten).
 | **Lager (`warehouses`)** | Benannter Backstock-Ort, der dem Mandanten gehört (eigene Tabelle), optional einem Standort zuordenbar. | „Standort"; „Zentrallager" als Oberbegriff |
 | **Zentrallager** | Das automatisch beim Mandanten-Anlegen erzeugte Default-Lager (`is_default = TRUE`, genau eines je Mandant). Löst das frühere namenlose „`machine_id = NULL`" ab. | „Hauptlager" |
 | **Mitgliedschaft (`tenant_users`)** | Zuordnung Login + Mandant + Rolle (Eigentümer/Auffüller/Gast); ein Mandant kann mehrere Mitglieder haben (zwei Eigentümer = zwei Mitgliedschaften). | „Benutzerkonto", „Account" |
-| **Notfall-Schlüssel / Break-Glass (`platform_admins`)** | MandantenÜBERGREIFENDER Support-Zugriff (Plattform-Betreiber), als eigene Tabelle modelliert (keine Rolle *innerhalb* eines Mandanten); standardmäßig **leer = niemand übergreift**, jeder Zugriff protokolliert. Das Modell ermöglicht ihn, schaltet ihn aber erst in der Auth-Stufe scharf. | mit Rolle „Eigentümer/Auffüller/Gast" verwechseln; „Superadmin-Rolle" |
+| **Notfall-Schlüssel / Break-Glass (`platform_admins`)** *(aktualisiert)* | MandantenÜBERGREIFENDER Support-Zugriff (Plattform-Betreiber), als eigene Tabelle modelliert (keine Rolle *innerhalb* eines Mandanten); standardmäßig **leer = niemand übergreift**, jeder Zugriff protokolliert. Wird in **Stufe 2 (Auth scharf)** als nur-lesende **Support-Sitzung** scharfgeschaltet (siehe Cluster „Auth scharf"). | mit Rolle „Eigentümer/Auffüller/Gast" verwechseln; „Superadmin-Rolle" |
 | **Mandanten-treuer Fremdschlüssel (composite FK)** | Zusammengesetzter FK `(tenant_id, parent_id)` statt nur `parent_id`; die DB garantiert, dass ein Kind nur auf einen Eltern **desselben** Mandanten zeigt. | „normaler Fremdschlüssel" als Schutz |
 | **`__default__`** | Transienter Platzhalter-Mandant **nur** während der Migration — nie Besitzer echter Daten; Altdaten ziehen auf den realen Mandanten um. | als echten Mandanten/Besitzer verwenden |
 
 Beziehungen: Mandant **hat** 1..n Mitgliedschaften · Mandant **hat** 1..n Standorte, 1..n Lager (mind. 1 Zentrallager),
 1..n Automaten · Automat **steht an** genau einem Standort · Lager **kann** einem Standort zugeordnet sein ·
 Charge **liegt in** höchstens einem Ort (**Automat ODER Lager**; aktive Charge: genau einem, verbrauchte/ausgesonderte darf ortlos sein).
+
+---
+
+## Mandantenfähigkeit: Auth scharf (Stufe 2) *(neu)*
+
+> Quelle: SPEC `docs/specs/multi-tenant-auth-scharf-stufe-2-v1.md`. Stufe 2 ersetzt die
+> hartcodierte Konstante durch dynamische, DB-gestützte Mandanten-Auflösung und schaltet
+> damit die schon gebaute RBAC/IDOR-Architektur scharf. Verkabelung, kein neues Feature/UI.
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **Heimat-Mandant (`homeTenantId`)** | Der Mandant, dem ein Login laut `tenant_users` dauerhaft angehört — der Alltagskontext. | „der Mandant" pauschal (verdeckt die Heimat/effektiv-Trennung) |
+| **Effektiver Mandant (`tenantId`)** | Der Mandant, auf dem ein Request **tatsächlich** operiert; standardmäßig = Heimat-Mandant, bei aktiver Support-Sitzung = Ziel-Mandant. | `tenantId` als „immer = Heimat" lesen |
+| **Plattform-Admin** | Ein in `platform_admins` eingetragener Login mit der Befugnis, im Supportfall fremde Mandanten zu betreten; **getrennt** von Mandanten-Mitgliedschaft und RBAC-Rolle (Doppelrolle möglich). | „Superadmin-Rolle"; mit Eigentümer-Rolle vermischen |
+| **Support-Sitzung (Break-Glass, scharf)** | Die **zur Laufzeit aktivierte** Form des Notfall-Schlüssels: bewusster, per-Request-expliziter, **nicht-klebriger**, **nur-lesender** Cross-Tenant-Zugriff eines Plattform-Admins; Default bleibt immer der eigene Mandant. | „Support-Modus" als dauerhafter Zustand; „Impersonation" mit Schreibrechten |
+| **Mandanten-Override (`X-Support-Tenant`)** | Das explizite Header-Signal, das eine Support-Sitzung pro Request aktiviert; nur wirksam bei Plattform-Admin **und** vertrauenswürdigem Identity-Pfad **und** existierendem Ziel-Mandant. Client-kontrolliert ⇒ untrusted by default. | `?tenant_override`-Query-Param; „Tenant-Switch" als Sitzungszustand |
+| **Mandanten-Registry (`tenant-directory`)** | Das Deep Module, das Login→Mandant, Plattform-Admin-Status, Mandanten-Existenz und Maschine→Mandant aus der DB in einen In-Memory-Cache lädt und als **einzige** Auflösungsquelle dient (`resolveViewer` bleibt synchron). | „der Cache" pauschal; Auflösung verstreut in Endpunkten |
+| **Maschinen-Mandant (`machineTenant`)** | Auflösung `machine → tenant_id`; liefert bei unbekannter Maschine **`null`** (nie einen Default), zwingend gekoppelt an `objectAccessAllowed` (`null` ⇒ deny). | unbekannte Maschine ⇒ Eigentümer/`t_faltrix` |
+| **Capability-Stripping** | Durchsetzung von read-only: bei aktiver Support-Sitzung werden die Fähigkeiten des Viewers auf die **Lese-Teilmenge** (`*.lesen`) reduziert, sodass bestehende `requireCapability`-Guards Schreibzugriffe automatisch mit `403` abweisen. | read-only nur über HTTP-Methode prüfen |
+| **fail-closed** | Jeder **technische** Fehler der Mandanten-Auflösung (DB/Cache) ⇒ deny/`503`, **nie** ein Default-Mandant. Strikte Trennung: „nicht gefunden/fremd" ⇒ `404`, „technisch fehlgeschlagen" ⇒ `503`. | `catch ⇒ Default-Mandant`; `404` und `503` vermischen |
+
+Beziehungen: Login **hat** genau einen Heimat-Mandanten (über Mitgliedschaft) · Plattform-Admin **kann** je Request eine Support-Sitzung auf einen fremden Mandanten öffnen ·
+Support-Sitzung **setzt** den effektiven Mandanten ≠ Heimat-Mandant **und** erzwingt read-only · Mandanten-Registry **ist** die einzige Quelle für Heimat-Mandant, Plattform-Admin-Status und Maschinen-Mandant.
 
 ---
 
@@ -238,6 +262,18 @@ Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
 > **Domain Expert:** „Nein, **Geräte-Claiming**: ein Gerät gehört genau einem Mandanten, systemweit eindeutig.
 > Der zweite läuft in einen Konflikt."
 
+## Beispiel-Dialog (Auth scharf) *(neu)*
+
+> **Dev:** „Ich bin Plattform-Admin — sehe ich dann immer alle Kunden?"
+> **Domain Expert:** „Nein. Standardmäßig bist du in deinem **Heimat-Mandanten**. Fremde Daten siehst du nur in
+> einer **Support-Sitzung**, die du **pro Request** explizit über den Header `X-Support-Tenant` öffnest — und nur **lesend**."
+> **Dev:** „Was, wenn ich den Header weglasse?"
+> **Domain Expert:** „Dann bist du sofort wieder in deinem eigenen Mandanten. Die Sitzung **klebt nicht** — es gibt keinen dauerhaften Support-Modus."
+> **Dev:** „Und wenn die DB beim Auflösen kurz weg ist — wird der Request dann dem Eigentümer zugeschlagen?"
+> **Domain Expert:** „Niemals. **fail-closed**: technischer Fehler ⇒ `503`, kein Default-Mandant. Eine *unbekannte* Maschine ist was anderes — die gibt `null` und damit `404`."
+> **Dev:** „Wie wird read-only erzwungen — blocke ich einfach POST?"
+> **Domain Expert:** „Primär über **Capability-Stripping**: in der Support-Sitzung bleiben nur die Lese-Fähigkeiten, also liefern die bestehenden Guards bei Schreibzugriff automatisch `403`. Der Methoden-Block ist nur der zweite Riegel."
+
 ## Markierte Unklarheiten *(neu)*
 
 - **Slot-Zahl pro Automat** für die Latten-Ableitung (Umsatz-Norm ÷ Slot-Zahl): Quelle aus den
@@ -248,6 +284,10 @@ Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
   Empfehlung: opake, **stabile** ID (unveränderlich), Anzeigename strikt getrennt.
 - **Physische Umbenennung `nayax_transaction_id` → `external_transaction_id`:** in Stufe 1 optional,
   um heutige Schreiber (n8n) nicht sofort zu brechen — Zeitpunkt der Umbenennung festlegen.
+- **Antwort auf nicht-berechtigten `X-Support-Tenant`** (Stufe 2): ignorieren-und-auditieren
+  (proxy-resilient) vs. striktes `403` — SPEC empfiehlt ignorieren + `denied`-Audit; finale Wahl in der Umsetzung bestätigen.
+- **Exakte Lese-Teilmenge für Capability-Stripping** (Stufe 2): welche der sechs Fähigkeiten als „lesen" gelten —
+  in der Umsetzung (TDD) fixieren; Empfehlung: genau `betrieb.lesen` + `finanzen.lesen`.
 
 ## Secret-Handling & Audit
 
