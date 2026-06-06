@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-06T05:49:02.382Z",
+  "updatedAt": "2026-06-06T08:07:06.518Z",
   "createdAt": "2026-05-25T14:36:35.576Z",
   "id": "pdIjiyIfVIIPuJIt",
   "name": "WF-Val - DB Konsistenz-Check",
@@ -44,7 +44,7 @@
       },
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT 'keine_preise' AS check_type, sa.product_slot_key AS key, p.name || ' (' || m.machine_key || ')' AS name, 'Aktiver Slot ohne Preis: ' || p.name AS message FROM automatenlager.slot_assignments sa JOIN automatenlager.products p ON p.product_id = sa.product_id JOIN automatenlager.machines m ON m.machine_id = sa.machine_id LEFT JOIN automatenlager.prices pr   ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL WHERE sa.active = TRUE AND pr.price_id IS NULL UNION ALL SELECT 'negative_qty', sb.batch_key, p.name, 'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name FROM automatenlager.stock_batches sb JOIN automatenlager.products p ON p.product_id = sb.product_id WHERE sb.remaining_qty < 0 AND sb.status IN ('aktiv','active','reserve') UNION ALL SELECT 'alte_warnungen', warning_type || '_count', warning_type, COUNT(*) || ' ungeloeste Warnungen (Typ: ' || warning_type || ') aelter 7 Tage' FROM automatenlager.warnings WHERE resolved = FALSE AND severity != 'info'   AND created_at < NOW() - INTERVAL '7 days' GROUP BY warning_type HAVING COUNT(*) > 0 UNION ALL SELECT 'pending_proposals', proposal_key, COALESCE(reason,'?'), 'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?') FROM automatenlager.product_change_proposals WHERE status = 'pending' AND created_at < NOW() - INTERVAL '14 days' ORDER BY check_type, key",
+        "query": "SELECT 'keine_preise' AS check_type, sa.product_slot_key AS key, p.name || ' (' || m.machine_key || ')' AS name, 'Aktiver Slot ohne Preis: ' || p.name AS message FROM automatenlager.slot_assignments sa JOIN automatenlager.products p ON p.product_id = sa.product_id JOIN automatenlager.machines m ON m.machine_id = sa.machine_id LEFT JOIN automatenlager.prices pr   ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL WHERE sa.active = TRUE AND pr.price_id IS NULL UNION ALL SELECT 'negative_qty', sb.batch_key, p.name, 'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name FROM automatenlager.stock_batches sb JOIN automatenlager.products p ON p.product_id = sb.product_id WHERE sb.remaining_qty < 0 AND sb.status IN ('aktiv','active','reserve') UNION ALL SELECT 'alte_warnungen', warning_type || '_count', warning_type, COUNT(*) || ' ungeloeste Warnungen (Typ: ' || warning_type || ') aelter 7 Tage' FROM automatenlager.warnings WHERE resolved = FALSE AND severity != 'info'   AND created_at < NOW() - INTERVAL '7 days' GROUP BY warning_type HAVING COUNT(*) > 0 UNION ALL SELECT 'pending_proposals', proposal_key, COALESCE(reason,'?'), 'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?') FROM automatenlager.product_change_proposals WHERE status = 'pending' AND created_at < NOW() - INTERVAL '14 days' UNION ALL SELECT '_db_latest_sale', 'latest', '', COALESCE(to_char(MAX(settlement_at) AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),'') FROM automatenlager.sales_transactions ORDER BY check_type, key",
         "options": {}
       },
       "alwaysOutputData": true
@@ -59,7 +59,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// WF-Val Aggregation: DB-Konsistenz + WF3-Liveness (execution-basiert, nicht verkaufs-basiert)\n// WF3 laeuft alle 5 Min und liefert auch ohne Verkaeufe 'success' -> kein Fehlalarm nachts/Wochenende.\nconst WF3_MAX_SUCCESS_AGE_MIN = 30;  // gesund: letzter ERFOLGREICHER WF3-Lauf juenger als 30 Min\n\nconst CHECK_LABELS = {\n  keine_preise:     'Aktive Slots ohne Preis',\n  negative_qty:     'Negative Lagermengen',\n  alte_warnungen:   'Alte ungeloeste Warnungen (>7 Tage)',\n  pending_proposals:'Offene Rechnungsvorschlaege (>14 Tage)',\n};\n\n// --- DB-Konsistenz-Befunde (leere alwaysOutputData-Items rausfiltern) ---\nconst otherItems = $('DB - Konsistenzcheck').all().filter(i => i.json && i.json.check_type);\nconst hasOtherIssues = otherItems.length > 0;\n\n// --- WF3-Liveness aus n8n execution_entity ---\nlet wf3Unhealthy = false;\nlet wf3Reason = '';\nlet wf3Determined = false;\ntry {\n  const row = $('PG n8n - WF3 Execution-Check').first().json;\n  const ageRaw = (row && row.wf3_last_success_age_min != null) ? Number(row.wf3_last_success_age_min) : null;\n  const lastStatus = (row && row.wf3_last_status) ? row.wf3_last_status : '?';\n  if (ageRaw != null && Number.isFinite(ageRaw)) {\n    wf3Determined = true;\n    if (ageRaw > WF3_MAX_SUCCESS_AGE_MIN) {\n      wf3Unhealthy = true;\n      wf3Reason = 'Letzter erfolgreicher WF3-Lauf vor ' + Math.round(ageRaw) + ' Min (Limit ' + WF3_MAX_SUCCESS_AGE_MIN + ' Min). Letzter Lauf-Status: ' + lastStatus + '.';\n    }\n  }\n  // ageRaw == null -> Health nicht bestimmbar -> KEINE Aktion (kein Fehlalarm, kein Neustart)\n} catch (e) {\n  // Execution-Check nicht verfuegbar -> unbestimmt -> keine Aktion\n}\n\nconst hasIssues = wf3Unhealthy || hasOtherIssues;\n\nif (!hasIssues) {\n  return [{ json: {\n    status: 'OK', count: 0, has_issues: false,\n    restart_flag: 'NEIN',\n    wf3_determined: wf3Determined,\n    email_subject: null, email_body: null,\n    summary: 'Alle Pruefungen bestanden (DB-Konsistenz ok; WF3 ' + (wf3Determined ? 'laeuft' : 'Status unbestimmt') + ').'\n  }}];\n}\n\nconst grouped = {};\nfor (const { json: r } of otherItems) {\n  if (!grouped[r.check_type]) grouped[r.check_type] = [];\n  grouped[r.check_type].push(r.message);\n}\nconst otherLines = Object.entries(grouped).map(([type, msgs]) => {\n  const label = CHECK_LABELS[type] || type;\n  return '<h3 style=\"color:#c0392b\">' + label + ' (' + msgs.length + ')</h3><ul>' +\n    msgs.map(m => '<li>' + m + '</li>').join('') + '</ul>';\n}).join('');\n\nconst wf3Section = wf3Unhealthy\n  ? '<h3 style=\"color:#e67e22\">WF3 Verkaufsworkflow haengt - Auto-Neustart ausgeloest</h3><ul><li>' + wf3Reason + '</li></ul>'\n  : '';\n\nconst ts = new Date().toISOString();\nconst totalCount = otherItems.length + (wf3Unhealthy ? 1 : 0);\n\nreturn [{ json: {\n  status: 'FEHLER',\n  count: totalCount,\n  has_issues: true,\n  restart_flag: wf3Unhealthy ? 'JA' : 'NEIN',\n  wf3_determined: wf3Determined,\n  email_subject: '[DB-Check] ' + totalCount + ' Problem' + (totalCount !== 1 ? 'e' : '') + ' - Automatenlager',\n  email_body: '<h2 style=\"color:#c0392b\">WF-Val Pruefung: ' + totalCount + ' Problem' + (totalCount !== 1 ? 'e' : '') + '</h2>' + wf3Section + otherLines + '<hr><p style=\"color:#888;font-size:12px\">WF-Val Check: ' + ts + '</p>'\n}}];",
+        "jsCode": "// WF-Val Aggregation: WF3-Liveness (execution) + DB-Konsistenz + Nayax-Schreibstillstand-Gegencheck\nconst WF3_MAX_SUCCESS_AGE_MIN = 30;\nconst WRITE_STALL_THRESHOLD_MIN = 30;  // Nayax > DB um mehr als das = WF3 laeuft, schreibt aber nicht\nfunction clean(v){ return String(v==null?'':v).replace(/\\s+/g,' ').trim(); }\nconst CHECK_LABELS = {\n  keine_preise:'Aktive Slots ohne Preis', negative_qty:'Negative Lagermengen',\n  alte_warnungen:'Alte ungeloeste Warnungen (>7 Tage)', pending_proposals:'Offene Rechnungsvorschlaege (>14 Tage)' };\n\n// DB-Konsistenz-Rows (ohne den _db_latest_sale-Hilfsrow)\nconst allDb = $('DB - Konsistenzcheck').all().filter(i => i.json && i.json.check_type);\nconst dbLatestRow = allDb.find(r => r.json.check_type === '_db_latest_sale');\nconst dbLatestIso = dbLatestRow ? clean(dbLatestRow.json.message) : '';\nconst otherItems = allDb.filter(r => r.json.check_type !== '_db_latest_sale');\nconst hasOtherIssues = otherItems.length > 0;\n\n// WF3-Liveness (execution-basiert)\nlet wf3Unhealthy=false, wf3Reason='', wf3Determined=false;\ntry {\n  const row = $('PG n8n - WF3 Execution-Check').first().json;\n  const ageRaw = (row && row.wf3_last_success_age_min != null) ? Number(row.wf3_last_success_age_min) : null;\n  const lastStatus = (row && row.wf3_last_status) ? row.wf3_last_status : '?';\n  if (ageRaw != null && Number.isFinite(ageRaw)) {\n    wf3Determined = true;\n    if (ageRaw > WF3_MAX_SUCCESS_AGE_MIN) {\n      wf3Unhealthy = true;\n      wf3Reason = 'Letzter erfolgreicher WF3-Lauf vor ' + Math.round(ageRaw) + ' Min (Limit ' + WF3_MAX_SUCCESS_AGE_MIN + ' Min). Letzter Lauf-Status: ' + lastStatus + '.';\n    }\n  }\n} catch (e) {}\n\n// Nayax-Schreibstillstand: nur wenn WF3 GESUND laeuft, aber Nayax der DB voraus ist\nlet writeStall=false, writeStallReason='';\ntry {\n  const nx = $('Nayax - lastSales Collapse').first().json;\n  const nayaxOk = !!(nx && nx.nayax_ok);\n  const nayaxMs = (nx && nx.nayax_latest_ms != null) ? Number(nx.nayax_latest_ms) : null;\n  const dbMs = dbLatestIso ? Date.parse(dbLatestIso) : null;\n  if (wf3Determined && !wf3Unhealthy && nayaxOk && Number.isFinite(nayaxMs) && Number.isFinite(dbMs)) {\n    const gapMin = (nayaxMs - dbMs) / 60000;\n    if (gapMin > WRITE_STALL_THRESHOLD_MIN) {\n      writeStall = true;\n      writeStallReason = 'Nayax hat Verkaeufe bis ' + nx.nayax_latest_iso + ', DB nur bis ' + dbLatestIso + ' (Rueckstand ' + Math.round(gapMin) + ' Min). WF3 laeuft, persistiert aber nicht.';\n    }\n  }\n} catch (e) {}\n\nconst hasIssues = wf3Unhealthy || writeStall || hasOtherIssues;\nif (!hasIssues) {\n  return [{ json: { status:'OK', count:0, has_issues:false, restart_flag:'NEIN', wf3_determined:wf3Determined,\n    email_subject:null, email_body:null,\n    summary:'Alle Pruefungen bestanden (DB-Konsistenz ok; WF3 ' + (wf3Determined?'laeuft':'Status unbestimmt') + '; Nayax<->DB synchron).' } }];\n}\n\nconst grouped = {};\nfor (const { json: r } of otherItems) { if(!grouped[r.check_type]) grouped[r.check_type]=[]; grouped[r.check_type].push(r.message); }\nconst otherLines = Object.entries(grouped).map(([type,msgs]) => {\n  const label = CHECK_LABELS[type] || type;\n  return '<h3 style=\"color:#c0392b\">' + label + ' (' + msgs.length + ')</h3><ul>' + msgs.map(m=>'<li>'+m+'</li>').join('') + '</ul>'; }).join('');\nconst wf3Section = wf3Unhealthy ? '<h3 style=\"color:#e67e22\">WF3 Verkaufsworkflow haengt - Auto-Neustart ausgeloest</h3><ul><li>'+wf3Reason+'</li></ul>' : '';\nconst stallSection = writeStall ? '<h3 style=\"color:#c0392b\">WF3 schreibt nicht (Nayax-Gegencheck)</h3><ul><li>'+writeStallReason+'</li></ul>' : '';\nconst ts = new Date().toISOString();\nconst totalCount = otherItems.length + (wf3Unhealthy?1:0) + (writeStall?1:0);\nreturn [{ json: {\n  status:'FEHLER', count:totalCount, has_issues:true,\n  restart_flag: wf3Unhealthy ? 'JA' : 'NEIN',\n  wf3_determined: wf3Determined, write_stall: writeStall,\n  email_subject: '[DB-Check] ' + totalCount + ' Problem' + (totalCount!==1?'e':'') + ' - Automatenlager',\n  email_body: '<h2 style=\"color:#c0392b\">WF-Val Pruefung: ' + totalCount + ' Problem' + (totalCount!==1?'e':'') + '</h2>' + wf3Section + stallSection + otherLines + '<hr><p style=\"color:#888;font-size:12px\">WF-Val Check: ' + ts + '</p>' } }];",
         "mode": "runOnceForAllItems"
       }
     },
@@ -246,6 +246,47 @@
       },
       "onError": "continueRegularOutput",
       "alwaysOutputData": true
+    },
+    {
+      "id": "wfval-nayax-lastsales-1",
+      "name": "Nayax - lastSales Cross-Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6JLrl6bb2ns3ISYe",
+          "name": "Nayax Lynx API"
+        }
+      },
+      "parameters": {
+        "method": "GET",
+        "url": "https://lynx.nayax.com/operational/v1/machines/457107528/lastSales",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "wfval-nayax-collapse-1",
+      "name": "Nayax - lastSales Collapse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        320
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Nayax lastSales -> ein Item mit max Settlement-Zeit (mirror WF3 'Normalize Sales')\nfunction clean(v){ return String(v==null?'':v).replace(/\\s+/g,' ').trim(); }\nfunction parseGmt(s){ let t=clean(s).replace(' ','T'); if(!t) return NaN;\n  if(!/[zZ]$/.test(t) && !/[+\\-]\\d{2}:?\\d{2}$/.test(t)) t+='Z';\n  return Date.parse(t); }\nconst items=$input.all();\nlet sales=[];\nfor(const it of items){ const d=it.json;\n  if(Array.isArray(d)) sales.push(...d);\n  else if(d && Array.isArray(d.body)) sales.push(...d.body);\n  else if(d && typeof d==='object') sales.push(d); }\nlet maxMs=null, maxIso='';\nfor(const s of sales){\n  const ms=parseGmt(s.SettlementDateTimeGMT || s.MachineAuthorizationTime || s.AuthorizationDateTimeGMT);\n  if(Number.isFinite(ms) && (maxMs===null || ms>maxMs)){ maxMs=ms; maxIso=new Date(ms).toISOString(); } }\nconst ok = sales.length>0 && maxMs!==null;\nreturn [{ json: { nayax_ok: ok, nayax_count: sales.length, nayax_latest_ms: maxMs, nayax_latest_iso: maxIso } }];"
+      }
     }
   ],
   "connections": {
@@ -338,6 +379,28 @@
       "main": [
         [
           {
+            "node": "Nayax - lastSales Cross-Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nayax - lastSales Cross-Check": {
+      "main": [
+        [
+          {
+            "node": "Nayax - lastSales Collapse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nayax - lastSales Collapse": {
+      "main": [
+        [
+          {
             "node": "DB - Konsistenzcheck",
             "type": "main",
             "index": 0
@@ -360,9 +423,9 @@
   },
   "meta": null,
   "pinData": null,
-  "versionId": "20d96fac-c480-42fd-ba0a-e5e103ed11fa",
-  "activeVersionId": "20d96fac-c480-42fd-ba0a-e5e103ed11fa",
-  "versionCounter": 16,
+  "versionId": "19eb484e-d295-42e4-b41b-e135520f20a4",
+  "activeVersionId": "19eb484e-d295-42e4-b41b-e135520f20a4",
+  "versionCounter": 19,
   "triggerCount": 1,
   "shared": [
     {
@@ -385,9 +448,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-06-06T05:49:02.383Z",
-    "createdAt": "2026-06-06T05:49:02.383Z",
-    "versionId": "20d96fac-c480-42fd-ba0a-e5e103ed11fa",
+    "updatedAt": "2026-06-06T08:07:06.519Z",
+    "createdAt": "2026-06-06T08:07:06.519Z",
+    "versionId": "19eb484e-d295-42e4-b41b-e135520f20a4",
     "workflowId": "pdIjiyIfVIIPuJIt",
     "nodes": [
       {
@@ -427,7 +490,7 @@
         },
         "parameters": {
           "operation": "executeQuery",
-          "query": "SELECT 'keine_preise' AS check_type, sa.product_slot_key AS key, p.name || ' (' || m.machine_key || ')' AS name, 'Aktiver Slot ohne Preis: ' || p.name AS message FROM automatenlager.slot_assignments sa JOIN automatenlager.products p ON p.product_id = sa.product_id JOIN automatenlager.machines m ON m.machine_id = sa.machine_id LEFT JOIN automatenlager.prices pr   ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL WHERE sa.active = TRUE AND pr.price_id IS NULL UNION ALL SELECT 'negative_qty', sb.batch_key, p.name, 'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name FROM automatenlager.stock_batches sb JOIN automatenlager.products p ON p.product_id = sb.product_id WHERE sb.remaining_qty < 0 AND sb.status IN ('aktiv','active','reserve') UNION ALL SELECT 'alte_warnungen', warning_type || '_count', warning_type, COUNT(*) || ' ungeloeste Warnungen (Typ: ' || warning_type || ') aelter 7 Tage' FROM automatenlager.warnings WHERE resolved = FALSE AND severity != 'info'   AND created_at < NOW() - INTERVAL '7 days' GROUP BY warning_type HAVING COUNT(*) > 0 UNION ALL SELECT 'pending_proposals', proposal_key, COALESCE(reason,'?'), 'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?') FROM automatenlager.product_change_proposals WHERE status = 'pending' AND created_at < NOW() - INTERVAL '14 days' ORDER BY check_type, key",
+          "query": "SELECT 'keine_preise' AS check_type, sa.product_slot_key AS key, p.name || ' (' || m.machine_key || ')' AS name, 'Aktiver Slot ohne Preis: ' || p.name AS message FROM automatenlager.slot_assignments sa JOIN automatenlager.products p ON p.product_id = sa.product_id JOIN automatenlager.machines m ON m.machine_id = sa.machine_id LEFT JOIN automatenlager.prices pr   ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.valid_to IS NULL WHERE sa.active = TRUE AND pr.price_id IS NULL UNION ALL SELECT 'negative_qty', sb.batch_key, p.name, 'Negative Menge (' || sb.remaining_qty || ') fuer: ' || p.name FROM automatenlager.stock_batches sb JOIN automatenlager.products p ON p.product_id = sb.product_id WHERE sb.remaining_qty < 0 AND sb.status IN ('aktiv','active','reserve') UNION ALL SELECT 'alte_warnungen', warning_type || '_count', warning_type, COUNT(*) || ' ungeloeste Warnungen (Typ: ' || warning_type || ') aelter 7 Tage' FROM automatenlager.warnings WHERE resolved = FALSE AND severity != 'info'   AND created_at < NOW() - INTERVAL '7 days' GROUP BY warning_type HAVING COUNT(*) > 0 UNION ALL SELECT 'pending_proposals', proposal_key, COALESCE(reason,'?'), 'Proposal seit ' || EXTRACT(DAY FROM NOW()-created_at)::int || ' Tagen offen: ' || COALESCE(reason,'?') FROM automatenlager.product_change_proposals WHERE status = 'pending' AND created_at < NOW() - INTERVAL '14 days' UNION ALL SELECT '_db_latest_sale', 'latest', '', COALESCE(to_char(MAX(settlement_at) AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),'') FROM automatenlager.sales_transactions ORDER BY check_type, key",
           "options": {}
         },
         "alwaysOutputData": true
@@ -442,7 +505,7 @@
           0
         ],
         "parameters": {
-          "jsCode": "// WF-Val Aggregation: DB-Konsistenz + WF3-Liveness (execution-basiert, nicht verkaufs-basiert)\n// WF3 laeuft alle 5 Min und liefert auch ohne Verkaeufe 'success' -> kein Fehlalarm nachts/Wochenende.\nconst WF3_MAX_SUCCESS_AGE_MIN = 30;  // gesund: letzter ERFOLGREICHER WF3-Lauf juenger als 30 Min\n\nconst CHECK_LABELS = {\n  keine_preise:     'Aktive Slots ohne Preis',\n  negative_qty:     'Negative Lagermengen',\n  alte_warnungen:   'Alte ungeloeste Warnungen (>7 Tage)',\n  pending_proposals:'Offene Rechnungsvorschlaege (>14 Tage)',\n};\n\n// --- DB-Konsistenz-Befunde (leere alwaysOutputData-Items rausfiltern) ---\nconst otherItems = $('DB - Konsistenzcheck').all().filter(i => i.json && i.json.check_type);\nconst hasOtherIssues = otherItems.length > 0;\n\n// --- WF3-Liveness aus n8n execution_entity ---\nlet wf3Unhealthy = false;\nlet wf3Reason = '';\nlet wf3Determined = false;\ntry {\n  const row = $('PG n8n - WF3 Execution-Check').first().json;\n  const ageRaw = (row && row.wf3_last_success_age_min != null) ? Number(row.wf3_last_success_age_min) : null;\n  const lastStatus = (row && row.wf3_last_status) ? row.wf3_last_status : '?';\n  if (ageRaw != null && Number.isFinite(ageRaw)) {\n    wf3Determined = true;\n    if (ageRaw > WF3_MAX_SUCCESS_AGE_MIN) {\n      wf3Unhealthy = true;\n      wf3Reason = 'Letzter erfolgreicher WF3-Lauf vor ' + Math.round(ageRaw) + ' Min (Limit ' + WF3_MAX_SUCCESS_AGE_MIN + ' Min). Letzter Lauf-Status: ' + lastStatus + '.';\n    }\n  }\n  // ageRaw == null -> Health nicht bestimmbar -> KEINE Aktion (kein Fehlalarm, kein Neustart)\n} catch (e) {\n  // Execution-Check nicht verfuegbar -> unbestimmt -> keine Aktion\n}\n\nconst hasIssues = wf3Unhealthy || hasOtherIssues;\n\nif (!hasIssues) {\n  return [{ json: {\n    status: 'OK', count: 0, has_issues: false,\n    restart_flag: 'NEIN',\n    wf3_determined: wf3Determined,\n    email_subject: null, email_body: null,\n    summary: 'Alle Pruefungen bestanden (DB-Konsistenz ok; WF3 ' + (wf3Determined ? 'laeuft' : 'Status unbestimmt') + ').'\n  }}];\n}\n\nconst grouped = {};\nfor (const { json: r } of otherItems) {\n  if (!grouped[r.check_type]) grouped[r.check_type] = [];\n  grouped[r.check_type].push(r.message);\n}\nconst otherLines = Object.entries(grouped).map(([type, msgs]) => {\n  const label = CHECK_LABELS[type] || type;\n  return '<h3 style=\"color:#c0392b\">' + label + ' (' + msgs.length + ')</h3><ul>' +\n    msgs.map(m => '<li>' + m + '</li>').join('') + '</ul>';\n}).join('');\n\nconst wf3Section = wf3Unhealthy\n  ? '<h3 style=\"color:#e67e22\">WF3 Verkaufsworkflow haengt - Auto-Neustart ausgeloest</h3><ul><li>' + wf3Reason + '</li></ul>'\n  : '';\n\nconst ts = new Date().toISOString();\nconst totalCount = otherItems.length + (wf3Unhealthy ? 1 : 0);\n\nreturn [{ json: {\n  status: 'FEHLER',\n  count: totalCount,\n  has_issues: true,\n  restart_flag: wf3Unhealthy ? 'JA' : 'NEIN',\n  wf3_determined: wf3Determined,\n  email_subject: '[DB-Check] ' + totalCount + ' Problem' + (totalCount !== 1 ? 'e' : '') + ' - Automatenlager',\n  email_body: '<h2 style=\"color:#c0392b\">WF-Val Pruefung: ' + totalCount + ' Problem' + (totalCount !== 1 ? 'e' : '') + '</h2>' + wf3Section + otherLines + '<hr><p style=\"color:#888;font-size:12px\">WF-Val Check: ' + ts + '</p>'\n}}];",
+          "jsCode": "// WF-Val Aggregation: WF3-Liveness (execution) + DB-Konsistenz + Nayax-Schreibstillstand-Gegencheck\nconst WF3_MAX_SUCCESS_AGE_MIN = 30;\nconst WRITE_STALL_THRESHOLD_MIN = 30;  // Nayax > DB um mehr als das = WF3 laeuft, schreibt aber nicht\nfunction clean(v){ return String(v==null?'':v).replace(/\\s+/g,' ').trim(); }\nconst CHECK_LABELS = {\n  keine_preise:'Aktive Slots ohne Preis', negative_qty:'Negative Lagermengen',\n  alte_warnungen:'Alte ungeloeste Warnungen (>7 Tage)', pending_proposals:'Offene Rechnungsvorschlaege (>14 Tage)' };\n\n// DB-Konsistenz-Rows (ohne den _db_latest_sale-Hilfsrow)\nconst allDb = $('DB - Konsistenzcheck').all().filter(i => i.json && i.json.check_type);\nconst dbLatestRow = allDb.find(r => r.json.check_type === '_db_latest_sale');\nconst dbLatestIso = dbLatestRow ? clean(dbLatestRow.json.message) : '';\nconst otherItems = allDb.filter(r => r.json.check_type !== '_db_latest_sale');\nconst hasOtherIssues = otherItems.length > 0;\n\n// WF3-Liveness (execution-basiert)\nlet wf3Unhealthy=false, wf3Reason='', wf3Determined=false;\ntry {\n  const row = $('PG n8n - WF3 Execution-Check').first().json;\n  const ageRaw = (row && row.wf3_last_success_age_min != null) ? Number(row.wf3_last_success_age_min) : null;\n  const lastStatus = (row && row.wf3_last_status) ? row.wf3_last_status : '?';\n  if (ageRaw != null && Number.isFinite(ageRaw)) {\n    wf3Determined = true;\n    if (ageRaw > WF3_MAX_SUCCESS_AGE_MIN) {\n      wf3Unhealthy = true;\n      wf3Reason = 'Letzter erfolgreicher WF3-Lauf vor ' + Math.round(ageRaw) + ' Min (Limit ' + WF3_MAX_SUCCESS_AGE_MIN + ' Min). Letzter Lauf-Status: ' + lastStatus + '.';\n    }\n  }\n} catch (e) {}\n\n// Nayax-Schreibstillstand: nur wenn WF3 GESUND laeuft, aber Nayax der DB voraus ist\nlet writeStall=false, writeStallReason='';\ntry {\n  const nx = $('Nayax - lastSales Collapse').first().json;\n  const nayaxOk = !!(nx && nx.nayax_ok);\n  const nayaxMs = (nx && nx.nayax_latest_ms != null) ? Number(nx.nayax_latest_ms) : null;\n  const dbMs = dbLatestIso ? Date.parse(dbLatestIso) : null;\n  if (wf3Determined && !wf3Unhealthy && nayaxOk && Number.isFinite(nayaxMs) && Number.isFinite(dbMs)) {\n    const gapMin = (nayaxMs - dbMs) / 60000;\n    if (gapMin > WRITE_STALL_THRESHOLD_MIN) {\n      writeStall = true;\n      writeStallReason = 'Nayax hat Verkaeufe bis ' + nx.nayax_latest_iso + ', DB nur bis ' + dbLatestIso + ' (Rueckstand ' + Math.round(gapMin) + ' Min). WF3 laeuft, persistiert aber nicht.';\n    }\n  }\n} catch (e) {}\n\nconst hasIssues = wf3Unhealthy || writeStall || hasOtherIssues;\nif (!hasIssues) {\n  return [{ json: { status:'OK', count:0, has_issues:false, restart_flag:'NEIN', wf3_determined:wf3Determined,\n    email_subject:null, email_body:null,\n    summary:'Alle Pruefungen bestanden (DB-Konsistenz ok; WF3 ' + (wf3Determined?'laeuft':'Status unbestimmt') + '; Nayax<->DB synchron).' } }];\n}\n\nconst grouped = {};\nfor (const { json: r } of otherItems) { if(!grouped[r.check_type]) grouped[r.check_type]=[]; grouped[r.check_type].push(r.message); }\nconst otherLines = Object.entries(grouped).map(([type,msgs]) => {\n  const label = CHECK_LABELS[type] || type;\n  return '<h3 style=\"color:#c0392b\">' + label + ' (' + msgs.length + ')</h3><ul>' + msgs.map(m=>'<li>'+m+'</li>').join('') + '</ul>'; }).join('');\nconst wf3Section = wf3Unhealthy ? '<h3 style=\"color:#e67e22\">WF3 Verkaufsworkflow haengt - Auto-Neustart ausgeloest</h3><ul><li>'+wf3Reason+'</li></ul>' : '';\nconst stallSection = writeStall ? '<h3 style=\"color:#c0392b\">WF3 schreibt nicht (Nayax-Gegencheck)</h3><ul><li>'+writeStallReason+'</li></ul>' : '';\nconst ts = new Date().toISOString();\nconst totalCount = otherItems.length + (wf3Unhealthy?1:0) + (writeStall?1:0);\nreturn [{ json: {\n  status:'FEHLER', count:totalCount, has_issues:true,\n  restart_flag: wf3Unhealthy ? 'JA' : 'NEIN',\n  wf3_determined: wf3Determined, write_stall: writeStall,\n  email_subject: '[DB-Check] ' + totalCount + ' Problem' + (totalCount!==1?'e':'') + ' - Automatenlager',\n  email_body: '<h2 style=\"color:#c0392b\">WF-Val Pruefung: ' + totalCount + ' Problem' + (totalCount!==1?'e':'') + '</h2>' + wf3Section + stallSection + otherLines + '<hr><p style=\"color:#888;font-size:12px\">WF-Val Check: ' + ts + '</p>' } }];",
           "mode": "runOnceForAllItems"
         }
       },
@@ -629,6 +692,47 @@
         },
         "onError": "continueRegularOutput",
         "alwaysOutputData": true
+      },
+      {
+        "id": "wfval-nayax-lastsales-1",
+        "name": "Nayax - lastSales Cross-Check",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          220,
+          320
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "6JLrl6bb2ns3ISYe",
+            "name": "Nayax Lynx API"
+          }
+        },
+        "parameters": {
+          "method": "GET",
+          "url": "https://lynx.nayax.com/operational/v1/machines/457107528/lastSales",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "options": {
+            "timeout": 10000
+          }
+        },
+        "onError": "continueRegularOutput",
+        "alwaysOutputData": true
+      },
+      {
+        "id": "wfval-nayax-collapse-1",
+        "name": "Nayax - lastSales Collapse",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          440,
+          320
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "// Nayax lastSales -> ein Item mit max Settlement-Zeit (mirror WF3 'Normalize Sales')\nfunction clean(v){ return String(v==null?'':v).replace(/\\s+/g,' ').trim(); }\nfunction parseGmt(s){ let t=clean(s).replace(' ','T'); if(!t) return NaN;\n  if(!/[zZ]$/.test(t) && !/[+\\-]\\d{2}:?\\d{2}$/.test(t)) t+='Z';\n  return Date.parse(t); }\nconst items=$input.all();\nlet sales=[];\nfor(const it of items){ const d=it.json;\n  if(Array.isArray(d)) sales.push(...d);\n  else if(d && Array.isArray(d.body)) sales.push(...d.body);\n  else if(d && typeof d==='object') sales.push(d); }\nlet maxMs=null, maxIso='';\nfor(const s of sales){\n  const ms=parseGmt(s.SettlementDateTimeGMT || s.MachineAuthorizationTime || s.AuthorizationDateTimeGMT);\n  if(Number.isFinite(ms) && (maxMs===null || ms>maxMs)){ maxMs=ms; maxIso=new Date(ms).toISOString(); } }\nconst ok = sales.length>0 && maxMs!==null;\nreturn [{ json: { nayax_ok: ok, nayax_count: sales.length, nayax_latest_ms: maxMs, nayax_latest_iso: maxIso } }];"
+        }
       }
     ],
     "connections": {
@@ -721,6 +825,28 @@
         "main": [
           [
             {
+              "node": "Nayax - lastSales Cross-Check",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Nayax - lastSales Cross-Check": {
+        "main": [
+          [
+            {
+              "node": "Nayax - lastSales Collapse",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Nayax - lastSales Collapse": {
+        "main": [
+          [
+            {
               "node": "DB - Konsistenzcheck",
               "type": "main",
               "index": 0
@@ -735,18 +861,18 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-06-06T05:49:02.401Z",
-        "id": 355,
+        "createdAt": "2026-06-06T08:07:06.544Z",
+        "id": 361,
         "workflowId": "pdIjiyIfVIIPuJIt",
-        "versionId": "20d96fac-c480-42fd-ba0a-e5e103ed11fa",
+        "versionId": "19eb484e-d295-42e4-b41b-e135520f20a4",
         "event": "deactivated",
         "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       },
       {
-        "createdAt": "2026-06-06T05:49:02.413Z",
-        "id": 356,
+        "createdAt": "2026-06-06T08:07:06.555Z",
+        "id": 362,
         "workflowId": "pdIjiyIfVIIPuJIt",
-        "versionId": "20d96fac-c480-42fd-ba0a-e5e103ed11fa",
+        "versionId": "19eb484e-d295-42e4-b41b-e135520f20a4",
         "event": "activated",
         "userId": "dd26b63a-7133-4afa-995a-0d7d72693aee"
       }
