@@ -29,6 +29,7 @@ const { queryEconomicsScopePg } = require('./lib/automaten-view.js');
 const { queryEconomicsLivePg } = require('./lib/economics-live.js');
 const { resolveViewer, objectAccessAllowed, breakGlassDecision } = require('./lib/auth.js');
 const { createTenantDirectory } = require('./lib/tenant-directory.js');
+const { createTenantDb } = require('./lib/tenant-db.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
 const { runStockCostCheck } = require('./lib/stock-cost-invariant.js');
@@ -346,21 +347,40 @@ function dashboardV2PgUrl() {
 // requireMachineAccess). Initialer Load-Fehler ⇒ Instanz bleibt „nicht bereit"
 // (isReady()===false) ⇒ Health-Check 503, IDOR-Hooks 503 (fail-closed) — es wird
 // NIE mit leerem Verzeichnis serviert und NIE auf einen Default-Mandanten gefallen.
-function buildTenantDirectory() {
+// EIN geteilter pg-Pool für die mandanten-bewusste Infrastruktur: Stufe-2-Registry
+// (lib/tenant-directory.js) UND Stufe-3-Mandanten-Tür (lib/tenant-db.js) teilen sich
+// denselben Pool (zentralisierter DB-Zugriff, SPEC §"DB-Zugriff zentralisiert").
+function buildSharedPgPool() {
   const pgUrl = dashboardV2PgUrl();
   if (!pgUrl) return null;
   const { Pool } = require('pg');
-  const pool = new Pool({ connectionString: pgUrl, max: 2, connectionTimeoutMillis: 3000 });
-  pool.on('error', (err) => console.error('[tenant-directory] Pool-Fehler:', err && err.message));
+  const pool = new Pool({ connectionString: pgUrl, max: 5, connectionTimeoutMillis: 3000 });
+  pool.on('error', (err) => console.error('[pg-pool] Pool-Fehler:', err && err.message));
+  return pool;
+}
+
+const sharedPgPool = buildSharedPgPool();
+const sharedPgQuery = sharedPgPool ? (sql, params) => sharedPgPool.query(sql, params) : null;
+
+function buildTenantDirectory() {
+  if (!sharedPgQuery) return null;
   const ttlEnv = Number(process.env.DASHBOARD_TENANT_DIR_TTL_MS);
   return createTenantDirectory({
-    query: (sql, params) => pool.query(sql, params),
+    query: sharedPgQuery,
     ttlMs: Number.isFinite(ttlEnv) && ttlEnv > 0 ? ttlEnv : undefined,
     logger: (...a) => console.error('[tenant-directory]', ...a),
   });
 }
 
 const tenantDirectory = buildTenantDirectory();
+
+// Stufe-3-Mandanten-Tür: die EINE Lese-Zugriffsschicht über demselben Pool. In #122
+// (Fundament) absichtlich von KEINEM Endpunkt konsumiert — es wird in diesem Slice
+// kein Lesepfad migriert. Steht für die Slices #123ff. bereit (fail-closed, siehe
+// lib/tenant-db.js). `null` ohne konfiguriertes PG (Dev/Test).
+const tenantDb = sharedPgQuery
+  ? createTenantDb({ query: sharedPgQuery, log: (...a) => console.error('[tenant-db]', ...a) })
+  : null;
 
 // Initialer Snapshot (non-blocking, wie die übrigen Startup-Checks). Erfolg ⇒
 // TTL-Auto-Refresh starten; Fehler ⇒ fail-closed (Instanz bleibt unready).
@@ -1971,6 +1991,7 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, healthy ? 200 : 503, {
         ok: healthy,
         tenantDirectoryReady: !!(tenantDirectory && tenantDirectory.isReady()),
+        tenantDbReady: !!tenantDb, // #122: Stufe-3-Mandanten-Tür konstruiert (noch nicht konsumiert)
         pgConfigured: !!dashboardV2PgUrl(),
       });
       return;
