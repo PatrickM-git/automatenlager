@@ -129,12 +129,11 @@ Read-Only guest access (Default-Deny seit #27, `dashboard/lib/auth.js` → `reso
 
 ## Current Next Step
 
-**Planung abgeschlossen (2026-06-06) — Auth scharf setzen (Stufe 2):**
-- SPEC: `docs/specs/multi-tenant-auth-scharf-stufe-2-v1.md` — echte `tenant_id` statt Konstante `TENANT_OWNER`; aktiviert die RBAC/IDOR-Architektur. Grundlage: `docs/specs/mandantenfaehigkeit-audit-2026-06-05.md` (Schritt 2 der Stufenkette 0→8).
-- Verifizierter Ist-Zustand: Stufe 0+1 LIVE auf dem Mini — `tenants` hat `__default__`+`t_faltrix`; ALLE echten Daten unter `t_faltrix`; `tenant_users`/`platform_admins` existieren aber LEER. `auth.js` `TENANT_OWNER='eigentuemer'` (hartcodiert in `resolveViewer`); `machineTenant()` Stub.
-- Kernentscheidungen: Login→`tenant_id` aus `tenant_users` via neues Deep Module `lib/tenant-directory.js` (In-Memory-Cache, `resolveViewer` bleibt synchron); `machineTenant()` async DB-Lookup (Miss→Recheck + Negative-Caching wegen n8n als Zweitschreiber); `TENANT_OWNER` + `machineTenant` ATOMAR auf `t_faltrix` (sonst Owner-Lockout, Regressions-Guard); `objectAccessAllowed` null⇒deny; Rolle bleibt in Env (`tenant_users.role` reserviert); Break-Glass = bewusste, nicht-klebrige, nur-lesende Support-Sitzung via Header `X-Support-Tenant` (nur platform-admin + vertrauenswürdiger Pfad, Capability-Stripping); fail-closed (404 nicht-gefunden vs 503 technischer Fehler, kein Default-Fallback); Audit an bestehende Senke (#32); Seed-Migration `0018` VOR Code-Rollout.
+**Umgesetzt (2026-06-06) — Auth scharf setzen (Stufe 2), Issues #115–#118 KOMPLETT (Code):**
+- Branch `feat/auth-scharf-stufe-2` (4 Commits), Suite **946/946**. SPEC: `docs/specs/multi-tenant-auth-scharf-stufe-2-v1.md`.
+- #115 Seed-Migration `0018` (tenant_users/platform_admins, GUC-parametrisierbar, idempotent); #116 `lib/tenant-directory.js` (Mandanten-Registry, Cache + async machineTenant + Negative-Caching, fail-closed); #117 `resolveViewer`/`objectAccessAllowed` real aus der Registry (kein TENANT_OWNER-Default), IDOR-Hooks async, `GET /health`, request-id, Taxonomie 404/503; #118 Break-Glass `X-Support-Tenant` (read-only, auditiert, nicht-klebrig). Trust-Header-Invariante: `docs/security/trust-header-invariante.md`.
+- **Nächster Schritt: Mini-Deploy nach Runbook in `HANDOVER.md`** — ZWINGEND Seed-Migration `0018` VOR dem Code-Rollout (sonst Owner-Lockout, da `tenant_users` auf dem Mini leer), danach Container-Restart + Live-Smoke (`/health` 200, Owner erreicht Faltrix-Maschine, Break-Glass GET=Lesen/POST=403). PR `feat/auth-scharf-stufe-2` mergen.
 - Scope-Grenze: KEINE flächendeckenden Query-Filter (Stufe 3), KEINE RLS (Stufe 5), kein UI (Stufe 8). Stufe 2 = Verkabelung + Verifizierbarkeit, NICHT verkaufsfähig für 2. realen Kunden.
-- **Nächster Schritt: `spec-to-issue`** (neuer Chat) — SPEC in GitHub-Issues zerlegen. Kritisch: Seed-Migration `0018` läuft VOR Code-Rollout/Mini-Deploy.
 
 **Davor umgesetzt (2026-06-03) — Feature „Branchen-Anker" (Drehgeschwindigkeits-Klassifikation), Issues #62–#66:**
 - SPEC: `docs/specs/branchen-anker-drehgeschwindigkeit-v1.md`.

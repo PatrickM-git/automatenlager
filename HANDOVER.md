@@ -2,6 +2,59 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
+## Stand: 2026-06-06 — Auth scharf setzen (Mandantenfähigkeit Stufe 2) — Issues #115–#118 KOMPLETT (Code), Mini-Deploy AUSSTEHEND
+
+Branch `feat/auth-scharf-stufe-2` (4 Commits), Suite **946/946 grün**. SPEC:
+`docs/specs/multi-tenant-auth-scharf-stufe-2-v1.md`. Macht die RBAC/IDOR-Architektur
+erstmals real wirksam: echter Mandant aus der DB statt Konstante `TENANT_OWNER`.
+
+- **#115** Seed-Migration `0018-seed-tenant-users-platform-admins.sql` — befüllt
+  `tenant_users`/`platform_admins` mit den Faltrix-Logins (Eigentümer-Default
+  `patrickmatthes2609@gmail.com`; Partner/Auffüller optional via Session-GUC).
+- **#116** `dashboard/lib/tenant-directory.js` — Mandanten-Registry (In-Memory-Cache,
+  `loginTenant`/`isPlatformAdmin`/`tenantExists` synchron, `machineTenant` async mit
+  Miss-Recheck + Negative-Caching; fail-closed).
+- **#117** `lib/auth.js` + `server.js` — `resolveViewer` leitet `tenantId` real aus
+  der Registry ab (kein Default mehr); `objectAccessAllowed` null/fremd ⇒ deny; beide
+  IDOR-Hooks (slot-change/nayax-apply) `await machineTenant`; `GET /health`; request-id;
+  Taxonomie 404 (nicht-gefunden/fremd) vs 503 (technisch, kein Default-Fallback).
+- **#118** Break-Glass `X-Support-Tenant` (nur-lesend, auditiert, nicht-klebrig);
+  Capability-Stripping + Methoden-Riegel; Audit an bestehende Senke. Proxy-Invariante:
+  `docs/security/trust-header-invariante.md`.
+
+### ⚠️ DEPLOY-RUNBOOK (Reihenfolge ZWINGEND — Seed VOR Code, sonst Owner-Lockout)
+
+Der Stufe-2-Code löst Login→Mandant aus `tenant_users` auf. Auf dem Mini ist diese
+Tabelle aktuell **leer** → ohne Seed liefert `resolveViewer` `tenantId=null` und der
+Eigentümer wird aus seinen eigenen Maschinen ausgesperrt (404). Deshalb:
+
+1. **Seed-Migration 0018 ZUERST** (Partner/Auffüller-Zeilen weglassen, wenn deren
+   Mini-Logins unbekannt/nicht vorhanden — der Eigentümer-Default genügt fürs Scharf-
+   schalten):
+   ```bash
+   psql "$DASHBOARD_V2_PG_URL" -v ON_ERROR_STOP=1 <<'SQL'
+   -- optional, nur wenn die echten Mini-Logins bekannt sind:
+   -- SET automatenlager.seed_partner_login  = '<partner-login>';
+   -- SET automatenlager.seed_operator_login = '<auffueller-login>';
+   \i dashboard/db-migrations/0018-seed-tenant-users-platform-admins.sql
+   SQL
+   ```
+   Verifikation: `SELECT login,tenant_id,role FROM automatenlager.tenant_users;`
+   (Eigentümer → `t_faltrix`) und `SELECT login FROM automatenlager.platform_admins;`.
+2. **DANN Code-Deploy:** `git pull --ff-only` auf dem Mini + Container-Restart
+   (`homelab-dashboard`). Optional `DASHBOARD_TENANT_DIR_TTL_MS` setzen (Default 60000).
+3. **Mini-Live-Smoke (Pflicht nach Deploy):**
+   - `GET /health` → `200`, `tenantDirectoryReady: true`.
+   - Eigentümer-Zugriff auf eine Faltrix-Maschine (slot-change/nayax-apply) funktioniert
+     weiter (Regressions-Guard „Owner nicht ausgesperrt").
+   - Break-Glass (Plattform-Admin): `GET` mit `X-Support-Tenant` liefert Lesedaten;
+     ein `POST`/`PUT` unter aktivem Override liefert `403`.
+
+Bis zum Deploy läuft auf dem Mini weiterhin der ALTE Code (TENANT_OWNER-Konstante) —
+nichts ändert sich produktiv, bis Schritt 1+2 bewusst ausgeführt werden.
+
+---
+
 ## Stand: 2026-06-05 Nachmittag — Prävention/Robustheit (4 Maßnahmen) + WF-Monitor-Reparatur
 
 Suite **852/852 grün** (inkl. WF4-Mojibake-Fix, siehe Punkt 5).
