@@ -160,29 +160,24 @@ test('#117 Endpoint: /health 200 ohne PG (Registry nicht anwendbar, Dev/Test)', 
   } finally { child.kill(); }
 });
 
-test('#117 Endpoint: /health 503 bei unerreichbarer DB (fail-closed sichtbar)', async () => {
-  const port = await getFreePort();
-  const child = await startDashboard(port, { DASHBOARD_V2_PG_URL: 'postgresql://nouser:nopass@127.0.0.1:59999/nodb' });
-  try {
-    const res = await request(port, '/health');
-    assert.equal(res.status, 503, 'Registry nicht bereit -> unhealthy');
-    assert.equal(res.json().tenantDirectoryReady, false);
-  } finally { child.kill(); }
-});
-
-test('#117 Endpoint: slot-change/confirm bei unerreichbarer DB -> 503 (kein Default-Fallback)', async () => {
+test('#117 Endpoint: unerreichbare DB -> /health 503 UND slot-change/confirm 503 (fail-closed, kein Default)', async () => {
+  // Ein Child für beide fail-closed-Checks (hält die Anzahl paralleler Spawns niedrig).
   const port = await getFreePort();
   const child = await startDashboard(port, {
     DASHBOARD_V2_PG_URL: 'postgresql://nouser:nopass@127.0.0.1:59999/nodb',
     DASHBOARD_ADMIN_LOGIN: 'admin@example.test',
   });
   try {
-    const res = await request(port, '/api/v2/slot-change/confirm', {
+    const health = await request(port, '/health');
+    assert.equal(health.status, 503, 'Registry nicht bereit -> unhealthy');
+    assert.equal(health.json().tenantDirectoryReady, false);
+
+    const sc = await request(port, '/api/v2/slot-change/confirm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'tailscale-user-login': 'admin@example.test' },
       body: JSON.stringify({ slot_assignment_id: '1', machine_id: 'VM01', mdb_code: 5, new_product_id: 11, new_qty: 10, start_date: '2026-06-01' }),
     });
-    assert.equal(res.status, 503, 'fail-closed: ohne Mandanten-Auflösung kein Schreibzugriff');
-    assert.equal(res.json().error.code, 'TENANT_DIRECTORY_UNAVAILABLE');
+    assert.equal(sc.status, 503, 'fail-closed: ohne Mandanten-Auflösung kein Schreibzugriff');
+    assert.equal(sc.json().error.code, 'TENANT_DIRECTORY_UNAVAILABLE');
   } finally { child.kill(); }
 });

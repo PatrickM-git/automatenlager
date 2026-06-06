@@ -27,7 +27,7 @@ const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buil
 const { buildProductCatalog } = require('./lib/product-catalog.js');
 const { queryEconomicsScopePg } = require('./lib/automaten-view.js');
 const { queryEconomicsLivePg } = require('./lib/economics-live.js');
-const { resolveViewer, objectAccessAllowed } = require('./lib/auth.js');
+const { resolveViewer, objectAccessAllowed, breakGlassDecision } = require('./lib/auth.js');
 const { createTenantDirectory } = require('./lib/tenant-directory.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
@@ -222,7 +222,22 @@ function getViewer(req) {
     env: process.env,
     directory: tenantDirectory,        // #117: reale Mandanten-Auflösung aus der Registry
     requestId: req._requestId || null, // #117: per-Request-id (Audit-Korrelation, #118)
+    supportTenant: req.headers['x-support-tenant'], // #118: Break-Glass-Override (untraut)
   });
+}
+
+// #118: Break-Glass-Audit-Pflichtfelder (an die bestehende Senke andocken). auditAction
+// ergänzt timestamp + login(=viewer) + outcome; hier die übrigen SPEC-Pflichtfelder.
+function breakGlassAuditFields(viewer, req, parsed) {
+  return {
+    homeTenant: (viewer && viewer.homeTenantId) || null,
+    targetTenant: (viewer && viewer.supportSession && viewer.supportSession.targetTenant) || null,
+    endpoint: parsed && parsed.pathname,
+    method: req.method,
+    sourceAddress: (req.socket && req.socket.remoteAddress) || null,
+    requestId: (viewer && viewer.requestId) || req._requestId || null,
+    denyReason: (viewer && viewer.supportSession && viewer.supportSession.denyReason) || null,
+  };
 }
 
 // Issue #28: zentrale serverseitige Fähigkeits-Durchsetzung. Liefert true, wenn
@@ -1960,6 +1975,25 @@ const server = http.createServer(async (req, res) => {
       });
       return;
     }
+
+    // #118: Break-Glass-Durchsetzung — zentral VOR allen Endpunkten. Greift nur,
+    // wenn der X-Support-Tenant-Header gesetzt ist; auditiert jeden Fall an die
+    // bestehende Senke. Aktiver Override + Schreibmethode ⇒ 403 (read-only);
+    // nicht-existenter Ziel-Mandant ⇒ 404; ungültiger Header (kein Admin / untrauter
+    // Pfad) ⇒ ignoriert (Heimat-Mandant), aber auditiert.
+    if (req.headers['x-support-tenant']) {
+      const bgViewer = getViewer(req);
+      const bg = breakGlassDecision(bgViewer, req.method);
+      if (bg.kind !== 'none') {
+        auditAction(bgViewer, bg.auditEvent, breakGlassAuditFields(bgViewer, req, parsed), bg.outcome);
+        if (bg.kind === 'block') {
+          sendJson(res, bg.status, { ok: false, error: { code: bg.code, message: bg.status === 404 ? 'Mandant nicht gefunden.' : 'Support-Sitzung ist nur-lesend.' } });
+          return;
+        }
+        // 'allow' (lesender Override) / 'ignore' (entwerteter Header): Request läuft weiter.
+      }
+    }
+
     if (parsed.pathname === '/api/dashboard') {
       const viewer = getViewer(req);
       auditGuestAccess(viewer, 'dashboard_view');
