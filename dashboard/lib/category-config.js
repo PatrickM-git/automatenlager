@@ -195,24 +195,23 @@ function buildEffectiveConfig(override = {}, defaults = DEFAULT_CONFIG) {
 
 const SETTINGS_TABLE = 'automatenlager.classification_settings';
 
-// Frische DBs bekommen die Tabelle direkt mit der angeglichenen Spalte `tenant_id`
-// (#96). Bestehende DBs vor dem Deploy von Migration 0009 tragen noch `mandant_id`
-// — CREATE IF NOT EXISTS ist dort ein No-Op, und tenantColumn() unten erkennt den
-// realen Spaltennamen. So bleibt der Code gegen beide Schema-Zustände korrekt,
-// ohne die Produktions-DB anzufassen.
+// classification_settings trägt in Stufe 1 weiterhin `mandant_id` (die Angleichung
+// auf tenant_id ist auf Stufe 6 verschoben, weil WF8 mandant_id hartcodiert liest).
+// CREATE IF NOT EXISTS ist auf der bestehenden DB ohnehin ein No-Op; tenantColumn()
+// erkennt den realen Spaltennamen, sodass der Code auch nach der späteren
+// Angleichung (tenant_id) ohne Änderung weiterläuft.
 const CREATE_SETTINGS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS automatenlager.classification_settings (
-    tenant_id text PRIMARY KEY,
+    mandant_id text PRIMARY KEY,
     config jsonb NOT NULL DEFAULT '{}'::jsonb,
     updated_at timestamptz NOT NULL DEFAULT now()
   )
 `;
 
-// Übergangsbrücke (#96): liefert den real existierenden Mandanten-Spaltennamen.
-// Ziel ist `tenant_id`; `mandant_id` ist der Legacy-Name bis Migration 0009
-// deployt ist. Strikt auf diese zwei Whitelist-Werte beschränkt (keine Injection).
-// Nach dem Deploy liefert die Funktion immer 'tenant_id' — der Fallback ist dann
-// toter Code und kann in einer Folgestufe entfernt werden.
+// Brücke: liefert den real existierenden Mandanten-Spaltennamen. In Stufe 1 ist das
+// `mandant_id`; nach der Angleichung in Stufe 6 wird es `tenant_id`. Strikt auf diese
+// zwei Whitelist-Werte beschränkt (keine Injection). So bleibt der Code gegen beide
+// Schema-Zustände korrekt.
 async function tenantColumn(client) {
   const res = await client.query(
     `SELECT column_name FROM information_schema.columns

@@ -54,8 +54,9 @@ DECLARE
     'machines','locations','machine_profiles','slot_assignments','products',
     'product_aliases','product_change_proposals','stock_batches','stock_movements',
     'sales_transactions','guv_daily','warnings','invoices','invoice_items','suppliers',
-    'nayax_devices','workflow_state','prices','settings_thresholds',
-    'classification_settings','warehouses'
+    'nayax_devices','workflow_state','prices','settings_thresholds','warehouses'
+    -- classification_settings ausgenommen: traegt in Stufe 1 mandant_id (kein
+    -- tenant_id-FK moeglich); kommt mit der Angleichung in Stufe 6.
   ];
 BEGIN
   FOREACH t IN ARRAY tabs LOOP

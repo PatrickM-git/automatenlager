@@ -53,10 +53,12 @@ BEGIN
   END LOOP;
 
   -- 3. Config-Tabellen: '__default__'-Config auf 't_faltrix' KOPIEREN (Vorlage bleibt).
+  -- classification_settings traegt in Stufe 1 weiter mandant_id (Umbenennung erst
+  -- Stufe 6, sonst braeche WF8). Kopie der __default__-Vorlage auf den realen Mandant.
   EXECUTE format(
-    'INSERT INTO automatenlager.classification_settings (tenant_id, config, updated_at)
-       SELECT %L, config, now() FROM automatenlager.classification_settings WHERE tenant_id = %L
-     ON CONFLICT (tenant_id) DO NOTHING', v_tenant, v_old);
+    'INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
+       SELECT %L, config, now() FROM automatenlager.classification_settings WHERE mandant_id = %L
+     ON CONFLICT (mandant_id) DO NOTHING', v_tenant, v_old);
   EXECUTE format(
     'INSERT INTO automatenlager.settings_thresholds (tenant_id, machine_id, key, value, updated_at)
        SELECT %L, machine_id, key, value, now() FROM automatenlager.settings_thresholds WHERE tenant_id = %L

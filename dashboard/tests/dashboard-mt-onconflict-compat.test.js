@@ -33,7 +33,9 @@ const CASES = [
   ['nayax_devices', "(nayax_machine_id) VALUES ('x')", '(nayax_machine_id)'],
   ['locations', "(location_key) VALUES ('x')", '(location_key)'],
   ['machines', "(machine_key) VALUES ('x')", '(machine_key)'],
-  ['classification_settings', "(tenant_id) VALUES ('x')", '(tenant_id)'],
+  // classification_settings traegt in Stufe 1 weiter mandant_id (Dashboard nutzt
+  // ON CONFLICT (mandant_id) via tenantColumn-Bruecke).
+  ['classification_settings', "(mandant_id) VALUES ('x')", '(mandant_id)'],
 ];
 
 test('ON-CONFLICT-Kompat: alle Schreibpfad-Konfliktziele bleiben nach 0007-0017 gültig (kein 42P10)', async (t) => {

@@ -43,24 +43,13 @@ BEGIN
 END $$;
 
 -- ──────────────────────────────────────────────────────────────────────────────
--- Angleichung: classification_settings.mandant_id -> tenant_id (einheitlicher
--- Spaltenname ueberall). Idempotent (nur umbenennen, wenn alt da & neu fehlt).
--- Der PK-Constraint (classification_settings_pkey) bleibt erhalten.
--- ──────────────────────────────────────────────────────────────────────────────
-DO $$
-BEGIN
-  IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-         WHERE table_schema='automatenlager' AND table_name='classification_settings'
-           AND column_name='mandant_id')
-     AND NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-         WHERE table_schema='automatenlager' AND table_name='classification_settings'
-           AND column_name='tenant_id')
-  THEN
-    ALTER TABLE automatenlager.classification_settings RENAME COLUMN mandant_id TO tenant_id;
-  END IF;
-END $$;
-
-COMMENT ON COLUMN automatenlager.classification_settings.tenant_id IS
-  'Mandant (angeglichen von mandant_id in 0009). UI-/Fachbegriff bleibt "Mandant".';
+-- ANGLEICHUNG classification_settings.mandant_id -> tenant_id: BEWUSST NICHT in
+-- Stufe 1. Grund (Deploy-Pruefung): WF8 (GuV-Aggregator, alle 15 Min) liest
+-- hartcodiert `SELECT config FROM classification_settings WHERE mandant_id=...`.
+-- Eine Umbenennung wuerde WF8 mit "column mandant_id does not exist" brechen
+-- (Story 23). Die Spalte bleibt daher `mandant_id`; der Dashboard-Code liest sie
+-- ueber die Bruecke category-config.js::tenantColumn() (erkennt mandant_id).
+-- Die Angleichung auf tenant_id erfolgt mit der n8n-Abloesung in Stufe 6
+-- (gleicher Zeitpunkt wie der Drop der globalen (key)-Uniques, Issue #111).
+-- classification_settings ist daher von der Tenant-Pflicht-Liste (db-schema.js)
+-- in Stufe 1 ausgenommen — es traegt seine Mandanten-Dimension als `mandant_id`.

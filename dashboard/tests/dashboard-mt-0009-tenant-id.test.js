@@ -26,12 +26,15 @@ test('#96 tablesMissingTenantId: meldet Pflicht-Tabelle ohne tenant_id, ignorier
 
 test('#96 TENANT_REQUIRED_TABLES enthält die operativen Pflicht-Tabellen inkl. stock_movements', () => {
   for (const t of ['machines', 'products', 'sales_transactions', 'stock_batches', 'stock_movements',
-    'prices', 'warnings', 'classification_settings', 'settings_thresholds', 'warehouses']) {
+    'prices', 'warnings', 'settings_thresholds', 'warehouses']) {
     assert.ok(TENANT_REQUIRED_TABLES.includes(t), `${t} ist Pflicht`);
   }
   // Ausnahmen sind NICHT in der Liste.
   assert.ok(!TENANT_REQUIRED_TABLES.includes('tenants'), 'tenants (PK=tenant_id) ausgenommen');
   assert.ok(!TENANT_REQUIRED_TABLES.includes('platform_admins'), 'platform_admins ausgenommen');
+  // classification_settings traegt mandant_id bis Stufe 6 -> bewusst NICHT Pflicht.
+  assert.ok(!TENANT_REQUIRED_TABLES.includes('classification_settings'),
+    'classification_settings ausgenommen (mandant_id bis Stufe 6)');
 });
 
 // ── LIVE-Sandbox: Migration anwenden, Vollständigkeit prüfen ──────────────────
@@ -60,7 +63,7 @@ test('#96 LIVE-Sandbox: nach 0009 trägt jede Pflicht-Tabelle tenant_id TEXT NOT
   });
 });
 
-test('#96 LIVE-Sandbox: classification_settings.mandant_id ist zu tenant_id angeglichen', async (t) => {
+test('#96 LIVE-Sandbox: classification_settings behält mandant_id (Angleichung erst Stufe 6, schützt WF8)', async (t) => {
   await inSandbox(t, async (client) => {
     await applyMigration(client, 7);
     await applyMigration(client, 8);
@@ -70,20 +73,20 @@ test('#96 LIVE-Sandbox: classification_settings.mandant_id ist zu tenant_id ange
       `SELECT column_name FROM information_schema.columns
         WHERE table_schema='automatenlager' AND table_name='classification_settings'`);
     const names = cols.rows.map((r) => r.column_name);
-    assert.ok(names.includes('tenant_id'), 'tenant_id existiert');
-    assert.ok(!names.includes('mandant_id'), 'mandant_id ist weg (umbenannt)');
+    assert.ok(names.includes('mandant_id'), 'mandant_id bleibt erhalten (WF8 liest es hartcodiert)');
+    assert.ok(!names.includes('tenant_id'), 'tenant_id wird in Stufe 1 NICHT angelegt (Umbenennung erst Stufe 6)');
 
-    // Übergangsbrücke erkennt jetzt tenant_id.
-    assert.equal(await tenantColumn(client), 'tenant_id', 'tenantColumn() liefert tenant_id nach 0009');
+    // Die Brücke erkennt den realen Spaltennamen (mandant_id).
+    assert.equal(await tenantColumn(client), 'mandant_id', 'tenantColumn() liefert mandant_id in Stufe 1');
 
-    // PK bleibt erhalten (jetzt auf tenant_id).
+    // PK bleibt auf mandant_id.
     const pk = await client.query(
       `SELECT a.attname FROM pg_constraint con
          JOIN pg_class c ON c.oid=con.conrelid
          JOIN pg_namespace n ON n.oid=c.relnamespace
          JOIN pg_attribute a ON a.attrelid=con.conrelid AND a.attnum=ANY(con.conkey)
         WHERE n.nspname='automatenlager' AND c.relname='classification_settings' AND con.contype='p'`);
-    assert.equal(pk.rows[0].attname, 'tenant_id', 'PK steht jetzt auf tenant_id');
+    assert.equal(pk.rows[0].attname, 'mandant_id', 'PK bleibt mandant_id');
   });
 });
 
