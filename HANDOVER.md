@@ -2,6 +2,19 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
+## Nachtrag (2026-06-07, später) — Feature „Inline-Inventur" (#152) LIVE
+
+`/lager`: **Chargenrest pro Charge inline editierbar** (gezählter Lager-Ist; Klick auf
+den Wert → Dialog → speichern). Ändert **nur `remaining_qty`**, NIE `machine_qty`
+(„Im Automaten" = Nayax). Das **Drift-⚠** (Chargenrest-vs-Nayax) ist entfernt (verglich
+Lager gegen Maschine). `lib/inventory-count.js` (`setBatchCountPg` via `db.tx`,
+0..initial_qty, optimistic lock) + `POST /api/v2/inventory/set-count` (`bestand.schreiben`,
+durch die Tür/RLS, JSONL-Audit) + `public/v3.js`. Migration **0016** auf
+`DROP MATERIALIZED VIEW … CASCADE` (Security-View hängt seit Stufe 5 dran). PR #153
+gemergt, Mini `324b08f`, Suite **1089/1089**, Endpoint live (403-Gate verifiziert).
+**Hinweis:** Lokale Preview konnte die daten-gegatete UI nicht zeigen (Dev-Admin ist
+mandantenlos → leer); auf dem Mini (echter Mandant + Admin) rendert sie real.
+
 ## Stand: 2026-06-07 — Mandantenfähigkeit STUFE 5 „RLS-Backstop" — KOMPLETT, LIVE & VERIFIZIERT
 
 Row-Level-Security als unumgehbarer Backstop für **Lesen UND Schreiben** ist umgesetzt,
