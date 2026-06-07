@@ -261,7 +261,10 @@ test('AC7: POST /api/v2/correction-action/confirm returns 403 for guest', async 
 
 test('AC8: POST /api/v2/correction-action/confirm returns 200 for admin (no webhook configured)', async (t) => {
   const port = await getFreePort();
-  const child = await startDashboard(port);
+  // #134: ohne PG ist das Case-Tor inaktiv (kein Mandanten-Datenbestand) — dieser Test
+  // prüft Payload/Status-Verhalten, NICHT die Case-Eigentümerschaft (separat in
+  // dashboard-mt-webhook-tore-case.test.js). Hermetisch, ohne Mini-Abhängigkeit.
+  const child = await startDashboard(port, { DASHBOARD_V2_PG_URL: '' });
   t.after(() => child.kill());
 
   const res = await request(port, '/api/v2/correction-action/confirm', {
@@ -293,6 +296,7 @@ test('AC10: POST /api/v2/correction-action/confirm returns 502 when webhook fail
   const port = await getFreePort();
   const child = await startDashboard(port, {
     CORRECTION_ACTION_WEBHOOK_URL: 'http://127.0.0.1:1/unreachable',
+    DASHBOARD_V2_PG_URL: '', // #134: Case-Tor inaktiv ohne PG — Test prüft Webhook-Fehlerpfad
   });
   t.after(() => child.kill());
 
@@ -308,7 +312,7 @@ test('AC10: POST /api/v2/correction-action/confirm returns 502 when webhook fail
 
 test('AC11: action_key is idempotent - same confirm produces same action_key', async (t) => {
   const port = await getFreePort();
-  const child = await startDashboard(port);
+  const child = await startDashboard(port, { DASHBOARD_V2_PG_URL: '' }); // #134: Case-Tor inaktiv ohne PG
   t.after(() => child.kill());
 
   const confirmBody = { case_id: 'proposal_1', case_type: 'mdb_proposal', machine_id: 10001, mdb_code: 102, old_product_id: 7, slot_assignment_id: 55, confirmed_product_id: 8 };

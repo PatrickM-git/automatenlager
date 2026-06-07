@@ -440,6 +440,38 @@ async function requireMachineAccess(viewer, machineKey, res, event) {
   return requireObjectAccess(viewer, objectTenantId, res, event);
 }
 
+// #134 (Stufe 4, IDOR — NICHT-Maschinen-Parent): Korrektur-Cases sind KEINE Tabelle,
+// sondern konstruiert (proposal_/unknown_/warning_) und werden tenant-gefiltert über
+// queryCorrectionCasesPg gelesen. Das Tor prüft, dass die übergebene case_id in der
+// tenant-gefilterten Case-Liste des Viewers liegt (exakt die Komposition des
+// Lesepfads). Taxonomie:
+//   * kein PG konfiguriert ⇒ Tor INAKTIV (Dev/Test: es existieren gar keine Cases;
+//     Produktion hat IMMER PG, dort läuft das Tor stets). Asymmetrie zu
+//     requireMachineAccess bewusst: eine machine_id ist immer client-geliefert und
+//     muss fail-closed aufgelöst werden; eine Case-Mitgliedschaft ohne Datenbasis
+//     ist gegenstandslos.
+//   * PG da, Verzeichnis/DB nicht bereit / Lookup-Fehler ⇒ 503 (fail-closed, kein Default)
+//   * case_id nicht in der Mandanten-Case-Liste ⇒ 404 (kein Existenz-Leak) + Audit
+// Liefert true (Zugriff erlaubt / inaktiv) oder false (Antwort bereits gesendet).
+async function requireCaseAccess(viewer, caseId, res, event) {
+  if (!tenantDb) return true; // kein PG ⇒ Dev/Test, Tor inaktiv (Produktion hat immer PG)
+  if (!tenantReadReady(res)) return false; // PG da, aber nicht bereit ⇒ 503
+  let cases;
+  try {
+    ({ cases } = buildCorrectionCases(await queryCorrectionCasesPg(tenantDb, viewer.tenantId)));
+  } catch (err) {
+    auditDenied(viewer, event, { caseId, reason: 'case_lookup_failed' });
+    sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: 'Fall-Auflösung fehlgeschlagen. Bitte später erneut.' } });
+    return false;
+  }
+  if (!cases.some((c) => c.case_id === caseId)) {
+    auditDenied(viewer, event, { caseId });
+    sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: 'Fall nicht gefunden.' } });
+    return false;
+  }
+  return true;
+}
+
 // #123 (Stufe 3): technische Bereitschaft der mandanten-getrennten Lesepfade.
 // Ist PG konfiguriert, aber das Mandanten-Verzeichnis NICHT bereit (z. B. DB
 // unerreichbar), kann der effektive Mandant nicht aufgelöst werden ⇒ die Tür würde
@@ -3675,12 +3707,17 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON.' } });
         return;
       }
+      // #134 (Stufe 4): Mandant kommt NUR aus dem Viewer — tenant_id/mandant_id im Body ⇒ 400 + Audit.
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
       const { case_id, case_type, machine_id, mdb_code, old_product_id, slot_assignment_id, confirmed_product_id } = body || {};
       const validation = validateCorrectionAction({ confirmed_product_id });
       if (!validation.valid) {
         sendJson(res, 400, { ok: false, error: { code: 'VALIDATION_ERROR', message: validation.errors.map((e) => e.message).join(' '), errors: validation.errors } });
         return;
       }
+      // #134 (Stufe 4, IDOR — Case-Parent): case_id muss in der tenant-gefilterten
+      // Case-Liste des Viewers liegen; fremd/unbekannt ⇒ 404 + Audit, BEVOR n8n läuft.
+      if (!(await requireCaseAccess(viewer, case_id, res, 'idor:correction-action'))) return;
       const correctionCase = { case_id, case_type, machine_id, mdb_code, product_id: old_product_id, slot_assignment_id };
       const payload = buildCorrectionActionPayload(correctionCase, { confirmed_product_id });
       const webhookUrl = process.env.CORRECTION_ACTION_WEBHOOK_URL;
@@ -3884,10 +3921,24 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON.' } });
         return;
       }
+      // #134 (Stufe 4): Mandant kommt NUR aus dem Viewer — tenant_id/mandant_id im Body ⇒ 400 + Audit.
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
       const { product_key, case_id, affected_tx_count } = body || {};
       const validation = validateOnboardingStart({ product_key });
       if (!validation.valid) {
         sendJson(res, 400, { ok: false, error: { code: 'VALIDATION_ERROR', message: validation.errors.map((e) => e.message).join(' '), errors: validation.errors } });
+        return;
+      }
+      // #134 (Stufe 4, IDOR): Mit case_id (= unknown_<product_key>) ⇒ Mitgliedschaftsprüfung
+      // in der tenant-gefilterten Case-Liste (fremd ⇒ 404). Ohne case_id gibt es KEIN
+      // adressierbares fremdes Objekt (product_key ist ein noch unbekanntes Nayax-Label,
+      // nicht in products) ⇒ Minimum: ein gesetzter Viewer-Mandant; der Mandant wird
+      // ausschließlich aus dem Viewer bestimmt.
+      if (case_id) {
+        if (!(await requireCaseAccess(viewer, case_id, res, 'idor:onboarding'))) return;
+      } else if (!viewer.tenantId) {
+        auditDenied(viewer, 'idor:onboarding', { reason: 'no_tenant_context' });
+        sendJson(res, 403, { ok: false, error: { code: 'NO_TENANT_CONTEXT', message: 'Kein Mandanten-Kontext für das Onboarding.' } });
         return;
       }
       const unknownCase = { case_id: case_id || `unknown_${product_key}`, product_key };
