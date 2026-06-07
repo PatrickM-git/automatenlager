@@ -3,6 +3,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+const { createTenantDb } = require('../lib/tenant-db.js'); // #127: queryLocationsPg ist jetzt tür-basiert
+
 const {
   queryLocationsPg,
   upsertLocationPg,
@@ -15,6 +17,7 @@ const {
 const REAL_LOCATION_COLUMNS = [
   'location_id', 'location_key', 'name', 'location_type', 'address',
   'customer_group', 'opening_hours', 'notes', 'created_at', 'updated_at',
+  'tenant_id', // #127: reale Spalte (Migration 0009) — vom Mandanten-Filter genutzt
 ];
 
 // Emuliert die Spaltenprüfung von Postgres: jede mit `l.` qualifizierte
@@ -62,7 +65,9 @@ test('REGRESSION: queryLocationsPg referenziert nur real existierende locations-
   ]);
 
   // Vor dem Fix warf dies "column \"status\" does not exist"; jetzt läuft es durch.
-  const profiles = await queryLocationsPg('postgresql://fake/db', () => fake);
+  // #127: durch die Mandanten-Tür (fake-Client als query-Quelle gewrappt).
+  const db = createTenantDb({ query: (s, p) => fake.query(s, p) });
+  const profiles = await queryLocationsPg(db, 'acme');
 
   assert.equal(profiles.length, 1);
   assert.equal(profiles[0].name, 'DPFA Weiterbildung Chemnitz');
@@ -70,12 +75,12 @@ test('REGRESSION: queryLocationsPg referenziert nur real existierende locations-
   assert.deepEqual(profiles[0].machine_ids, ['1', '2']);
   assert.equal(profiles[0].target_group, null);
   assert.equal(profiles[0].start_date, null);
-  assert.equal(fake.connected, true);
-  assert.equal(fake.ended, true);
 
   // machine_ids/target_group werden aus dem realen Schema abgeleitet.
   assert.match(fake.calls[0].sql, /automatenlager\.machines/);
   assert.match(fake.calls[0].sql, /customer_group/);
+  // #127: Mandanten-Filter ist im SELECT verankert.
+  assert.match(fake.calls[0].sql, /l\.tenant_id = \$1/);
 });
 
 test('REGRESSION-GUARD: die Spaltenprüfung erkennt eine wieder eingeführte status-Spalte', () => {
@@ -93,7 +98,7 @@ test('queryLocationsPg-Ergebnis ist direkt mit buildLocationComparison kompatibe
   const fake = makeFakeClient([
     { location_id: '1', name: 'Standort A', notes: null, target_group: 'Schule', start_date: null, machine_ids: ['VM01'], status: 'aktiv' },
   ]);
-  const profiles = await queryLocationsPg('x', () => fake);
+  const profiles = await queryLocationsPg(createTenantDb({ query: (s, p) => fake.query(s, p) }), 'acme');
   const cmp = buildLocationComparison(profiles, [
     { machine_id: 'VM01', revenue_net: 100, db_net: 30, qty: 10, slot_turnover: 1, inventory_value: 50 },
   ]);

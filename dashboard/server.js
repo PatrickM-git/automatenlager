@@ -472,7 +472,7 @@ function mergeSettingsOverride(current = {}, incoming = {}) {
 // liest PG (aktive Slots + Nayax-Aliase + Produktnamen) und baut den Diff über
 // die getestete reine Logik in lib/nayax-abgleich.js. Wirft bei Webhook-/PG-
 // Fehlern (mit err.code) -> der Aufrufer mappt auf HTTP-Status.
-async function computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey) {
+async function computeNayaxAbgleichDiff(db, tenant, webhookUrl, machineKey) {
   const wfResp = await fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -493,25 +493,18 @@ async function computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey) {
     || [];
   const nayaxItems = normalizeNayaxItems(Array.isArray(rawItems) ? rawItems : []);
 
-  const { Client } = require('pg');
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  let pgSlots; let aliasRows; let idAliasRows; let productRows;
-  try {
-    const slotsQ = buildActiveSlotsQuery({ machineKey });
-    const aliasQ = buildNayaxAliasesQuery();
-    const idAliasQ = buildNayaxIdAliasesQuery();
-    const prodQ = buildProductsByIdQuery();
-    const [sRes, aRes, idRes, pRes] = await Promise.all([
-      client.query(slotsQ.text, slotsQ.values),
-      client.query(aliasQ.text, aliasQ.values),
-      client.query(idAliasQ.text, idAliasQ.values),
-      client.query(prodQ.text, prodQ.values),
-    ]);
-    pgSlots = sRes.rows; aliasRows = aRes.rows; idAliasRows = idRes.rows; productRows = pRes.rows;
-  } finally {
-    await client.end();
-  }
+  // #127: 4 Reads durch die Mandanten-Tür (tenant_id-Filter in den Buildern, Mandant=$1).
+  const slotsQ = buildActiveSlotsQuery({ machineKey });
+  const aliasQ = buildNayaxAliasesQuery();
+  const idAliasQ = buildNayaxIdAliasesQuery();
+  const prodQ = buildProductsByIdQuery();
+  const [sRes, aRes, idRes, pRes] = await Promise.all([
+    db.read({ tenant, tables: ['slot_assignments', 'products', 'machines'], text: slotsQ.text, params: slotsQ.values }),
+    db.read({ tenant, tables: ['product_aliases'], text: aliasQ.text, params: aliasQ.values }),
+    db.read({ tenant, tables: ['product_aliases'], text: idAliasQ.text, params: idAliasQ.values }),
+    db.read({ tenant, tables: ['products'], text: prodQ.text, params: prodQ.values }),
+  ]);
+  const pgSlots = sRes.rows; const aliasRows = aRes.rows; const idAliasRows = idRes.rows; const productRows = pRes.rows;
   const aliasIndex = buildAliasIndex(aliasRows);
   const idIndex = buildNayaxIdIndex(idAliasRows);
   // Fallback-Match ueber products.name (Produkte ohne gepflegten nayax-Alias).
@@ -3393,13 +3386,15 @@ const server = http.createServer(async (req, res) => {
     // ── Locations routes ──────────────────────────────────────────────────────
 
     if (parsed.pathname === '/api/v2/locations' && req.method === 'GET') {
+      const viewer = getViewer(req); // #127: Mandant für die Standort-Liste
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const profiles = await queryLocationsPg(pgUrl);
+        const profiles = await queryLocationsPg(tenantDb, viewer.tenantId);
         const kpiRows = [];
         const comparison = buildLocationComparison(profiles, kpiRows);
         sendJson(res, 200, {
@@ -3453,7 +3448,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       try {
-        const data = await queryMachineProfilesPg(pgUrl);
+        if (!tenantReadReady(res)) return;
+        const data = await queryMachineProfilesPg(tenantDb, viewer.tenantId);
         sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), data, options, is_admin: viewer.canTriggerActions });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
@@ -3569,10 +3565,11 @@ const server = http.createServer(async (req, res) => {
     // #3: Verfügbare Nayax-Geräte fürs Anlege-Combobox (liest den DB-Spiegel,
     // markiert bereits angelegte). Leere Liste -> Frontend fällt auf Freitext.
     if (parsed.pathname === '/api/v2/nayax-devices' && req.method === 'GET') {
+      const viewer = getViewer(req); // #127: Mandant für die nutzersichtbare Geräte-Liste
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) { sendJson(res, 200, { ok: true, data: [] }); return; }
       try {
-        const rows = await queryNayaxDevicesPg(pgUrl);
+        const rows = await queryNayaxDevicesPg(tenantDb, viewer.tenantId);
         sendJson(res, 200, { ok: true, data: shapeNayaxDevices(rows) });
       } catch (err) {
         sendJson(res, 200, { ok: true, data: [], error: { code: 'PG_ERROR', message: err.message } });
@@ -3704,6 +3701,7 @@ const server = http.createServer(async (req, res) => {
     // Vorschau (read-only, auch für Gäste): vollständiger Diff aus Slotbelegung
     // (Umbuchung alt->neu) + Menge (alt->neu) + Onboarding-Liste + PG-only-Slots.
     if (parsed.pathname === '/api/v2/nayax-abgleich/preview' && req.method === 'GET') {
+      const viewer = getViewer(req); // #127: Mandant für den Nayax-Abgleich-Preview
       const machineKey = clean(parsed.query.machine || parsed.query.machine_id || '');
       if (!machineKey) {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_PARAMS', message: 'machine (Nayax-Nummer) erforderlich.' } });
@@ -3719,8 +3717,9 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 503, { ok: false, error: { code: 'NAYAX_WEBHOOK_UNCONFIGURED', message: 'NAYAX_ABGLEICH_WEBHOOK_URL nicht gesetzt.' } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const { diff } = await computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey);
+        const { diff } = await computeNayaxAbgleichDiff(tenantDb, viewer.tenantId, webhookUrl, machineKey);
         sendJson(res, 200, { ok: true, ...diff });
       } catch (err) {
         const code = err.code === 'NAYAX_WEBHOOK_ERROR' ? 502 : 503;
@@ -3772,7 +3771,7 @@ const server = http.createServer(async (req, res) => {
       }
       let plan; let diff; let events;
       try {
-        const result = await computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey);
+        const result = await computeNayaxAbgleichDiff(tenantDb, viewer.tenantId, webhookUrl, machineKey);
         diff = result.diff;
         plan = buildApplyPlan(diff);
         const nowIso = new Date().toISOString();
@@ -4069,10 +4068,15 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
+  // #127: Mandanten-Registry VOR dem Ready-Signal laden. Der Server lauscht bereits;
+  // nur das „running"-Log (Bereitschafts-Signal für Aufrufer/Tests) verschiebt sich,
+  // bis die Registry ready/failed ist. Sonst läuft ein sofort feuernder Aufrufer in
+  // das Startup-Race „Verzeichnis noch nicht bereit ⇒ 503" der tenant-getrennten
+  // Lesepfade. initTenantDirectory ist fail-closed und wirft nicht (fängt intern);
+  // ohne konfiguriertes PG kehrt es sofort zurück.
+  await initTenantDirectory(); // #117: Mandanten-Registry laden (fail-closed)
   console.log(`Automatenlager dashboard running at http://localhost:${PORT}`);
-  // Nicht awaiten: Startup nicht blockieren, nur informativ loggen.
-  initTenantDirectory(); // #117: Mandanten-Registry laden (non-blocking, fail-closed)
   logStartupSchemaCheck();
   logStartupStockCostCheck();
 });

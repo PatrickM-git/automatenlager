@@ -70,22 +70,24 @@ function shapeNayaxDevices(dbRows) {
   }));
 }
 
-async function queryNayaxDevicesPg(pgUrl, clientFactory) {
-  const { Client } = require('pg');
-  const client = clientFactory ? clientFactory(pgUrl) : new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  try {
-    const res = await client.query(
+// #127 (Stufe 3): nutzersichtbarer Geräte-Read mandantengetrennt durch die Tür
+// (nayax_devices ist als Geräte-ZUORDNUNG mandantenpflichtig). Mandant = $1. Die
+// reine Existenz-/Claiming-Eindeutigkeitsprüfung (global) ist ein separater Pfad
+// (Onboarding/Stufe 6) und bleibt von der Tür unberührt.
+async function queryNayaxDevicesPg(db, tenant) {
+  const res = await db.read({
+    tenant,
+    tables: ['nayax_devices', 'machines'],
+    text:
       `SELECT d.nayax_machine_id, d.machine_number, d.machine_name,
               (m.machine_key IS NOT NULL) AS already_created
          FROM automatenlager.nayax_devices d
-         LEFT JOIN automatenlager.machines m ON m.machine_key = d.nayax_machine_id
+         LEFT JOIN automatenlager.machines m ON m.machine_key = d.nayax_machine_id AND m.tenant_id = d.tenant_id
+        WHERE d.tenant_id = $1
         ORDER BY already_created, d.machine_name NULLS LAST, d.nayax_machine_id`,
-    );
-    return res.rows;
-  } finally {
-    await client.end();
-  }
+    params: [],
+  });
+  return res.rows;
 }
 
 module.exports = {

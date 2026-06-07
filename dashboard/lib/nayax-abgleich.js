@@ -470,13 +470,15 @@ function buildAbgleichAuditEntry(viewer, payload, result) {
  * Aktive slot_assignments je Automat (Nayax-Nummer machine_key, parametrisch).
  * Liefert genau die Spalten, die buildAbgleichDiff als pgSlots konsumiert.
  */
+// #127 (Stufe 3): durch die Mandanten-Tür gelesen — Mandant = $1 (Tür stellt ihn voran),
+// eigene Parameter folgen ab $2. tenant_id-Filter + mandanten-treue Joins.
 function buildActiveSlotsQuery(opts = {}) {
   const raw = opts.machineKey;
   const machineKey = raw != null && String(raw).trim() !== '' ? String(raw).trim() : null;
   const values = machineKey ? [machineKey] : [];
   const where = machineKey
-    ? 'WHERE sa.active = TRUE AND m.machine_key = $1'
-    : 'WHERE sa.active = TRUE';
+    ? 'WHERE sa.active = TRUE AND sa.tenant_id = $1 AND m.machine_key = $2'
+    : 'WHERE sa.active = TRUE AND sa.tenant_id = $1';
 
   const text = `
     SELECT
@@ -491,39 +493,39 @@ function buildActiveSlotsQuery(opts = {}) {
       sa.machine_capacity     AS machine_capacity,
       sa.product_slot_key     AS product_slot_key
     FROM automatenlager.slot_assignments sa
-    JOIN automatenlager.products p ON p.product_id = sa.product_id
-    JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
+    JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
+    JOIN automatenlager.machines m ON m.machine_id = sa.machine_id AND m.tenant_id = sa.tenant_id
     ${where}
     ORDER BY sa.mdb_code`;
 
   return { text, values };
 }
 
-/** Alle Nayax-Aliase (source='nayax') mit ihrem product_id, fuers Matching. */
+/** Alle Nayax-Aliase (source='nayax') mit ihrem product_id, fuers Matching. Mandant=$1. */
 function buildNayaxAliasesQuery() {
   const text = `
     SELECT
       a.alias       AS alias,
       a.product_id  AS product_id
     FROM automatenlager.product_aliases a
-    WHERE a.source = 'nayax'
+    WHERE a.source = 'nayax' AND a.tenant_id = $1
     ORDER BY a.product_id, a.alias`;
   return { text, values: [] };
 }
 
-/** Nayax-ID-Aliase (source='nayax_id'): NayaxProductID -> product_id (Issue #18). */
+/** Nayax-ID-Aliase (source='nayax_id'): NayaxProductID -> product_id (Issue #18). Mandant=$1. */
 function buildNayaxIdAliasesQuery() {
   const text = `
     SELECT
       a.alias       AS alias,
       a.product_id  AS product_id
     FROM automatenlager.product_aliases a
-    WHERE a.source = 'nayax_id'
+    WHERE a.source = 'nayax_id' AND a.tenant_id = $1
     ORDER BY a.product_id, a.alias`;
   return { text, values: [] };
 }
 
-/** product_id -> name, fuer die Aufloesung neuer Produktnamen im Diff. */
+/** product_id -> name, fuer die Aufloesung neuer Produktnamen im Diff. Mandant=$1. */
 function buildProductsByIdQuery() {
   const text = `
     SELECT
@@ -531,6 +533,7 @@ function buildProductsByIdQuery() {
       p.name         AS name,
       p.product_key  AS product_key
     FROM automatenlager.products p
+    WHERE p.tenant_id = $1
     ORDER BY p.product_id`;
   return { text, values: [] };
 }

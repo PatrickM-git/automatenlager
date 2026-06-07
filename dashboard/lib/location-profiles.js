@@ -91,7 +91,8 @@ const LOCATIONS_SELECT_SQL = `
       ELSE 'geplant'
     END AS status
   FROM automatenlager.locations l
-  LEFT JOIN automatenlager.machines m ON m.location_id = l.location_id
+  LEFT JOIN automatenlager.machines m ON m.location_id = l.location_id AND m.tenant_id = l.tenant_id
+  WHERE l.tenant_id = $1
   GROUP BY l.location_id, l.name, l.notes, l.customer_group
   ORDER BY l.name
 `;
@@ -186,15 +187,16 @@ function slugifyLocationKey(name) {
   return `LOC_${slug || 'STANDORT'}`;
 }
 
-async function queryLocationsPg(pgUrl, clientFactory) {
-  const client = (clientFactory || defaultClientFactory)(pgUrl);
-  await client.connect();
-  try {
-    const res = await client.query(LOCATIONS_SELECT_SQL);
-    return res.rows.map(mapLocationRow);
-  } finally {
-    await client.end();
-  }
+// #127 (Stufe 3): mandantengetrennt durch die Mandanten-Tür (Lesepfad). Mandant = $1.
+// Schreibpfade upsertLocationPg/deleteLocationPg bleiben unverändert = Stufe 4.
+async function queryLocationsPg(db, tenant) {
+  const res = await db.read({
+    tenant,
+    tables: ['locations', 'machines'],
+    text: LOCATIONS_SELECT_SQL,
+    params: [],
+  });
+  return res.rows.map(mapLocationRow);
 }
 
 async function upsertLocationPg(pgUrl, profileData, clientFactory) {

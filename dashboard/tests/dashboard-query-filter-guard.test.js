@@ -91,17 +91,22 @@ test('#122 Guard findViolations: schrumpfende Allowlist (bereichsweise scharf)',
 // Noch NICHT migrierte Module mit rohem DB-Zugriff. Pro Slice wird diese Liste
 // KLEINER; im Endzustand (#129) bleibt nur die Infrastruktur-Ausnahme. Migrierte
 // Module dürfen hier NICHT stehen — sonst könnten sie unbemerkt zurückfallen.
+// Noch raw: Module mit Stufe-4-SCHREIBPFADEN (Lesepfade sind durch die Tür migriert,
+// aber upsert/create/delete/setThreshold bleiben roh = Stufe 4) + Infrastruktur-Guards
+// (db-schema, stock-cost-invariant lesen information_schema/Invarianten, kein Mandanten-
+// Datenpfad) + correction-cases/product-onboarding (#128). Schrumpft weiter in #128.
 const STILL_BYPASSING = [
   'correction-cases.js', 'db-schema.js', 'location-profiles.js',
-  'machine-create.js', 'machine-profiles.js', 'nayax-devices.js', 'product-onboarding.js',
+  'machine-create.js', 'machine-profiles.js', 'product-onboarding.js',
   'settings-thresholds.js', 'stock-cost-invariant.js',
 ];
-// Pro Slice durch die Tür geführte (migrierte) Lese-Module.
+// Pro Slice durch die Tür geführte (migrierte) Lese-Module bzw. -pfade.
 const MIGRATED = [
   'economics.js', 'economics-live.js',                                  // #123 Finanzen/GuV
   'overview-monitoring.js', 'automaten-view.js', 'alert-digest.js',     // #124 Übersicht/Cockpit/Monitoring
-  'assortment-slots.js', 'category-config.js',                          // #125 Sortiment (settings-thresholds: READ migriert, Schreibpfad #127)
+  'assortment-slots.js', 'category-config.js',                          // #125 Sortiment
   'inventory-mhd.js',                                                   // #126 Bestand/MHD/Lager
+  'nayax-devices.js',                                                   // #127 (reines Lesemodul ⇒ voll migriert)
 ];
 
 test('#123 Guard scharf: kein Bypass außerhalb der schrumpfenden Allowlist (Default-Deny)', () => {

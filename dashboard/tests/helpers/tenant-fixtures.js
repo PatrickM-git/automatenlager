@@ -143,6 +143,20 @@ async function seedTenant(client, tenantId, opts = {}) {
     [`slot_${tid}`, machineId, productId, tid],
   );
 
+  // 10) Automaten-Profil (Lesepfad machine-profiles, #127). machine_id = machine_key.
+  await client.query(
+    `INSERT INTO automatenlager.machine_profiles (machine_id, area, nickname, tenant_id)
+       VALUES ($1, $2, $3, $4)`,
+    [`vm_${tid}`, `Bereich ${tid}`, `Automat ${tid}`, tid],
+  );
+
+  // 11) Nayax-Gerät (Lesepfad nayax-devices, #127). Nutzersichtbare Zuordnung.
+  await client.query(
+    `INSERT INTO automatenlager.nayax_devices (nayax_machine_id, machine_number, machine_name, tenant_id)
+       VALUES ($1, $2, $3, $4)`,
+    [`nx_${tid}`, `${tid}-1`, `Gerät ${tid}`, tid],
+  );
+
   return { tenantId: tid, locationId, machineId, productId, productName, revenueGross: gross, slotKey: `slot_${tid}` };
 }
 
