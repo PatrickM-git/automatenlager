@@ -129,7 +129,9 @@ Read-Only guest access (Default-Deny seit #27, `dashboard/lib/auth.js` → `reso
 
 ## Current Next Step
 
-**Nächster Schritt (2026-06-07) — STUFE 6 planen (`grill-me`):** n8n-Eigenabsicherung/-Ablösung (raus aus der BYPASS-Verbindung — erst danach ist der Backstop systemweit dicht), per-Mandant-Config, **#108** (tenantColumn-Brücke + `__default__`-Abbau) + **#111** (globale (key)-Uniques droppen → `ON CONFLICT (tenant_id,key)`). Separat: **#109** IR-Runbook (braucht org-Input). **Kein zweiter echter Kunde vor Stufe 6.**
+**Zielarchitektur (Nordstern) + geordnete Gesamtplanung: siehe `docs/ROADMAP.md`.** Kurz: weg vom Heim-Mini hin zu **3-Schichten-Cloud — Cloudflare (Frontend) · Render (Backend + Cron) · Supabase (Postgres + RLS)**; **n8n VOLLSTÄNDIG ablösen** (= Stufe 6, durch Backend-Code/Cron). Cloud-agnostisch bauen (RLS/Tür/SQL-only sind bereits Supabase-portabel → Umzug, kein Rewrite). **Kein zweiter echter Kunde vor Stufe 6 UND Cloud** (externe Kunden nicht auf dem Mini).
+
+**Nächste Schritte (laut ROADMAP, sinnvolle Reihenfolge):** A1 **Performance-Pass** (<3 s/Seite, gemessen, sicher) → A2 **Stufe 6 = n8n-Ablösung** (WF1/2/3/5/7/8/9 → Backend-Code/Cron; schließt den Backstop systemweit) + **#108** + **#111** → A3 Monitoring/Alerting + Off-Site-Backup → A4 Self-Service (Login/Reset/2FA, Mandanten-Admin-UI [Stufe 8], Onboarding-Wizard, Credential-Vault [Stufe 7]) → A5 **#109** IR-Runbook + DSGVO-Basis → Phase B Cloud-Migration → Phase C Wachstum (Stripe-Billing, Marketing-Site, Par-Level/Bestellwesen/Provisionen/Routen, DATEV/GoBD/TSE). Jede Phase startet mit eigener SPEC.
 
 **Umgesetzt (2026-06-07) — Mandantenfähigkeit STUFE 5 „RLS-Backstop", Issues #143–#150 KOMPLETT, LIVE & VERIFIZIERT:**
 - PR [#151](https://github.com/PatrickM-git/automatenlager/pull/151) gemergt, Mini auf `145ee7b`. SPEC: `docs/specs/multi-tenant-rls-stufe-5-v1.md`. Suite **1081/1081 grün**. Details: `HANDOVER.md`.
