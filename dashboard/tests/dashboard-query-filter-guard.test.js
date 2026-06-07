@@ -30,8 +30,8 @@ test('#122 Guard Melde-Modus: Worklist aller noch ungefilterten Lesepfade, brich
   // Heute laufen noch viele Module an der Tür vorbei — die Worklist ist nicht leer.
   assert.ok(report.bypass.length > 0, 'Melde-Modus listet noch-ungefilterte Lesepfade');
   const files = report.bypass.map((b) => b.file);
-  // Stabile Vertreter, die heute direkt pg nutzen (aus dem Audit):
-  for (const known of ['economics.js', 'inventory-mhd.js', 'assortment-slots.js', 'overview-monitoring.js']) {
+  // Stabile Vertreter, die heute noch direkt pg nutzen (noch nicht migriert):
+  for (const known of ['inventory-mhd.js', 'assortment-slots.js', 'overview-monitoring.js']) {
     assert.ok(files.includes(known), `Worklist enthält ${known}`);
   }
   // Jeder Eintrag trägt eine Begründung (welches Muster).
@@ -81,10 +81,37 @@ test('#122 Guard findViolations: schrumpfende Allowlist (bereichsweise scharf)',
   assert.equal(none.length, 0, 'mit voller Allowlist keine Verstöße');
 
   // Einen Bereich „scharf schalten" (aus der Allowlist nehmen) ⇒ er wird zum Verstoß.
-  const sharpened = allBypass.filter((f) => f !== 'economics.js');
+  const sharpened = allBypass.filter((f) => f !== 'inventory-mhd.js');
   const violations = guard.findViolations({ libDir: LIB_DIR, allowlist: sharpened });
-  assert.ok(violations.some((v) => v.file === 'economics.js'),
+  assert.ok(violations.some((v) => v.file === 'inventory-mhd.js'),
     'ein aus der Allowlist genommener (noch nicht migrierter) Lesepfad ist ein Verstoß');
+});
+
+// ── Bereichsweise scharf (Default-Deny, schrumpfende Allowlist) ──────────────────
+// Noch NICHT migrierte Module mit rohem DB-Zugriff. Pro Slice wird diese Liste
+// KLEINER; im Endzustand (#129) bleibt nur die Infrastruktur-Ausnahme. Migrierte
+// Module dürfen hier NICHT stehen — sonst könnten sie unbemerkt zurückfallen.
+const STILL_BYPASSING = [
+  'alert-digest.js', 'assortment-slots.js', 'automaten-view.js', 'category-config.js',
+  'correction-cases.js', 'db-schema.js', 'inventory-mhd.js', 'location-profiles.js',
+  'machine-create.js', 'machine-profiles.js', 'nayax-devices.js', 'overview-monitoring.js',
+  'product-onboarding.js', 'settings-thresholds.js', 'stock-cost-invariant.js',
+];
+// Pro Slice durch die Tür geführte (migrierte) Lesemodule.
+const MIGRATED = ['economics.js', 'economics-live.js']; // #123 Finanzen/GuV
+
+test('#123 Guard scharf: kein Bypass außerhalb der schrumpfenden Allowlist (Default-Deny)', () => {
+  const violations = guard.findViolations({ libDir: LIB_DIR, allowlist: STILL_BYPASSING });
+  assert.deepEqual(violations.map((v) => v.file), [],
+    'jeder noch-rohe Lesepfad muss explizit allowlistet sein; Neuzugang ⇒ Verstoß');
+});
+
+test('#123 Guard: Finanz-Module migriert (nicht im Bypass, NICHT allowlistet ⇒ Rückfall = Verstoß)', () => {
+  const bypassFiles = guard.buildReport({ libDir: LIB_DIR }).bypass.map((b) => b.file);
+  for (const f of MIGRATED) {
+    assert.ok(!bypassFiles.includes(f), `${f} ist migriert (kein rohes pg mehr)`);
+    assert.ok(!STILL_BYPASSING.includes(f), `${f} ist NICHT allowlistet`);
+  }
 });
 
 test('#122 Guard: enge, dokumentierte Global-Allowlist — Default mandantenpflichtig', () => {

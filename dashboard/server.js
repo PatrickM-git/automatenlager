@@ -425,6 +425,20 @@ async function requireMachineAccess(viewer, machineKey, res, event) {
   return requireObjectAccess(viewer, objectTenantId, res, event);
 }
 
+// #123 (Stufe 3): technische Bereitschaft der mandanten-getrennten Lesepfade.
+// Ist PG konfiguriert, aber das Mandanten-Verzeichnis NICHT bereit (z. B. DB
+// unerreichbar), kann der effektive Mandant nicht aufgelöst werden ⇒ die Tür würde
+// fail-closed LEER liefern und damit einen TECHNISCHEN Fehler als „keine Daten"
+// maskieren. SPEC-Taxonomie: technischer Fehler ≠ leer ⇒ hier 503 (kein leeres
+// Resultat). Liefert true (bereit) oder false (503 bereits gesendet).
+function tenantReadReady(res) {
+  if (tenantDirectory && !tenantDirectory.isReady()) {
+    sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: 'Mandanten-Verzeichnis nicht bereit (DB nicht erreichbar).' } });
+    return false;
+  }
+  return true;
+}
+
 // Effektive Kategorie-/Schwellwert-Config (#63) für /einstellungen. Ohne erreichbare
 // DB fallen wir auf die Branchen-Anker-Defaults zurück (die Seite bleibt nutzbar).
 async function loadClassificationConfig(mandantId = DEFAULT_MANDANT) {
@@ -804,7 +818,7 @@ function buildDashboardV2Error(area, code, message, status = 503) {
   };
 }
 
-async function buildDashboardV2Area(area, query = {}) {
+async function buildDashboardV2Area(area, query = {}, viewer = null) {
   if (!dashboardV2Areas.has(area)) {
     return buildDashboardV2Error(area, 'V2_AREA_NOT_FOUND', 'Dieser Dashboard-v2-Bereich ist nicht definiert.', 404);
   }
@@ -853,12 +867,21 @@ async function buildDashboardV2Area(area, query = {}) {
   }
 
   if (area === 'economics') {
+    // #123: technischer Ausfall (Verzeichnis nicht bereit) ⇒ 503, nicht leer.
+    if (tenantDirectory && !tenantDirectory.isReady()) {
+      return buildDashboardV2Error(area, 'PG_ERROR', 'Mandanten-Verzeichnis nicht bereit (DB nicht erreichbar).');
+    }
     try {
-      const pgRows = await queryEconomicsPg(pgUrl, query);
+      // #123: mandantengetrennt durch die Tür; effektiver Mandant aus dem Viewer.
+      const tenant = viewer && viewer.tenantId;
+      const pgRows = await queryEconomicsPg(tenantDb, tenant, query);
       // #40: laufender Tag (noch nicht von WF8 aggregiert) als vorläufige
       // Position ergänzen — Fehler hier dürfen die GuV nie kippen.
       try {
-        pgRows.provisional = await queryEconomicsProvisionalPg(pgUrl, query);
+        // Tax-Config (#56) des Mandanten laden und in den Live-Pfad reichen
+        // (kein DB-Zugriff in economics.js; classification_settings-Migration = #125).
+        const taxConfig = await loadClassificationConfig(tenant || DEFAULT_MANDANT);
+        pgRows.provisional = await queryEconomicsProvisionalPg(tenantDb, tenant, query, taxConfig);
       } catch (_) {
         pgRows.provisional = null;
       }
@@ -2029,11 +2052,11 @@ const server = http.createServer(async (req, res) => {
     const v2Area = [...dashboardV2Areas.entries()]
       .find(([, config]) => parsed.pathname === config.path);
     if (v2Area && req.method === 'GET') {
+      const areaViewer = getViewer(req); // #123: Mandant für die mandanten-getrennten Lesepfade
       if (v2Area[0] === 'economics') { // #80: GuV ist finanzen.lesen-Bereich
-        const areaViewer = getViewer(req);
         if (!requireCapability(areaViewer, 'finanzen.lesen', res)) return;
       }
-      const result = await buildDashboardV2Area(v2Area[0], parsed.query);
+      const result = await buildDashboardV2Area(v2Area[0], parsed.query, areaViewer);
       sendJson(res, result.status, result.body);
       return;
     }
@@ -2918,7 +2941,9 @@ const server = http.createServer(async (req, res) => {
     // ── Reports export route ──────────────────────────────────────────────────
 
     if (parsed.pathname === '/api/v2/reports/export' && req.method === 'GET') {
-      if (!requireCapability(getViewer(req), 'finanzen.lesen', res)) return; // #80
+      const viewer = getViewer(req); // #123: Mandant für den Finanz-Export
+      if (!requireCapability(viewer, 'finanzen.lesen', res)) return; // #80
+      if (!tenantReadReady(res)) return; // #123: DB/Verzeichnis-Ausfall ⇒ 503, nicht leer
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
@@ -2935,7 +2960,7 @@ const server = http.createServer(async (req, res) => {
         machines: clean(parsed.query.machines),
       };
       try {
-        const rawData = await queryEconomicsPg(pgUrl, exportQuery);
+        const rawData = await queryEconomicsPg(tenantDb, viewer.tenantId, exportQuery);
         const economicsData = buildEconomicsData(rawData, exportQuery);
         const { from, to } = economicsData.period;
         // Brutto-Werte wie auf der Seite, sortiert nach Brutto-Umsatz,
@@ -2957,7 +2982,9 @@ const server = http.createServer(async (req, res) => {
     // ── PDF-Export (GuV-Bericht als echte Datei) ──────────────────────────────
 
     if (parsed.pathname === '/api/v2/reports/pdf' && req.method === 'GET') {
-      if (!requireCapability(getViewer(req), 'finanzen.lesen', res)) return; // #80: viewer war undefiniert
+      const viewer = getViewer(req); // #123: Mandant für den GuV-PDF-Report
+      if (!requireCapability(viewer, 'finanzen.lesen', res)) return; // #80: viewer war undefiniert
+      if (!tenantReadReady(res)) return; // #123: DB/Verzeichnis-Ausfall ⇒ 503, nicht leer
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
@@ -2972,7 +2999,7 @@ const server = http.createServer(async (req, res) => {
         machines: clean(parsed.query.machines),
       };
       try {
-        const rawData = await queryEconomicsPg(pgUrl, exportQuery);
+        const rawData = await queryEconomicsPg(tenantDb, viewer.tenantId, exportQuery);
         const economicsData = buildEconomicsData(rawData, exportQuery);
         const { from, to } = economicsData.period;
         const rows = [...economicsData.byProduct].sort((a, b) => b.revenue_gross - a.revenue_gross);
@@ -3272,14 +3299,16 @@ const server = http.createServer(async (req, res) => {
     // v3-Live-Kachel; Filter machines=ID1,ID2 und limit wie bei /economics.
 
     if (parsed.pathname === '/api/v2/economics/live' && req.method === 'GET') {
-      if (!requireCapability(getViewer(req), 'finanzen.lesen', res)) return; // #28: GuV nur mit finanzen.lesen
+      const viewer = getViewer(req); // #123: Mandant für den Live-Umsatz
+      if (!requireCapability(viewer, 'finanzen.lesen', res)) return; // #28: GuV nur mit finanzen.lesen
+      if (!tenantReadReady(res)) return; // #123: DB/Verzeichnis-Ausfall ⇒ 503, nicht leer
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
       try {
-        const live = await queryEconomicsLivePg(pgUrl, parsed.query || {});
+        const live = await queryEconomicsLivePg(tenantDb, viewer.tenantId, parsed.query || {});
         sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), data: live });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });

@@ -22,6 +22,21 @@ const READ_PATH_TABLES = Object.freeze([
   'locations', 'machines', 'products', 'stock_batches', 'sales_transactions', 'guv_daily', 'warnings',
 ]);
 
+// Mandanten-Tür über EINEN Sandbox-Client. Die Door-Konsumenten nutzen z. T.
+// Promise.all (mehrere Reads gleichzeitig) — ein einzelner pg-Client kann aber
+// keine parallelen Queries fahren (Produktion nutzt einen Pool). Daher hier
+// serialisieren: jede Query wartet auf die vorherige. Reines Test-Hilfsmittel.
+function doorForClient(client) {
+  const { createTenantDb } = require('../../lib/tenant-db.js');
+  let tail = Promise.resolve();
+  const query = (sql, params) => {
+    const result = tail.then(() => client.query(sql, params));
+    tail = result.catch(() => {}); // Kette auch nach Fehler am Leben halten
+    return result;
+  };
+  return createTenantDb({ query });
+}
+
 function round2(n) { return Math.round(n * 100) / 100; }
 
 /**
@@ -122,4 +137,4 @@ async function seedAcmeGlobex(client) {
   return { acme, globex };
 }
 
-module.exports = { seedTenant, seedAcmeGlobex, READ_PATH_TABLES };
+module.exports = { seedTenant, seedAcmeGlobex, READ_PATH_TABLES, doorForClient };

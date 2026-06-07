@@ -32,6 +32,11 @@ const path = require('node:path');
 // legitim — „kein DB-Zugriff AUSSERHALB der Tür".
 const DOOR_FILES = Object.freeze(['tenant-db.js']);
 
+// Der Wächter selbst trägt die Erkennungsmuster (new Client/client.query/…) als
+// String-LITERALE und würde sich sonst selbst melden. Er ist kein Lesepfad ⇒
+// vom Scan ausgenommen (kein DB-Zugriff zur Laufzeit).
+const SELF_FILES = Object.freeze(['query-filter-guard.js']);
+
 // Reine Logik-/injizierte Module, die per Konstruktion kein rohes pg tragen, hier
 // nur zur Dokumentation (sie tauchen ohnehin nicht in der Worklist auf, weil sie
 // keines der Muster matchen): tenant-directory.js (injizierte query), pg-url.js,
@@ -91,6 +96,7 @@ function buildReport({ libDir, doorFiles = DOOR_FILES } = {}) {
   if (!libDir) throw new TypeError('query-filter-guard: libDir erforderlich');
   const all = [];
   for (const file of listJsFiles(libDir)) {
+    if (SELF_FILES.includes(file)) continue; // der Wächter meldet sich nicht selbst
     const reasons = scanSource(fs.readFileSync(path.join(libDir, file), 'utf8'));
     if (reasons.length) all.push({ file, reasons });
   }
