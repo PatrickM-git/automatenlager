@@ -11,7 +11,7 @@ const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = re
 const { buildAlertDigest, queryAlertDigestPg } = require('./lib/alert-digest.js');
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
 const { availableBatchStatusSqlList } = require('./lib/stock-status.js');
-const { validateWriteOff, canWriteOff, buildWriteOffAuditEntry, WRITE_OFF_STATUS } = require('./lib/write-off.js');
+const { validateWriteOff, buildWriteOffAuditEntry, writeOffBatchPg } = require('./lib/write-off.js'); // #138: writeOffBatchPg geht durch die Tür
 const { buildSlotChangePreview, validateSlotChange, buildSlotChangePayload, buildSlotChangeAuditEntry } = require('./lib/slot-change.js');
 const { buildProductOnboardingData, queryProductOnboardingPg } = require('./lib/product-onboarding.js');
 const { buildReportCsv, buildReportFilename } = require('./lib/reports.js');
@@ -2350,70 +2350,40 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON im Request-Body.' } });
         return;
       }
+      // #138: Mandant kommt NUR aus dem Viewer — tenant_id/mandant_id im Body ⇒ 400 + Audit.
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
       const check = validateWriteOff(body);
       if (!check.valid) {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: check.errors.map((e) => e.message).join(' ') } });
         return;
       }
-      const pgUrl = dashboardV2PgUrl();
-      if (!pgUrl) {
+      if (!tenantDb) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
       const expectedRemaining = body && body.expected_remaining_qty;
-      const { Client } = require('pg');
-      const client = new Client({ connectionString: pgUrl });
-      let outcome = null;
+      let outcome;
       try {
-        await client.connect();
-        await client.query('BEGIN');
-        const sel = await client.query(
-          `SELECT sb.batch_id, sb.product_id, sb.remaining_qty, sb.status
-             FROM automatenlager.stock_batches sb
-            WHERE sb.batch_key = $1
-            FOR UPDATE`,
-          [check.batch_key],
-        );
-        const batch = sel.rows[0] || null;
-        const verdict = canWriteOff(batch, expectedRemaining);
-        if (!verdict.ok) {
-          await client.query('ROLLBACK');
-          const statusCode = verdict.code === 'NOT_FOUND' ? 404 : 409;
+        // #138: SELECT … FOR UPDATE + UPDATE (stock_batches/warnings) atomar DURCH die
+        // Tür (tenant_id = $1). Eine fremde Charge ist im tenant-gefilterten SELECT
+        // unsichtbar ⇒ NOT_FOUND, keine Änderung an fremden Daten.
+        outcome = await writeOffBatchPg(tenantDb, viewer.tenantId, check.batch_key, expectedRemaining);
+      } catch (err) {
+        if (['NOT_FOUND', 'ALREADY_WRITTEN_OFF', 'EMPTY', 'DRIFT'].includes(err.code)) {
+          const statusCode = err.code === 'NOT_FOUND' ? 404 : 409;
           const messages = {
             NOT_FOUND: 'Charge nicht gefunden.',
             ALREADY_WRITTEN_OFF: 'Charge ist bereits ausgebucht.',
             EMPTY: 'Charge hat keinen Bestand mehr.',
-            DRIFT: `Bestand hat sich geändert (jetzt ${verdict.remaining_qty}). Bitte neu laden.`,
+            DRIFT: `Bestand hat sich geändert (jetzt ${err.verdict && err.verdict.remaining_qty}). Bitte neu laden.`,
           };
-          sendJson(res, statusCode, { ok: false, error: { code: verdict.code, message: messages[verdict.code] || 'Ausbuchen nicht möglich.' } });
+          sendJson(res, statusCode, { ok: false, error: { code: err.code, message: messages[err.code] || 'Ausbuchen nicht möglich.' } });
           return;
         }
-        const writtenOff = verdict.remaining_qty;
-        await client.query(
-          `UPDATE automatenlager.stock_batches sb
-              SET status = $2, remaining_qty = 0, updated_at = now()
-            WHERE sb.batch_id = $1`,
-          [batch.batch_id, WRITE_OFF_STATUS],
-        );
-        // Offene Warnungen für dieses Produkt auflösen (MHD_NEAR, LOW_STOCK, LOW_BATCH).
-        // Verhindert, dass nach dem Ausbuchen veraltete Warnungen im Cockpit hängen bleiben.
-        await client.query(
-          `UPDATE automatenlager.warnings
-              SET resolved = TRUE, resolved_at = now(), resolved_by = 'write-off'
-            WHERE product_id = $1
-              AND resolved = FALSE
-              AND warning_type IN ('MHD_NEAR', 'LOW_STOCK', 'LOW_BATCH')`,
-          [batch.product_id],
-        );
-        await client.query('COMMIT');
-        outcome = { ok: true, product_id: Number(batch.product_id) || null, written_off_qty: writtenOff, message: `${writtenOff} Stk. ausgebucht (${check.reason}).` };
-      } catch (err) {
-        try { await client.query('ROLLBACK'); } catch { /* ignore */ }
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
         return;
-      } finally {
-        await client.end();
       }
+      outcome.message = `${outcome.written_off_qty} Stk. ausgebucht (${check.reason}).`;
       const auditEntry = buildWriteOffAuditEntry(viewer, check, outcome);
       const auditPath = path.join(__dirname, 'logs', 'writeoff-actions.jsonl');
       try {
