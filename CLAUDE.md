@@ -129,11 +129,12 @@ Read-Only guest access (Default-Deny seit #27, `dashboard/lib/auth.js` → `reso
 
 ## Current Next Step
 
-**Geplant (2026-06-06) — Mandantenfähigkeit STUFE 3 „Query-Filter" (Lese-Isolation):**
-- SPEC: `docs/specs/multi-tenant-query-filter-stufe-3-v1.md` (32 User Stories, 14 Pflicht-Testfälle). Grundlage: `docs/specs/mandantenfaehigkeit-audit-2026-06-05.md` (Schritt 3 der Stufenkette 0→8).
-- Kern: flächendeckende Mandanten-Filter auf ALLEN ~40 Lese-Pfaden über EINE zentrale, fail-closed „Mandanten-Tür" (Weg B; zentralisiert den DB-Zugriff; ist der Haken für RLS in Stufe 5). Begleitend #107-Wächter: Melde-Modus → bereichsweise scharf (schrumpfende Allowlist) → Endzustand **build-blocking**. **No-Bypass** (kein Read an der Tür vorbei). Aggregate (SUM/COUNT) wie Einzelzeilen. (Mat)Views als Bypass behandelt. Global-Allowlist EXTREM eng (`machines`/`locations`/`settings_thresholds`/`nayax_devices`-Zuordnung sind mandantenpflichtig; nur Verzeichnis + reine Lookups global). Kein Mandant ⇒ leeres Dashboard; Break-Glass liest Ziel-Mandant read-only; Hintergrund-Jobs (`alert-digest`) brauchen explizite Mandanten-Quelle, kein Default.
-- Rollout HÄPPCHENWEISE (Finanzen zuerst), je Slice Test gegen acme/globex (#94-Sandbox) + Live-Check. Scope: NUR Lesen; Schreiben=Stufe 4, RLS=Stufe 5, n8n=Stufe 6, kein UI. NICHT verkaufsfähig für 2. Kunden vor Stufe 3+4+5.
-- **Nächster Schritt: `ubiquitous-language` (Domänenbegriffe) → dann neuer Chat `spec-to-issue`** (SPEC in Issues zerlegen, #107 = Begleit-Guard).
+**Umgesetzt (2026-06-07) — Mandantenfähigkeit STUFE 3 „Query-Filter" (Lese-Isolation), Issues #122–#129 KOMPLETT (Code):**
+- Branch `feat/query-filter-stufe-3` (8 Commits), Suite **1003/1003 grün** (live gegen die Mini-DB im #94-Sandbox-Harness, ROLLBACK). SPEC: `docs/specs/multi-tenant-query-filter-stufe-3-v1.md`. Details: `HANDOVER.md`.
+- **Mandanten-Tür** `lib/tenant-db.js` (fail-closed, Mandant als `$1`, explizite Zieltabellen, `read`/`write`/`forViewer`/`asDoor`, Stufe-5-Haken inert) als EINZIGE Lese-Zugriffsschicht über geteiltem Pool. **#107-Wächter** `lib/query-filter-guard.js` strukturell + **build-blocking-Endzustand**; enge Global-Allowlist (nur Verzeichnis). Doku: `docs/security/query-filter-guard-allowlist.md`. **acme/globex-Fixtures** + `doorForClient` + Advisory-Lock (DDL-vs-DML-Deadlock-Schutz).
+- Alle ~40 Lese-Pfade durch die Tür mit `tenant_id`-Filter (Finanzen #123, Übersicht/Monitoring #124 inkl. Hintergrund-Job `alert-digest` pro Mandant, Sortiment #125, Bestand/MHD #126, Automaten/Nayax #127, Korrektur/Onboarding #128). Aggregate + MatViews tenant-scoped. Je Domäne nicht-vakuöser acme↔globex-Isolationstest. Startup-Race-Fix (Ready-Log nach Registry-Load).
+- **Scope-Grenze (dokumentiert):** Schreibpfade (upsert/create/delete/setThreshold) bewusst UNVERÄNDERT = **Stufe 4** (stehen begründet auf der Guard-Allowlist); RLS = **Stufe 5** (unumgehbarer Backstop, ohne Lücke); n8n = Stufe 6; Config (`classification_settings`) bleibt `__default__`-gekeyt (per-Mandant = Stufe 6). **Kein zweiter realer Kunde vor Stufe 3+4+5.**
+- **Nächste Schritte:** (1) PR mergen (schließt #107 + #122–#129) + Mini-Deploy (reiner Code, kein DDL) + finaler Live-Smoke; (2) **Stufe 4 (Schreib-Isolation)** planen/umsetzen; (3) **Stufe 5 (RLS)** — Tür-Haken zünden.
 
 **Umgesetzt (2026-06-06) — Auth scharf setzen (Stufe 2), Issues #115–#118 KOMPLETT (Code):**
 - Branch `feat/auth-scharf-stufe-2` (4 Commits), Suite **946/946**. SPEC: `docs/specs/multi-tenant-auth-scharf-stufe-2-v1.md`.

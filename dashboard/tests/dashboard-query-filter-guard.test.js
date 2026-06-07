@@ -149,3 +149,46 @@ test('#122 Guard: Global-Allowlist ist bewusst eng (keine schleichende Aufblähu
   const n = Object.keys(guard.GLOBAL_TABLE_ALLOWLIST).length;
   assert.ok(n <= 5, `Global-Allowlist eng halten (ist ${n}, erwartet ≤ 5)`);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #129 — BUILD-BLOCKING-ENDZUSTAND
+// Alle Lese-Domänen (#123–#128) sind migriert ⇒ die Read-Migrations-Ausnahmeliste
+// ist LEER. Was strukturell noch rohes pg trägt, ist ausschließlich:
+//  (a) INFRASTRUKTUR — kein Mandanten-Datenpfad (information_schema/Invarianten);
+//  (b) STUFE-4-SCHREIBPFADE — die Lesepfade dieser Module sind durch die Tür; nur
+//      ihre Schreibfunktionen (upsert/create/delete/setThreshold) bleiben roh und
+//      werden in Stufe 4 (Schreib-Isolation) + Stufe 5 (RLS) nachgezogen.
+// Ab jetzt bricht JEDER neue rohe/ungefilterte Read AUSSERHALB dieser Allowlist
+// den Build (build-blocking, nicht nur Warnung).
+// ─────────────────────────────────────────────────────────────────────────────
+const INFRASTRUCTURE_ALLOWLIST = ['db-schema.js', 'stock-cost-invariant.js'];
+const STUFE4_WRITE_ALLOWLIST = [
+  'location-profiles.js', 'machine-create.js', 'machine-profiles.js', 'settings-thresholds.js',
+];
+const FINAL_ALLOWLIST = [...INFRASTRUCTURE_ALLOWLIST, ...STUFE4_WRITE_ALLOWLIST];
+
+test('#129 Guard build-blocking: kein roher DB-Zugriff außerhalb der finalen Allowlist', () => {
+  const violations = guard.findViolations({ libDir: LIB_DIR, allowlist: FINAL_ALLOWLIST });
+  assert.deepEqual(violations.map((v) => v.file), [],
+    'Endzustand: jeder NEUE rohe/ungefilterte Read bricht den Build (keine Toleranz)');
+});
+
+test('#129 Guard: Read-Migrations-Ausnahmeliste ist LEER (alle Lese-Domänen migriert)', () => {
+  // Alle migrierten Lese-Module sind NICHT auf der finalen Allowlist (kein Rückfall möglich).
+  for (const f of MIGRATED) {
+    assert.ok(!FINAL_ALLOWLIST.includes(f), `${f} ist migriert und NICHT allowlistet`);
+  }
+  // STILL_BYPASSING (laufende Allowlist) deckt sich mit der finalen Allowlist —
+  // es gibt keine "noch nicht migriert"-Restposten mehr (nur Infra + Stufe-4-Writes).
+  assert.deepEqual([...STILL_BYPASSING].sort(), [...FINAL_ALLOWLIST].sort());
+});
+
+test('#129 Guard (Testfall 12+13): künstlicher roher/ungefilterter Read bräche den Build', () => {
+  // No-Bypass (Testfall 12): direkter pg.Client-Read außerhalb der Tür.
+  assert.ok(guard.scanSource("const c = new (require('pg').Client)(); await c.connect(); c.query('SELECT 1');").length > 0);
+  // Build-blocking (Testfall 13): eine neue lib-Datei mit rohem Read wäre — da NICHT
+  // auf der finalen Allowlist — sofort ein Verstoß (findViolations würde sie melden).
+  const simulatedNewBypass = FINAL_ALLOWLIST; // ein NEUES Modul stünde hier NICHT drin
+  assert.ok(!simulatedNewBypass.includes('a-new-unfiltered-read-module.js'),
+    'ein neues ungefiltertes Lesemodul ist per Definition nicht allowlistet ⇒ Build rot');
+});

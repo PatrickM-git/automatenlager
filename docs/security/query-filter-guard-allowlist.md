@@ -73,3 +73,23 @@ schon getrennt".
 
 Die Global-Allowlist bleibt **sehr kurz** (Test: `≤ 5` Einträge). Wächst sie, muss die
 Schranke bewusst angefasst und die Aufnahme hier begründet werden.
+
+## Endzustand nach Stufe 3 (#129) — build-blocking
+
+Nach den Slices #123–#128 ist die **Read-Migrations-Ausnahmeliste leer** (alle
+Lese-Domänen laufen durch die Tür). Der Wächter ist **build-blocking**: jeder NEUE rohe
+oder ungefilterte Read außerhalb der Datei-Allowlist bricht die Suite/CI
+(`dashboard-query-filter-guard.test.js`).
+
+Die verbleibende **Datei-Allowlist** (nicht Tabellen — diese ist die Liste der `lib/*.js`
+mit noch rohem pg) hat zwei begründete Klassen:
+
+| Klasse | Dateien | Begründung |
+| --- | --- | --- |
+| **Infrastruktur** | `db-schema.js`, `stock-cost-invariant.js` | Kein Mandanten-Datenpfad: lesen `information_schema` bzw. prüfen Invarianten (System-Metadaten). Dauerhafte Ausnahme. |
+| **Stufe-4-Schreibpfade** | `location-profiles.js`, `machine-create.js`, `machine-profiles.js`, `settings-thresholds.js` | Ihre **Lesepfade** sind durch die Tür migriert; nur ihre **Schreibfunktionen** (upsert/create/delete/setThreshold) tragen noch rohes pg. Werden in **Stufe 4** (Schreib-Isolation) durch die Tür geführt und in **Stufe 5** (RLS) abgesichert. |
+
+**Ehrliche Garantie-Ebene:** Die Stufe-3-Laufzeitsicherung ist der **Wächter im CI**
+(kein neuer ungesicherter Read kommt rein), **nicht** die Tür zur Laufzeit. Ein Leck,
+das am Wächter vorbeikäme, fängt erst **RLS (Stufe 5)** zur Laufzeit ab — bewusst
+akzeptierter Restrisiko-Korridor; ein zweiter realer Kunde erst nach Stufe 3+4+5.
