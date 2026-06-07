@@ -442,17 +442,14 @@ function tenantReadReady(res) {
 // Effektive Kategorie-/Schwellwert-Config (#63) für /einstellungen. Ohne erreichbare
 // DB fallen wir auf die Branchen-Anker-Defaults zurück (die Seite bleibt nutzbar).
 async function loadClassificationConfig(mandantId = DEFAULT_MANDANT) {
-  const pgUrl = dashboardV2PgUrl();
-  if (!pgUrl) return buildEffectiveConfig({});
-  const { Client } = require('pg');
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 3000 });
+  // #125: durch die Mandanten-Tür (geteilter Pool). Config liegt unter mandantId
+  // (Default __default__) — per-Mandant-Config ist Stufe 6. Fehler ⇒ Defaults
+  // (das Dashboard bleibt nutzbar).
+  if (!tenantDb) return buildEffectiveConfig({});
   try {
-    await client.connect();
-    return await loadEffectiveConfig(client, mandantId);
+    return await loadEffectiveConfig(tenantDb, mandantId);
   } catch {
     return buildEffectiveConfig({});
-  } finally {
-    try { await client.end(); } catch { /* ignore */ }
   }
 }
 
@@ -840,7 +837,7 @@ async function buildDashboardV2Area(area, query = {}, viewer = null) {
     try {
       // #124: mandantengetrennt durch die Tür; Mandant aus dem Viewer, MHD-Fenster aus der Config.
       const tenant = viewer && viewer.tenantId;
-      const cfg = await loadClassificationConfig(tenant || DEFAULT_MANDANT);
+      const cfg = await loadClassificationConfig(DEFAULT_MANDANT);
       const raw = await queryOverviewMonitoringPg(tenantDb, tenant, { mhdDays: cfg.mhdRiskDays });
       const overview = buildOverviewData(raw);
       const monitoring = buildMonitoringData(raw);
@@ -887,7 +884,7 @@ async function buildDashboardV2Area(area, query = {}, viewer = null) {
       try {
         // Tax-Config (#56) des Mandanten laden und in den Live-Pfad reichen
         // (kein DB-Zugriff in economics.js; classification_settings-Migration = #125).
-        const taxConfig = await loadClassificationConfig(tenant || DEFAULT_MANDANT);
+        const taxConfig = await loadClassificationConfig(DEFAULT_MANDANT);
         pgRows.provisional = await queryEconomicsProvisionalPg(tenantDb, tenant, query, taxConfig);
       } catch (_) {
         pgRows.provisional = null;
@@ -951,8 +948,14 @@ async function buildDashboardV2Area(area, query = {}, viewer = null) {
   }
 
   if (area === 'assortment-slots') {
+    // #125: technischer Ausfall (Verzeichnis nicht bereit) ⇒ 503, nicht leer.
+    if (tenantDirectory && !tenantDirectory.isReady()) {
+      return buildDashboardV2Error(area, 'PG_ERROR', 'Mandanten-Verzeichnis nicht bereit (DB nicht erreichbar).');
+    }
     try {
-      const pgRows = await queryAssortmentSlotsPg(pgUrl, query);
+      // #125: mandantengetrennt durch die Tür; effektiver Mandant aus dem Viewer.
+      const tenant = viewer && viewer.tenantId;
+      const pgRows = await queryAssortmentSlotsPg(tenantDb, tenant, query);
       const data = buildAssortmentSlotsData(pgRows, query);
       const now = new Date();
       return {
@@ -3093,16 +3096,13 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
-      const { Client } = require('pg');
-      const client = new Client({ connectionString: pgUrl });
       try {
-        await client.connect();
-        // Bestehenden Override lesen und mit den eingehenden Feldern mergen, damit
-        // ein Teil-Speichern nicht die übrigen Werte verwirft.
-        const current = await readOverride(client, DEFAULT_MANDANT);
+        // #125: durch die Mandanten-Tür (kein Inline-Client). Config unter __default__
+        // (per-Mandant-Config = Stufe 6). readOverride/writeOverride nehmen die Tür.
+        const current = await readOverride(tenantDb, DEFAULT_MANDANT);
         const incoming = sanitizeOverride(body && body.config ? body.config : body);
         const mergedOverride = mergeSettingsOverride(current, incoming);
-        const config = await writeOverride(client, DEFAULT_MANDANT, mergedOverride);
+        const config = await writeOverride(tenantDb, DEFAULT_MANDANT, mergedOverride);
         // #32: Schwellwert-Änderung protokollieren — nur die geänderten Schlüssel,
         // KEINE Werte (Audit-Hygiene; Schwellwerte sind zwar keine Secrets, aber wir
         // halten den Trail bewusst schlank + secret-frei).
@@ -3110,8 +3110,6 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, { ok: true, definitions: { slowMover: SLOW_MOVER, config } });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
-      } finally {
-        await client.end();
       }
       return;
     }

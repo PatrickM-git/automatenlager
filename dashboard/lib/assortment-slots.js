@@ -167,81 +167,71 @@ function buildAssortmentSlotsData(pgRows, query = {}) {
   };
 }
 
-async function queryAssortmentSlotsPg(pgUrl, query = {}) {
-  const { Client } = require('pg');
+// #125 (Stufe 3): mandantengetrennt durch die Mandanten-Tür. Mandant = $1 (Tür);
+// Filter/Datumsgrenzen folgen ab $2. Config/Schwellwerte unter __default__ (Config ist
+// in Stufe 3 nicht per-Mandant; per-Mandant-Config = Stufe 6). Kein Mandant ⇒ leer.
+async function queryAssortmentSlotsPg(db, tenant, query = {}) {
   const locationFilter = clean(query.location);
   const machineFilter = clean(query.machine);
   const { from, to } = resolvePeriod(query);
   const dateFrom = `${from}-01`;
   const dateTo = `${to}-01`;
 
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  try {
-    // #34: MHD-Risiko-Fenster aus der EINEN Settings-Quelle (vor der Query laden,
-    // damit es ins SQL fließt). mhdRiskDays ist via mergeConfig validierter Integer.
-    // #31: ladenhueterDays aus settings_thresholds (global), Fallback = classification_settings.
-    let config = await loadEffectiveConfig(client, DEFAULT_MANDANT);
-    const thresholds = await getThresholds(client, DEFAULT_MANDANT, null);
-    if (thresholds.ladenhueterDays.source !== 'default') {
-      config = { ...config, ladenhueterDays: Number(thresholds.ladenhueterDays.value) };
-    }
-    const mhdDays = config.mhdRiskDays;
-    const result = await client.query(
+  // #34/#31: MHD-Fenster + Ladenhüter-Schwelle aus der Settings-Quelle (durch die Tür,
+  // unter __default__ — Verhalten wie bisher). loadEffectiveConfig/getThresholds nehmen
+  // die Tür (asDoor).
+  let config = await loadEffectiveConfig(db, DEFAULT_MANDANT);
+  const thresholds = await getThresholds(db, DEFAULT_MANDANT, null);
+  if (thresholds.ladenhueterDays.source !== 'default') {
+    config = { ...config, ladenhueterDays: Number(thresholds.ladenhueterDays.value) };
+  }
+  const mhdDays = config.mhdRiskDays;
+
+  const result = await db.read({
+    tenant,
+    tables: ['slot_assignments', 'products', 'machines', 'locations', 'guv_daily',
+      'v_slot_turnover', 'sales_transactions', 'stock_batches', 'mv_inventory_value_daily', 'v_warnings_open'],
+    text:
       `WITH sales AS (
-         SELECT machine_id,
-                mdb_code,
-                product_id,
+         SELECT machine_id, mdb_code, product_id,
                 SUM(quantity_sold)::int AS qty,
                 SUM(revenue_net) AS revenue_net,
                 SUM(gross_profit) AS db_net
            FROM automatenlager.guv_daily
-          WHERE source != 'historic_backfill'
-            AND date_trunc('month', posting_date) >= $3::date
-            AND date_trunc('month', posting_date) <= $4::date
+          WHERE tenant_id = $1
+            AND source != 'historic_backfill'
+            AND date_trunc('month', posting_date) >= $4::date
+            AND date_trunc('month', posting_date) <= $5::date
           GROUP BY machine_id, mdb_code, product_id
        ),
        turnover AS (
-         SELECT machine_id,
-                mdb_code,
-                SUM(turnover_count)::int AS turnover_count
+         SELECT machine_id, mdb_code, SUM(turnover_count)::int AS turnover_count
            FROM automatenlager.v_slot_turnover
-          WHERE month >= $3::date
-            AND month <= $4::date
+          WHERE tenant_id = $1 AND month >= $4::date AND month <= $5::date
           GROUP BY machine_id, mdb_code
        ),
        money_window AS (
-         -- Rollierendes 4-Wochen-Fenster (28 Tage) je Slot: Deckungsbeitrag,
-         -- Wareneinsatz und Menge — Basis der geldbasierten Klassifikation (#64).
-         -- historic_backfill ausgeschlossen, konsistent zu turnover/last_sale.
-         SELECT machine_id,
-                mdb_code,
+         -- Rollierendes 4-Wochen-Fenster (28 Tage) je Slot (#64).
+         SELECT machine_id, mdb_code,
                 SUM(gross_profit)  AS db_window,
                 SUM(cost_of_goods) AS cost_window,
                 SUM(quantity_sold)::int AS window_qty
            FROM automatenlager.guv_daily
-          WHERE source != 'historic_backfill'
+          WHERE tenant_id = $1
+            AND source != 'historic_backfill'
             AND posting_date >= CURRENT_DATE - INTERVAL '28 days'
           GROUP BY machine_id, mdb_code
        ),
        last_sale AS (
-         -- Letzter echter Verkauf je Slot (machine_id+mdb_code), zeitraum-unabhängig.
-         -- historic_backfill ausgeschlossen — identisch zur v_slot_turnover-Semantik.
-         SELECT st.machine_id,
-                st.mdb_code,
-                MAX(st.settlement_at) AS last_sale_at
+         SELECT st.machine_id, st.mdb_code, MAX(st.settlement_at) AS last_sale_at
            FROM automatenlager.sales_transactions st
-          WHERE st.source != 'historic_backfill'
+          WHERE st.tenant_id = $1 AND st.source != 'historic_backfill'
           GROUP BY st.machine_id, st.mdb_code
        ),
        first_sale AS (
-         -- Erster echter Verkauf je Produkt (produktweit, nicht slotweit) = „hatte
-         -- das Produkt je eine Chance". Robuster Schonfrist-Anker als die
-         -- Slot-valid_from, die bei jeder Slot-Neuzuordnung zurückgesetzt würde.
-         SELECT st.product_id,
-                MIN(st.settlement_at) AS first_sale_at
+         SELECT st.product_id, MIN(st.settlement_at) AS first_sale_at
            FROM automatenlager.sales_transactions st
-          WHERE st.source != 'historic_backfill'
+          WHERE st.tenant_id = $1 AND st.source != 'historic_backfill'
           GROUP BY st.product_id
        ),
        batch_status AS (
@@ -249,13 +239,14 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
                 MIN(mhd_date) FILTER (WHERE mhd_date IS NOT NULL AND status NOT IN ('depleted', 'expired')) AS nearest_mhd_date,
                 SUM(remaining_qty) FILTER (WHERE mhd_date <= CURRENT_DATE + INTERVAL '${mhdDays} days' AND status NOT IN ('depleted', 'expired'))::int AS mhd_risk_qty
            FROM automatenlager.stock_batches
+          WHERE tenant_id = $1
           GROUP BY product_id
        ),
        warning_status AS (
-         SELECT product_id,
-                slot_assignment_id,
+         SELECT product_id, slot_assignment_id,
                 ARRAY_AGG(DISTINCT warning_type) FILTER (WHERE warning_type IS NOT NULL) AS warning_types
            FROM automatenlager.v_warnings_open
+          WHERE tenant_id = $1
           GROUP BY product_id, slot_assignment_id
        )
        SELECT sa.slot_assignment_id,
@@ -288,60 +279,52 @@ async function queryAssortmentSlotsPg(pgUrl, query = {}) {
               COALESCE(bs.mhd_risk_qty, 0) AS mhd_risk_qty,
               COALESCE(ws.warning_types, ARRAY[]::text[]) AS warning_types
          FROM automatenlager.slot_assignments sa
-         JOIN automatenlager.products p ON p.product_id = sa.product_id
-         JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
-         JOIN automatenlager.locations l ON l.location_id = m.location_id
+         JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
+         JOIN automatenlager.machines m ON m.machine_id = sa.machine_id AND m.tenant_id = sa.tenant_id
+         JOIN automatenlager.locations l ON l.location_id = m.location_id AND l.tenant_id = m.tenant_id
          LEFT JOIN sales s
-           ON s.machine_id = sa.machine_id
-          AND s.mdb_code = sa.mdb_code
-          AND s.product_id = sa.product_id
+           ON s.machine_id = sa.machine_id AND s.mdb_code = sa.mdb_code AND s.product_id = sa.product_id
          LEFT JOIN turnover t
-           ON t.machine_id = sa.machine_id
-          AND t.mdb_code = sa.mdb_code
+           ON t.machine_id = sa.machine_id AND t.mdb_code = sa.mdb_code
          LEFT JOIN money_window mw
-           ON mw.machine_id = sa.machine_id
-          AND mw.mdb_code = sa.mdb_code
+           ON mw.machine_id = sa.machine_id AND mw.mdb_code = sa.mdb_code
          LEFT JOIN last_sale ls
-           ON ls.machine_id = sa.machine_id
-          AND ls.mdb_code = sa.mdb_code
+           ON ls.machine_id = sa.machine_id AND ls.mdb_code = sa.mdb_code
          LEFT JOIN first_sale fs
            ON fs.product_id = sa.product_id
-         LEFT JOIN automatenlager.mv_inventory_value_daily iv ON iv.product_id = sa.product_id
+         LEFT JOIN automatenlager.mv_inventory_value_daily iv ON iv.product_id = sa.product_id AND iv.tenant_id = sa.tenant_id
          LEFT JOIN batch_status bs ON bs.product_id = sa.product_id
          LEFT JOIN warning_status ws
            ON ws.product_id = sa.product_id
           AND (ws.slot_assignment_id = sa.slot_assignment_id OR ws.slot_assignment_id IS NULL)
         WHERE sa.active = TRUE
-          AND ($1 = '' OR l.location_key = $1 OR l.name ILIKE '%' || $1 || '%')
-          AND ($2 = '' OR m.machine_key = $2 OR m.name ILIKE '%' || $2 || '%')
+          AND sa.tenant_id = $1
+          AND ($2 = '' OR l.location_key = $2 OR l.name ILIKE '%' || $2 || '%')
+          AND ($3 = '' OR m.machine_key = $3 OR m.name ILIKE '%' || $3 || '%')
         ORDER BY l.name, m.name, sa.mdb_code`,
-      [locationFilter, machineFilter, dateFrom, dateTo],
-    );
+    params: [locationFilter, machineFilter, dateFrom, dateTo],
+  });
 
-    // Lagerware OHNE aktiven Slot: ausgetauschte/ausgelistete Produkte, die noch
-    // Restbestand im Lager haben (kein aktiver Slot mehr). Im Slot-Editor sonst
-    // nirgends greifbar — der User soll sie hier direkt aussortieren können.
-    // Chargen-Ebene (batch_key), damit der bestehende write-off-Dialog passt.
-    const lagerOhneSlotResult = await client.query(
-      `SELECT sb.batch_key,
-              p.name AS product_name,
-              sb.remaining_qty,
-              sb.mhd_date::text AS mhd_date
+  // Lagerware OHNE aktiven Slot (mandanten-gefiltert).
+  const lagerOhneSlotResult = await db.read({
+    tenant,
+    tables: ['stock_batches', 'products', 'slot_assignments'],
+    text:
+      `SELECT sb.batch_key, p.name AS product_name, sb.remaining_qty, sb.mhd_date::text AS mhd_date
          FROM automatenlager.stock_batches sb
-         JOIN automatenlager.products p ON p.product_id = sb.product_id
-        WHERE sb.status IN (${availableBatchStatusSqlList()})
+         JOIN automatenlager.products p ON p.product_id = sb.product_id AND p.tenant_id = sb.tenant_id
+        WHERE sb.tenant_id = $1
+          AND sb.status IN (${availableBatchStatusSqlList()})
           AND sb.remaining_qty > 0
           AND NOT EXISTS (
             SELECT 1 FROM automatenlager.slot_assignments sa
-             WHERE sa.product_id = p.product_id AND sa.active = TRUE
+             WHERE sa.product_id = p.product_id AND sa.active = TRUE AND sa.tenant_id = sb.tenant_id
           )
         ORDER BY p.name, sb.batch_key`,
-    );
+    params: [],
+  });
 
-    return { slots: result.rows, config, lagerOhneSlot: lagerOhneSlotResult.rows };
-  } finally {
-    await client.end();
-  }
+  return { slots: result.rows, config, lagerOhneSlot: lagerOhneSlotResult.rows };
 }
 
 module.exports = { buildAssortmentSlotsData, queryAssortmentSlotsPg };

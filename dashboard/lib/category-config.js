@@ -193,6 +193,8 @@ function buildEffectiveConfig(override = {}, defaults = DEFAULT_CONFIG) {
 
 // ── Persistenz: classification_settings (JSONB-Override je mandant_id) ──────────
 
+const { asDoor } = require('./tenant-db.js'); // #125: tür-basierter DB-Zugriff (No-Bypass)
+
 const SETTINGS_TABLE = 'automatenlager.classification_settings';
 
 // classification_settings trägt in Stufe 1 weiterhin `mandant_id` (die Angleichung
@@ -212,44 +214,63 @@ const CREATE_SETTINGS_TABLE_SQL = `
 // `mandant_id`; nach der Angleichung in Stufe 6 wird es `tenant_id`. Strikt auf diese
 // zwei Whitelist-Werte beschränkt (keine Injection). So bleibt der Code gegen beide
 // Schema-Zustände korrekt.
-async function tenantColumn(client) {
-  const res = await client.query(
-    `SELECT column_name FROM information_schema.columns
-      WHERE table_schema = 'automatenlager' AND table_name = 'classification_settings'
-        AND column_name IN ('tenant_id', 'mandant_id')
-      ORDER BY (column_name = 'tenant_id') DESC
-      LIMIT 1`,
-  );
+// #125 (Stufe 3): tür-basiert (asDoor akzeptiert Tür ODER rohen Client→gewrappt).
+// classification_settings trägt die Mandanten-Dimension als `mandant_id` (Brücke).
+// information_schema hat kein tenant_id → tenant-gated via `$1::text IS NOT NULL`.
+async function tenantColumn(dbOrClient, mandantId = DEFAULT_MANDANT) {
+  const db = asDoor(dbOrClient);
+  const res = await db.read({
+    tenant: String(mandantId || DEFAULT_MANDANT),
+    tables: ['classification_settings'],
+    text:
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'automatenlager' AND table_name = 'classification_settings'
+          AND column_name IN ('tenant_id', 'mandant_id')
+          AND $1::text IS NOT NULL
+        ORDER BY (column_name = 'tenant_id') DESC
+        LIMIT 1`,
+    params: [],
+  });
   return (res.rows[0] && res.rows[0].column_name) === 'mandant_id' ? 'mandant_id' : 'tenant_id';
 }
 
 /**
  * Liest den rohen Override eines Mandanten (leeres Objekt, wenn keiner existiert).
- * Mandant-Isolation: liest exakt die Zeile dieses Mandanten, nie eine fremde.
+ * Mandant-Isolation: liest exakt die Zeile dieses Mandanten (mandant_id = $1).
  */
-async function readOverride(client, mandantId = DEFAULT_MANDANT) {
-  const col = await tenantColumn(client);
-  const res = await client.query(
-    `SELECT config FROM automatenlager.classification_settings WHERE ${col} = $1`,
-    [String(mandantId || DEFAULT_MANDANT)],
-  );
+async function readOverride(dbOrClient, mandantId = DEFAULT_MANDANT) {
+  const db = asDoor(dbOrClient);
+  const tenant = String(mandantId || DEFAULT_MANDANT);
+  const col = await tenantColumn(db, tenant);
+  const res = await db.read({
+    tenant,
+    tables: ['classification_settings'],
+    text: `SELECT config FROM automatenlager.classification_settings WHERE ${col} = $1`,
+    params: [],
+  });
   if (!res.rows.length) return {};
   return isPlainObject(res.rows[0].config) ? res.rows[0].config : {};
 }
 
 /**
- * Schreibt den Override eines Mandanten (Upsert). Validiert/normalisiert über
- * mergeConfig, sodass nie Müll persistiert wird; gibt die effektive Config zurück.
+ * Schreibt den Override eines Mandanten (Upsert durch die Tür). Validiert/normalisiert,
+ * sodass nie Müll persistiert wird; gibt die effektive Config zurück. (Schreib-
+ * ISOLATION = Stufe 4; hier nur Mandanten-Bindung über die Tür.)
  */
-async function writeOverride(client, mandantId, override) {
+async function writeOverride(dbOrClient, mandantId, override) {
   const clean = sanitizeOverride(override);
-  const col = await tenantColumn(client);
-  await client.query(
-    `INSERT INTO automatenlager.classification_settings (${col}, config, updated_at)
-     VALUES ($1, $2::jsonb, now())
-     ON CONFLICT (${col}) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
-    [String(mandantId || DEFAULT_MANDANT), JSON.stringify(clean)],
-  );
+  const db = asDoor(dbOrClient);
+  const tenant = String(mandantId || DEFAULT_MANDANT);
+  const col = await tenantColumn(db, tenant);
+  await db.write({
+    tenant,
+    tables: ['classification_settings'],
+    text:
+      `INSERT INTO automatenlager.classification_settings (${col}, config, updated_at)
+       VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (${col}) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+    params: [JSON.stringify(clean)],
+  });
   return buildEffectiveConfig(clean);
 }
 
@@ -291,9 +312,10 @@ function sanitizeOverride(input) {
  * Effektive Config eines Mandanten aus der DB (Override + Defaults). Stellt die
  * Tabelle sicher (idempotent), liest den Override und baut die effektive Config.
  */
-async function loadEffectiveConfig(client, mandantId = DEFAULT_MANDANT) {
-  await client.query(CREATE_SETTINGS_TABLE_SQL);
-  const override = await readOverride(client, mandantId);
+async function loadEffectiveConfig(dbOrClient, mandantId = DEFAULT_MANDANT) {
+  // Kein Runtime-CREATE TABLE mehr (Tabelle existiert via Migration; DDL durch die
+  // Tür wäre ein Sonderfall). readOverride geht durch die Tür (asDoor).
+  const override = await readOverride(dbOrClient, mandantId);
   return buildEffectiveConfig(override);
 }
 

@@ -94,6 +94,29 @@ function createTenantDb({ query, pool, log } = {}) {
   }
 
   /**
+   * Mandanten-gebundener WRITE (Upsert/Insert/Update/Delete). Mechanisch wie read
+   * (Mandant als $1, eigene Parameter ab $2), aber als Schreibpfad benannt. Die
+   * volle Schreib-ISOLATION (verhindern, dass fremde Daten verändert werden) ist
+   * Stufe 4; hier nur Mandanten-Bindung + fail-closed, damit Module ohne eigenen
+   * pg.Client auskommen (No-Bypass). Kein/leerer Mandant ⇒ KEIN Schreibzugriff.
+   * @returns {Promise<{rows:any[], rowCount:number, tenantless?:boolean}>}
+   */
+  async function write({ tenant, tables, text, params = [] } = {}) {
+    if (!Array.isArray(tables) || tables.length === 0) {
+      throw new TypeError('tenant-db: write() verlangt explizite Zieltabelle(n) (tables: [...])');
+    }
+    if (typeof text !== 'string' || text.trim() === '') {
+      throw new TypeError('tenant-db: write() verlangt SQL-Text (text)');
+    }
+    if (!isValidTenant(tenant)) {
+      logfn('tenant-db: write ohne Mandant ⇒ kein Schreibzugriff (fail-closed)', { tables });
+      return { rows: [], rowCount: 0, tenantless: true };
+    }
+    const allParams = [tenant, ...(Array.isArray(params) ? params : [params])];
+    return runQuery(text, allParams);
+  }
+
+  /**
    * Ergonomische, an EINEN Mandanten gebundene Tür (für die Slice-Module).
    * `forTenant('').read(...)` ist identisch fail-closed.
    */
@@ -101,6 +124,7 @@ function createTenantDb({ query, pool, log } = {}) {
     return {
       tenant: isValidTenant(tenant) ? tenant : null,
       read: ({ tables, text, params } = {}) => read({ tenant, tables, text, params }),
+      write: ({ tables, text, params } = {}) => write({ tenant, tables, text, params }),
     };
   }
 
@@ -109,7 +133,21 @@ function createTenantDb({ query, pool, log } = {}) {
     return forTenant(viewer && viewer.tenantId);
   }
 
-  return { read, forTenant, forViewer, isValidTenant };
+  return { read, write, forTenant, forViewer, isValidTenant };
 }
 
-module.exports = { createTenantDb, isValidTenant };
+// Migrations-Brücke: nimmt entweder eine fertige Tür (hat .read) ODER einen rohen
+// pg-Client (hat .query) und liefert immer eine Tür. So können geteilte Module
+// (category-config, settings-thresholds) tür-basiert lesen, während noch nicht
+// migrierte Aufrufer (z. B. inventory-mhd #126, Settings-Schreibendpunkte) weiter
+// ihren Client übergeben — der wird transparent in eine Tür gewrappt. Dadurch
+// trägt KEIN geteiltes Modul mehr ein rohes `client.query` (No-Bypass erfüllt).
+function asDoor(runner) {
+  if (runner && typeof runner.read === 'function') return runner; // bereits eine Tür
+  if (runner && typeof runner.query === 'function') {
+    return createTenantDb({ query: (sql, params) => runner.query(sql, params) });
+  }
+  throw new TypeError('asDoor: Tür (.read) oder pg-Client (.query) erforderlich');
+}
+
+module.exports = { createTenantDb, isValidTenant, asDoor };

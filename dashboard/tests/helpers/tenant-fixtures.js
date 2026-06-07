@@ -134,7 +134,16 @@ async function seedTenant(client, tenantId, opts = {}) {
     [`warn_${tid}`, `Test-Warnung ${tid}`, machineId, productId, tid],
   );
 
-  return { tenantId: tid, locationId, machineId, productId, productName, revenueGross: gross };
+  // 9) Aktive Slot-Zuordnung (Sortiment-Lesepfad: assortment-slots liest FROM
+  // slot_assignments). Mandanten-treu: Automat/Produkt desselben Mandanten.
+  await client.query(
+    `INSERT INTO automatenlager.slot_assignments
+       (product_slot_key, machine_id, mdb_code, product_id, valid_from, active, current_machine_qty, tenant_id)
+       VALUES ($1, $2, 10, $3, '2026-01-01', TRUE, 5, $4)`,
+    [`slot_${tid}`, machineId, productId, tid],
+  );
+
+  return { tenantId: tid, locationId, machineId, productId, productName, revenueGross: gross, slotKey: `slot_${tid}` };
 }
 
 /**
