@@ -183,3 +183,30 @@ test('#116 LIVE-Sandbox: machineTenant Cache-Hit + Miss-Recheck einer NACH init 
     assert.equal(await dir.machineTenant('TDIR_LATE'), 't_faltrix', 'spaeter angelegte Maschine via Miss-Recheck');
   });
 });
+
+// ── Härtung: Self-Heal nach fehlgeschlagenem Initial-Load (Deploy-Fenster) ────────
+// Garantie, auf die sich server.js::initTenantDirectory (finally → startAutoRefresh)
+// verlässt: ein fehlgeschlagener Initial-Load lässt das Verzeichnis NICHT dauerhaft
+// unready — der nächste (Auto-Refresh-)Tick heilt selbst, sobald die DB wieder antwortet.
+test('Härtung: fehlgeschlagener Initial-Load → ready=false, späterer Refresh heilt → ready=true', async () => {
+  let calls = 0;
+  const query = async (sql) => {
+    calls++;
+    // Die ersten 4 Aufrufe (loadSnapshot = 4 SELECTs) scheitern (DB im Deploy-Fenster nicht erreichbar).
+    if (calls <= 4) throw new Error('DB nicht erreichbar (Deploy-Fenster)');
+    if (sql.includes('tenant_users')) return { rows: [{ login: 'owner@example.test', tenant_id: 't_faltrix' }] };
+    if (sql.includes('tenants')) return { rows: [{ tenant_id: 't_faltrix' }] };
+    return { rows: [] };
+  };
+  const dir = createTenantDirectory({ query });
+
+  await assert.rejects(() => dir.init(), /nicht erreichbar/, 'Initial-Load wirft (fail-closed)');
+  assert.equal(dir.isReady(), false, 'nach Fehl-Init NICHT bereit (kein leeres Durchwinken)');
+  assert.equal(dir.loginTenant('owner@example.test'), null, 'unready ⇒ kein Lookup');
+
+  // Genau das, was der Auto-Refresh-Timer (server.js: finally → startAutoRefresh) tickt:
+  const healed = await dir.refreshQuietly();
+  assert.equal(healed, true, 'Refresh erfolgreich, sobald die DB wieder antwortet');
+  assert.equal(dir.isReady(), true, 'Verzeichnis hat sich selbst geheilt (kein Dauer-503)');
+  assert.equal(dir.loginTenant('owner@example.test'), 't_faltrix', 'Owner löst nach Self-Heal wieder auf');
+});

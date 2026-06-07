@@ -405,10 +405,18 @@ async function initTenantDirectory() {
   if (!tenantDirectory) return;
   try {
     await tenantDirectory.init();
-    tenantDirectory.startAutoRefresh();
     console.log('[tenant-directory] bereit.');
   } catch (err) {
-    console.error('[tenant-directory] initialer Load fehlgeschlagen — fail-closed:', err && err.message);
+    // Fail-closed bleibt: isReady()===false ⇒ Lese-Endpunkte liefern 503 (kein leeres
+    // Dashboard, kein Default). Aber NICHT dauerhaft: der Auto-Refresh (finally) heilt
+    // selbst, sobald die DB wieder erreichbar ist — sonst bliebe das Verzeichnis nach
+    // einem Deploy-Fenster-Fehler (DB kurz unter Last) bis zum manuellen Container-
+    // Neustart unready (Owner-Aussperrung). refreshQuietly() setzt ready=true beim
+    // ersten erfolgreichen Tick.
+    console.error('[tenant-directory] initialer Load fehlgeschlagen — fail-closed; Auto-Refresh heilt selbst:', err && err.message);
+  } finally {
+    // #Härtung: Auto-Refresh IMMER starten (idempotent), auch nach Init-Fehler.
+    tenantDirectory.startAutoRefresh();
   }
 }
 
