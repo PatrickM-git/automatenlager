@@ -129,6 +129,11 @@ Read-Only guest access (Default-Deny seit #27, `dashboard/lib/auth.js` → `reso
 
 ## Current Next Step
 
+**Geplant (2026-06-07) — Mandantenfähigkeit STUFE 5 „RLS-Backstop" + Vorbedingung #141:**
+- **Zuerst** Quick-Issue **#141** schließen (zwei Read-Bypässe in `server.js` — `/api/v2/products/catalog`, `/api/v2/inventory/batch-search` — durch die Mandanten-Tür + tenant-gefiltert + acme/globex-Tests; #107-Wächter **build-blocking auf `server.js`** erweitern). Ist Stufe-3-Rest und harte Vorbedingung für RLS.
+- **Danach** Stufe 5 nach **SPEC `docs/specs/multi-tenant-rls-stufe-5-v1.md`** umsetzen: RLS-Backstop für Lesen UND Schreiben über eingeengte App-Rolle `automatenlager_app` (kein BYPASSRLS, kein Tabellen-Eigentum) + `BYPASSRLS`-Infra-Verbindung (Bootstrap/Migrationen/Refresh); GUC `automatenlager.current_tenant` transaktionslokal via `set_config(...,$1,true)` in der Tür; `read()` wird transaktional. Policies (`USING`+`WITH CHECK`, einarmiges `current_setting` → fehlender GUC kracht) auf 20 operative Tabellen; Vereinigungs-Policy für `__default__`-Config; Security-View/`security_invoker` für (Mat)Views. Rollout invertiert zu Stufe 4 (Code vor Scharfschaltung), gestaffelt pro Tabellengruppe + Smoke, `DISABLE-RLS`-Rollback diszipliniert. **Härtung:** explizite `REVOKE` (nicht nur `GRANT`), `search_path` bei Views/Funktionen/DDL härten, `tenant_id`-Indizes auf stark genutzten Tabellen prüfen.
+- **Kein zweiter echter Kunde vor Stufe 6**, solange n8n noch außerhalb des RLS-Backstops schreibt (Bypass-Verbindung; n8n-Absicherung/-Ablösung = Stufe 6).
+
 **Umgesetzt (2026-06-07) — Mandantenfähigkeit STUFE 4 „Schreib-Isolation", Issues #131–#139 KOMPLETT (Code):**
 - Branch `feat/write-isolation-stufe-4` (9 Commits), Suite **1056/1056 grün** (live gegen die Mini-DB im #94-Sandbox-Harness, ROLLBACK). Details: `HANDOVER.md`. **⚠️ AUSSTEHEND:** PR mergen + Mini-Deploy mit DDL **0020 UND 0021** (vor Code, idempotent) + Container-Restart + **Live-Smoke** — erst danach „erledigt".
 - SPEC: `docs/specs/multi-tenant-write-isolation-stufe-4-v1.md`. Basiert auf echter Code-Analyse (nicht Doku-Annahmen).
