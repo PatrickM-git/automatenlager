@@ -31,7 +31,7 @@ test('#122 Guard Melde-Modus: Worklist aller noch ungefilterten Lesepfade, brich
   assert.ok(report.bypass.length > 0, 'Melde-Modus listet noch-ungefilterte Lesepfade');
   const files = report.bypass.map((b) => b.file);
   // Stabile Vertreter, die heute noch direkt pg nutzen (noch nicht migriert):
-  for (const known of ['machine-profiles.js', 'location-profiles.js', 'correction-cases.js']) {
+  for (const known of ['machine-profiles.js', 'location-profiles.js', 'machine-create.js']) {
     assert.ok(files.includes(known), `Worklist enthält ${known}`);
   }
   // Jeder Eintrag trägt eine Begründung (welches Muster).
@@ -95,10 +95,15 @@ test('#122 Guard findViolations: schrumpfende Allowlist (bereichsweise scharf)',
 // aber upsert/create/delete/setThreshold bleiben roh = Stufe 4) + Infrastruktur-Guards
 // (db-schema, stock-cost-invariant lesen information_schema/Invarianten, kein Mandanten-
 // Datenpfad) + correction-cases/product-onboarding (#128). Schrumpft weiter in #128.
+// Verbleibende Allowlist nach #128. Zwei Klassen (in #129 final klassifiziert):
+//  (a) INFRASTRUKTUR-Guards (kein Mandanten-Datenpfad): db-schema (information_schema),
+//      stock-cost-invariant (Invarianten-Check). Bleiben dauerhaft.
+//  (b) Module mit Stufe-4-SCHREIBPFADEN (Lesepfade migriert, upsert/create/delete/
+//      setThreshold bleiben roh = Stufe 4): location-profiles, machine-create,
+//      machine-profiles, settings-thresholds.
 const STILL_BYPASSING = [
-  'correction-cases.js', 'db-schema.js', 'location-profiles.js',
-  'machine-create.js', 'machine-profiles.js', 'product-onboarding.js',
-  'settings-thresholds.js', 'stock-cost-invariant.js',
+  'db-schema.js', 'location-profiles.js', 'machine-create.js',
+  'machine-profiles.js', 'settings-thresholds.js', 'stock-cost-invariant.js',
 ];
 // Pro Slice durch die Tür geführte (migrierte) Lese-Module bzw. -pfade.
 const MIGRATED = [
@@ -107,6 +112,7 @@ const MIGRATED = [
   'assortment-slots.js', 'category-config.js',                          // #125 Sortiment
   'inventory-mhd.js',                                                   // #126 Bestand/MHD/Lager
   'nayax-devices.js',                                                   // #127 (reines Lesemodul ⇒ voll migriert)
+  'correction-cases.js', 'product-onboarding.js',                      // #128 (reine Lesemodule ⇒ voll migriert)
 ];
 
 test('#123 Guard scharf: kein Bypass außerhalb der schrumpfenden Allowlist (Default-Deny)', () => {

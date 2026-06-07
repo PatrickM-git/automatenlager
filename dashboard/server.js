@@ -2427,8 +2427,9 @@ const server = http.createServer(async (req, res) => {
       }
       const viewer = getViewer(req);
       const isAdmin = viewer.role === 'admin';
+      if (!tenantReadReady(res)) return;
       try {
-        const rawData = await queryProductOnboardingPg(pgUrl);
+        const rawData = await queryProductOnboardingPg(tenantDb, viewer.tenantId);
         const data = buildProductOnboardingData(rawData);
         let wf2FormUrl = '';
         try {
@@ -2454,6 +2455,7 @@ const server = http.createServer(async (req, res) => {
     // ── Slot-Change routes ────────────────────────────────────────────────────
 
     if (parsed.pathname === '/api/v2/slot-change/preview' && req.method === 'GET') {
+      const viewer = getViewer(req); // #128: Mandant für die Slot-Umbuchungs-Vorschau
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
@@ -2466,37 +2468,40 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_PARAMS', message: 'slot_assignment_id oder machine_id+mdb_code erforderlich.' } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const { Client } = require('pg');
-        const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-        await client.connect();
+        // #128: durch die Mandanten-Tür mit tenant_id-Filter (kein Inline-Client).
         const whereClause = slotAssignmentId
-          ? 'sa.slot_assignment_id = $1'
-          : 'sa.machine_id = $1 AND sa.mdb_code = $2 AND sa.active = true';
+          ? 'sa.slot_assignment_id = $2'
+          : 'sa.machine_id = $2 AND sa.mdb_code = $3 AND sa.active = true';
         const queryParams = slotAssignmentId ? [slotAssignmentId] : [machineId, mdbCode];
-        const slotResult = await client.query(
+        const slotResult = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['slot_assignments', 'machines', 'locations', 'products'],
+          text:
           `SELECT sa.slot_assignment_id, sa.machine_id::text AS machine_id,
                   m.name AS machine_label, sa.mdb_code, sa.product_id,
                   p.name AS product_name, sa.current_machine_qty,
                   sa.target_stock, sa.machine_capacity,
                   l.name AS location_name
              FROM automatenlager.slot_assignments sa
-             JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
-             JOIN automatenlager.locations l ON l.location_id = m.location_id
-             JOIN automatenlager.products p ON p.product_id = sa.product_id
-            WHERE ${whereClause}
+             JOIN automatenlager.machines m ON m.machine_id = sa.machine_id AND m.tenant_id = sa.tenant_id
+             JOIN automatenlager.locations l ON l.location_id = m.location_id AND l.tenant_id = m.tenant_id
+             JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
+            WHERE sa.tenant_id = $1 AND ${whereClause}
             LIMIT 1`,
-          queryParams,
-        );
+          params: queryParams,
+        });
         if (!slotResult.rows.length) {
-          await client.end();
           sendJson(res, 404, { ok: false, error: { code: 'SLOT_NOT_FOUND', message: 'Slot nicht gefunden.' } });
           return;
         }
-        const productResult = await client.query(
-          'SELECT product_id, name FROM automatenlager.products WHERE active = true ORDER BY name',
-        );
-        await client.end();
+        const productResult = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['products'],
+          text: 'SELECT product_id, name FROM automatenlager.products WHERE active = true AND tenant_id = $1 ORDER BY name',
+          params: [],
+        });
         const preview = buildSlotChangePreview(slotResult.rows[0], productResult.rows);
         sendJson(res, 200, { ok: true, ...preview });
       } catch (err) {
@@ -3587,8 +3592,9 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, { ok: true, is_admin: isAdmin, generatedAt: new Date().toISOString(), cases: [], counts: { mdb_proposals: 0, unknown_products: 0, correction_warnings: 0, total: 0 } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const raw = await queryCorrectionCasesPg(pgUrl);
+        const raw = await queryCorrectionCasesPg(tenantDb, viewer.tenantId);
         const { cases, counts } = buildCorrectionCases(raw);
         sendJson(res, 200, { ok: true, is_admin: isAdmin, generatedAt: new Date().toISOString(), cases, counts });
       } catch (err) {
@@ -3606,25 +3612,20 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_CASE_ID', message: 'case_id erforderlich.' } });
         return;
       }
+      const viewer = getViewer(req); // #128: Mandant für die Korrektur-Vorschau (suggest)
       const pgUrl = dashboardV2PgUrl();
       let correctionCase = null;
       let allProducts = [];
       if (pgUrl) {
         try {
-          const { Client } = require('pg');
-          const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-          await client.connect();
-          try {
-            const [rawCases, prodRes] = await Promise.all([
-              queryCorrectionCasesPg(pgUrl).catch(() => ({ proposals: [], unknownTxGroups: [], correctionWarnings: [] })),
-              client.query('SELECT product_id, name FROM automatenlager.products ORDER BY name'),
-            ]);
-            const { cases } = buildCorrectionCases(rawCases);
-            correctionCase = cases.find((c) => c.case_id === caseId) ?? null;
-            allProducts = prodRes.rows.map((r) => ({ ...r, name: formatProductName(r.name) ?? r.name }));
-          } finally {
-            await client.end();
-          }
+          // #128: durch die Mandanten-Tür (tenant_id-Filter), kein Inline-Client.
+          const [rawCases, prodRes] = await Promise.all([
+            queryCorrectionCasesPg(tenantDb, viewer.tenantId).catch(() => ({ proposals: [], unknownTxGroups: [], correctionWarnings: [] })),
+            tenantDb.read({ tenant: viewer.tenantId, tables: ['products'], text: 'SELECT product_id, name FROM automatenlager.products WHERE tenant_id = $1 ORDER BY name', params: [] }),
+          ]);
+          const { cases } = buildCorrectionCases(rawCases);
+          correctionCase = cases.find((c) => c.case_id === caseId) ?? null;
+          allProducts = prodRes.rows.map((r) => ({ ...r, name: formatProductName(r.name) ?? r.name }));
         } catch { /* fall through to empty response */ }
       }
       const { suggestion, products } = buildProductSuggestion(correctionCase ?? { case_id: caseId, suggested_product_id: null, suggested_product_name: null }, allProducts);
@@ -3935,30 +3936,24 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_PARAMS', message: 'product_id erforderlich.' } });
         return;
       }
+      const viewer = getViewer(req); // #128: Mandant für die Slot-Zuweisungs-Vorschau
+      if (!tenantReadReady(res)) return;
       try {
-        const { Client } = require('pg');
-        const client = new Client({ connectionString: pgUrl });
-        await client.connect();
-        let productRow, machineRows;
-        try {
-          const [pRes, mRes] = await Promise.all([
-            client.query(
-              `SELECT p.product_id, p.product_key, p.name
-               FROM automatenlager.products p
-               WHERE p.product_id = $1 LIMIT 1`,
-              [Number(productId)]
-            ),
-            client.query(
-              `SELECT machine_id, area, type, position, nickname
-               FROM automatenlager.machine_profiles
-               ORDER BY area NULLS LAST, machine_id`
-            ),
-          ]);
-          productRow  = pRes.rows[0] || null;
-          machineRows = mRes.rows;
-        } finally {
-          await client.end();
-        }
+        // #128: durch die Mandanten-Tür mit tenant_id-Filter (kein Inline-Client).
+        const [pRes, mRes] = await Promise.all([
+          tenantDb.read({
+            tenant: viewer.tenantId, tables: ['products'],
+            text: `SELECT p.product_id, p.product_key, p.name FROM automatenlager.products p WHERE p.tenant_id = $1 AND p.product_id = $2 LIMIT 1`,
+            params: [Number(productId)],
+          }),
+          tenantDb.read({
+            tenant: viewer.tenantId, tables: ['machine_profiles'],
+            text: `SELECT machine_id, area, type, position, nickname FROM automatenlager.machine_profiles WHERE tenant_id = $1 ORDER BY area NULLS LAST, machine_id`,
+            params: [],
+          }),
+        ]);
+        const productRow  = pRes.rows[0] || null;
+        const machineRows = mRes.rows;
         if (!productRow) {
           sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: `Produkt ${productId} nicht gefunden.` } });
           return;
