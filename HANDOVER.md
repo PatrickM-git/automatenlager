@@ -2,63 +2,83 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-06-07 — Mandantenfähigkeit STUFE 3 „Query-Filter" (Lese-Isolation) — Issues #122–#129 KOMPLETT (Code), Mini-Deploy AUSSTEHEND
+## Stand: 2026-06-07 — Mandantenfähigkeit STUFE 4 „Schreib-Isolation" — Issues #131–#139 KOMPLETT (Code), Mini-Deploy + Live-Smoke AUSSTEHEND
 
-Branch `feat/query-filter-stufe-3` (8 Commits), Suite **1003/1003 grün** (live gegen die
+Branch `feat/write-isolation-stufe-4` (9 Commits), Suite **1056/1056 grün** (live gegen die
 Mini-DB im #94-Sandbox-Harness, ROLLBACK). SPEC:
-`docs/specs/multi-tenant-query-filter-stufe-3-v1.md`. Macht die in Stufe 2 scharf
-gestellte Mandanten-Identität erstmals in den **Lese-Pfaden** wirksam: jede
-DB-gestützte Lese-Abfrage liefert nur noch Daten des **eigenen Mandanten**.
+`docs/specs/multi-tenant-write-isolation-stufe-4-v1.md`. Schließt die in Stufe 3 bewusst
+offen gelassene Lücke: nachdem **Lesen** mandantengetrennt ist (Stufe 3), ist jetzt
+**Schreiben** (INSERT/UPDATE/DELETE/UPSERT) und jede **schreib-auslösende Autorisierung**
+mandantengetrennt — fail-closed und gegen zwei echte Test-Mandanten (`acme`/`globex`)
+nicht-vakuös bewiesen.
 
-### Architektur (das Fundament, #122)
-- **Mandanten-Tür** `dashboard/lib/tenant-db.js` (`createTenantDb`): die EINZIGE legitime
-  Stelle für mandanten-bezogene Reads. `read({tenant, tables, text, params})` +
-  `write(...)` (Stufe-4-Vorbereitung) + `forTenant`/`forViewer` + `asDoor` (Brücke:
-  akzeptiert Tür ODER rohen pg-Client → gewrappt). Fail-closed: kein/leerer Mandant ⇒
-  **leeres** Resultat OHNE Abfrage (kein Default, kein „catch ⇒ alles"). Mandant wird
-  als **`$1`** vorangestellt; eigene Parameter folgen ab `$2`. Technischer Fehler
-  **propagiert** (≠ leer). Stufe-5-Haken (SET LOCAL current_tenant) vorbereitet, inert.
-  Geteilter pg-Pool in `server.js` (Registry + Tür).
-- **#107-Wächter** `dashboard/lib/query-filter-guard.js`: **struktureller** Contract
-  (kein SQL-Parsing) — kein rohes pg (`new Client`/`client.query`/…) außerhalb der Tür.
-  Im **build-blocking-Endzustand** (Test `dashboard-query-filter-guard.test.js`).
-  Enge Global-Allowlist: nur `tenants`/`tenant_users`/`platform_admins` (Verzeichnis).
-  Doku: `docs/security/query-filter-guard-allowlist.md`.
-- **Fixtures** `dashboard/tests/helpers/tenant-fixtures.js`: beidseitige `acme`/`globex`
-  (FK-konsistente Kette) im Sandbox-Harness; `doorForClient`; Advisory-Lock gegen
-  DDL-vs-DML-Deadlock über parallele Sandbox-Transaktionen.
+### Was umgesetzt wurde (Code)
 
-### Migrierte Lese-Domänen (je nicht-vakuöser acme↔globex-Isolationstest)
-- **#123 Finanzen/GuV** — economics, economics-live (inkl. Aggregate + MatView `mv_inventory_value_daily`).
-- **#124 Übersicht/Cockpit/Monitoring** — overview-monitoring, automaten-view, **alert-digest**
-  (Hintergrund-Job: Mandant aus expliziter Quelle `tenant-directory.listTenantIds`, pro
-  Mandant, KEIN Default; `audit.workflow_runs` = System-Telemetrie, tenant-gated).
-- **#125 Sortiment** — assortment-slots, category-config, settings-thresholds(Read).
-- **#126 Bestand/MHD/Lager** — inventory-mhd + Refill-Vorschauen.
-- **#127 Automaten/Standorte/Nayax/Einstellungen** — machine-profiles, location-profiles,
-  nayax-devices, nayax-abgleich. + **Startup-Race-Fix** (Ready-Log erst nach Registry-Load).
-- **#128 Korrektur/Onboarding/Slots** — correction-cases, product-onboarding + slot-Vorschauen.
+- **#131 Fundament** (`lib/tenant-db.js`): `write()` ist **fail-closed-werfend** (kein
+  Mandant ⇒ Fehler statt stillem `{rowCount:0}`); `read()` bleibt fail-closed-**leer**.
+  Neuer transaktionaler Modus **`db.tx(tenant, fn)`** (BEGIN → tür-gebundenes read+write,
+  Mandant als `$1` → COMMIT/ROLLBACK; dedizierter Client aus dem Pool). Inerter
+  **Stufe-5-RLS-Haken** (`SET LOCAL automatenlager.current_tenant`) als kommentierter
+  Steckplatz in `db.tx`. Body-Tenant-Reject-Helper `lib/write-guards.js`
+  (`tenant_id`/`mandant_id` im Body ⇒ 400 + Audit). #107-Guard um `entryFiles` erweitert
+  (erfasst Schreibpfade auch außerhalb `lib/`). Schreib-Fixtures `WRITE_PATH_TABLES` +
+  `sandboxTxPool` (SAVEPOINT-Mapping für `db.tx` im Sandbox-Harness).
+- **#132 DDL 0020:** `locations`/`machines`/`machine_profiles` — globale `(key)`-Uniques
+  gedroppt, ersetzt durch `UNIQUE NULLS NOT DISTINCT (tenant_id, key)`. Idempotent,
+  Vorab-Checks. (Eigentümer-freigegebene „Variante 2".) `#111` Scope um diese 3 Tabellen
+  reduziert (Kommentar gesetzt, **nicht** geschlossen).
+- **#136 DDL 0021:** `machine_profiles`-tenant-treue-Trigger (aus `0017`) mandanten-
+  skopiert (`AND tenant_id = NEW.tenant_id`) — `0020` machte die globale
+  `machine_key`-Auflösung mehrdeutig. **Folge-Korrektur zu 0020.**
+- **#133/#134 Webhook-Tore:** `refill/trigger` + `slot-assign-inline/confirm` mit
+  `requireMachineAccess`; `correction-action/confirm` + `onboarding/start` mit
+  Case-Mitgliedschaftsprüfung (`requireCaseAccess`, NICHT Maschine). Alle vier + Body-
+  Tenant-Reject. **Bugfix:** `readJsonBody` war am slot-assign-Endpunkt nie definiert
+  (Body kam immer als `{}` an) — jetzt definiert.
+- **#135/#136/#137/#138 direkte Schreiber durch die Tür:** `location-profiles`
+  (UPSERT/DELETE, `db.tx`-DELETE), `machine-create` (`db.tx`, Parent-`location_id` IN der
+  Transaktion ⇒ fremd = 404), `machine-profiles`, `settings-thresholds` (UPSERT/DELETE,
+  fail-closed-werfend, kein `__default__`-Default mehr in den Schreibfunktionen),
+  `write-off` (inline-Transaktion aus `server.js` in `lib/write-off.js::writeOffBatchPg`
+  ausgelagert, `SELECT … FOR UPDATE` + UPDATE atomar, tenant-skopiert).
+- **#139 Abschluss:** Guard-Schreibpfad-Allowlist **leer** (`STUFE4_WRITE_ALLOWLIST = []`)
+  ⇒ `lib/`-Guard build-blocking; Stufe-5-Haken dokumentiert + inert; Konsolidierungstest
+  `dashboard-mt-stufe4-abschluss.test.js` (Break-Glass an allen 12 neuen Endpunkten,
+  fail-closed, Guard-Endzustand); Doku `docs/security/query-filter-guard-allowlist.md`.
 
-### Wichtige Einordnung (Abgrenzung)
-- App-Filter allein sind **nicht** die finale Garantie. **RLS = Stufe 5** ist der
-  unumgehbare DB-Backstop und kommt **ohne Lücke**; **Schreib-Isolation = Stufe 4**
-  direkt im Anschluss. **Kein zweiter realer Kunde vor Stufe 3+4+5.** Mit nur einem
-  realen Mandanten (Faltrix) leckt während des Umbaus nichts (keine zweiten Echtdaten).
-- **Schreibpfade unverändert (Stufe 4):** upsert/create/delete/setThreshold der Module
-  location-profiles/machine-create/machine-profiles/settings-thresholds bleiben roh und
-  stehen bewusst (dokumentiert) auf der Guard-Allowlist. Infrastruktur-Guards
-  (db-schema, stock-cost-invariant) lesen kein Mandanten-Datum → dauerhafte Ausnahme.
-- **Config (classification_settings)** wird weiter unter `__default__` gelesen (nicht
-  per Viewer) — per-Mandant-Config ist Stufe 6 (mandant_id→tenant_id). Korrektur in
-  #125: ein latenter Regress aus #123/#124 (Config per Viewer) wurde rückgängig gemacht.
+### Nicht-vakuöse Isolationstests (acme/globex)
 
-## Nächste Schritte
-1. **PR mergen** (Branch `feat/query-filter-stufe-3`, schließt #107 + #122–#129) und
-   **auf den Mini deployen** (reiner Code-Deploy ohne DDL: `git pull --ff-only` +
-   Container-Restart). **Finaler Live-Smoke am Mini:** Eigentümer-Zugriff auf alle Panels
-   (GuV, Übersicht, Cockpit, Sortiment, Bestand/MHD, Automaten, Korrektur, Onboarding)
-   liefert unverändert die Faltrix-Daten; keine leeren Ansichten, keine Fehler.
-2. **Stufe 4 (Schreib-Isolation):** die in Stufe 3 bewusst rohen Schreibpfade durch die
-   Tür/`db.write` führen + Objekt-Isolation an allen Schreib-Endpunkten.
-3. **Stufe 5 (RLS):** den Stufe-5-Haken der Tür zünden (`SET LOCAL current_tenant`) +
-   Supabase Row-Level-Security — der unumgehbare Backstop.
+Pro Domäne ein eigener `dashboard-mt-*-isolation.test.js`: gleicher Key ⇒ getrennte
+Zeilen (kein Cross-Tenant-Überschreiben), fremder Parent ⇒ 404/NOT_FOUND ohne Änderung,
+fail-closed ohne Mandant, Side-Effects-Isolation (settings-thresholds), Owner-Regression.
+Sandbox-Tests wenden `0020`(+`0021`) vorab an (DDL vor Code).
+
+### ⚠️ AUSSTEHEND — vor „erledigt": Mini-Deploy + Live-Smoke (#139, AC6)
+
+Stufe 4 enthält **DDL** — diese muss VOR dem Code auf den Mini:
+
+1. **PR mergen** (`feat/write-isolation-stufe-4`) → schließt #131–#139.
+2. **Mini-Deploy (HP-Mini, nie localhost):** `git pull --ff-only`, dann **Migration `0020`
+   UND `0021`** anwenden (`psql $PGURL -f dashboard/db-migrations/0020-*.sql` und
+   `0021-*.sql`; beide idempotent), dann Container-Restart.
+3. **Live-Smoke:** Eigentümer-Schreibungen am echten Dashboard prüfen — Standort
+   anlegen/löschen, Maschine anlegen + aussondern, Schwelle setzen/zurücksetzen, Charge
+   ausbuchen. Keine falschen „gespeichert", keine Fehler.
+
+### Abgrenzung / nächste Stufen
+
+- **Stufe 5 (RLS):** den inerten `SET LOCAL`-Haken in `db.tx` zünden — der unumgehbare
+  DB-Backstop. **Kein zweiter realer Kunde vor Stufe 3+4+5.**
+- **Stufe 6:** n8n-eigene Schreibpfade; per-Mandant-Config (`classification_settings`
+  bleibt `mandant_id`/`__default__`; `settings_thresholds`-Endpunkt schreibt weiter unter
+  `DEFAULT_MANDANT`); restliche globale `(key)`-Uniques (#111, Scope ohne
+  locations/machines).
+- **Stufe 8:** UI (Mandanten-Selektor, Support-Bedien-UI).
+
+### Bekannte Test-Eigenheit
+
+Die volle Suite (`node --test`, ~45 Dateien) zeigt sporadisch 1–3 **transiente**
+Fehlschläge unter Last (viele Spawned-Server + Sandbox-Verbindungen gleichzeitig gegen EINE
+Mini-DB). Gezielte Läufe einzelner Dateien sind deterministisch grün. Bei einem roten
+Volllauf: die betroffenen Dateien einzeln nachfahren (kein Code-Fehler, Verbindungs-
+Kontention).
