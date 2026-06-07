@@ -31,7 +31,8 @@ test('#122 Guard Melde-Modus: Worklist aller noch ungefilterten Lesepfade, brich
   assert.ok(report.bypass.length > 0, 'Melde-Modus listet noch-ungefilterte Lesepfade');
   const files = report.bypass.map((b) => b.file);
   // Stabile Vertreter, die heute noch direkt pg nutzen (noch nicht migriert):
-  for (const known of ['machine-profiles.js', 'location-profiles.js', 'machine-create.js']) {
+  // (location-profiles.js ist seit #135 durch die Tür ⇒ nicht mehr im Bypass.)
+  for (const known of ['machine-profiles.js', 'machine-create.js']) {
     assert.ok(files.includes(known), `Worklist enthält ${known}`);
   }
   // Jeder Eintrag trägt eine Begründung (welches Muster).
@@ -81,10 +82,10 @@ test('#122 Guard findViolations: schrumpfende Allowlist (bereichsweise scharf)',
   assert.equal(none.length, 0, 'mit voller Allowlist keine Verstöße');
 
   // Einen Bereich „scharf schalten" (aus der Allowlist nehmen) ⇒ er wird zum Verstoß.
-  const sharpened = allBypass.filter((f) => f !== 'location-profiles.js');
+  const sharpened = allBypass.filter((f) => f !== 'machine-create.js');
   const violations = guard.findViolations({ libDir: LIB_DIR, allowlist: sharpened });
-  assert.ok(violations.some((v) => v.file === 'location-profiles.js'),
-    'ein aus der Allowlist genommener (noch nicht migrierter) Lesepfad ist ein Verstoß');
+  assert.ok(violations.some((v) => v.file === 'machine-create.js'),
+    'ein aus der Allowlist genommener (noch nicht migrierter) Schreibpfad ist ein Verstoß');
 });
 
 // ── Bereichsweise scharf (Default-Deny, schrumpfende Allowlist) ──────────────────
@@ -102,7 +103,7 @@ test('#122 Guard findViolations: schrumpfende Allowlist (bereichsweise scharf)',
 //      setThreshold bleiben roh = Stufe 4): location-profiles, machine-create,
 //      machine-profiles, settings-thresholds.
 const STILL_BYPASSING = [
-  'db-schema.js', 'location-profiles.js', 'machine-create.js',
+  'db-schema.js', 'machine-create.js',
   'machine-profiles.js', 'settings-thresholds.js', 'stock-cost-invariant.js',
 ];
 // Pro Slice durch die Tür geführte (migrierte) Lese-Module bzw. -pfade.
@@ -163,7 +164,7 @@ test('#122 Guard: Global-Allowlist ist bewusst eng (keine schleichende Aufblähu
 // ─────────────────────────────────────────────────────────────────────────────
 const INFRASTRUCTURE_ALLOWLIST = ['db-schema.js', 'stock-cost-invariant.js'];
 const STUFE4_WRITE_ALLOWLIST = [
-  'location-profiles.js', 'machine-create.js', 'machine-profiles.js', 'settings-thresholds.js',
+  'machine-create.js', 'machine-profiles.js', 'settings-thresholds.js',
 ];
 const FINAL_ALLOWLIST = [...INFRASTRUCTURE_ALLOWLIST, ...STUFE4_WRITE_ALLOWLIST];
 

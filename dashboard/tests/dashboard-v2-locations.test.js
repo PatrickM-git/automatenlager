@@ -110,32 +110,46 @@ test('queryLocationsPg-Ergebnis ist direkt mit buildLocationComparison kompatibe
 
 // ── Schreibpfad: upsertLocationPg an reales Schema angepasst ────────────────────
 
-test('upsertLocationPg schreibt nur reale Spalten und nutzt ON CONFLICT (location_key)', async () => {
-  const fake = makeFakeClient((sql, params) => [
-    { location_id: '7', location_key: params[0], name: params[1], location_type: params[2], customer_group: params[3], notes: params[4] },
-  ]);
+// #135: tür-basiert (Mandant als $1 vorangestellt). Die injizierte query-Funktion
+// ist die Systemgrenze DB; assertOnlyRealLocationColumns spielt die PG-Spaltenprüfung.
+function makeDoorCapture(rowFor) {
+  const calls = [];
+  const db = createTenantDb({
+    query: async (sql, params) => {
+      assertOnlyRealLocationColumns(sql);
+      calls.push({ sql, params });
+      return { rows: [rowFor(params)], rowCount: 1 };
+    },
+  });
+  return { db, calls };
+}
 
-  const saved = await upsertLocationPg('x', {
+test('upsertLocationPg schreibt nur reale Spalten und nutzt ON CONFLICT (tenant_id, location_key)', async () => {
+  // params (mit vorangestelltem Mandanten): [tenant, location_key, name, location_type, customer_group, notes]
+  const { db, calls } = makeDoorCapture((p) => ({ location_id: '7', location_key: p[1], name: p[2], location_type: p[3], customer_group: p[4], notes: p[5] }));
+
+  const saved = await upsertLocationPg(db, 'acme', {
     name: 'Büro Berlin',
     status: 'aktiv',
     notes: 'Kantine EG',
     start_date: null,
     target_group: 'Mitarbeiter',
     machine_ids: ['VM01'],
-  }, () => fake);
+  });
 
-  const { sql, params } = fake.calls[0];
-  // ON CONFLICT muss auf den realen Unique-Key (location_key) zielen, nicht auf name.
-  assert.match(sql, /ON CONFLICT \(location_key\)/);
+  const { sql, params } = calls[0];
+  // #132/#135: ON CONFLICT mandantengetrennt — nie das Überschreiben fremder Standorte.
+  assert.match(sql, /ON CONFLICT \(tenant_id, location_key\)/);
   // Nicht existierende Spalten dürfen nicht geschrieben werden.
   assert.doesNotMatch(sql, /\bstatus\b/);
   assert.doesNotMatch(sql, /start_date/);
   assert.doesNotMatch(sql, /machine_ids/);
-  // Mapping: target_group → customer_group, location_key aus Name generiert.
-  assert.equal(params[0], 'LOC_BUERO_BERLIN');
-  assert.equal(params[1], 'Büro Berlin');
-  assert.equal(params[3], 'Mitarbeiter');
-  assert.equal(params[4], 'Kantine EG');
+  // Mandant als $1; eigene Parameter ab $2. Mapping target_group → customer_group.
+  assert.equal(params[0], 'acme');
+  assert.equal(params[1], 'LOC_BUERO_BERLIN');
+  assert.equal(params[2], 'Büro Berlin');
+  assert.equal(params[4], 'Mitarbeiter');
+  assert.equal(params[5], 'Kantine EG');
   // Ergebnis wird zurück ins Domänenmodell gemappt.
   assert.equal(saved.name, 'Büro Berlin');
   assert.equal(saved.target_group, 'Mitarbeiter');
@@ -143,15 +157,14 @@ test('upsertLocationPg schreibt nur reale Spalten und nutzt ON CONFLICT (locatio
 });
 
 test('upsertLocationPg akzeptiert expliziten location_key und location_type', async () => {
-  const fake = makeFakeClient((sql, params) => [
-    { location_id: '8', location_key: params[0], name: params[1], location_type: params[2], customer_group: params[3], notes: params[4] },
-  ]);
-  await upsertLocationPg('x', {
+  const { db, calls } = makeDoorCapture((p) => ({ location_id: '8', location_key: p[1], name: p[2], location_type: p[3], customer_group: p[4], notes: p[5] }));
+  await upsertLocationPg(db, 'acme', {
     name: 'DPFA Chemnitz', status: 'aktiv', machine_ids: [],
     location_key: 'LOC_DPFA_CHEMNITZ', location_type: 'bildung',
-  }, () => fake);
-  assert.equal(fake.calls[0].params[0], 'LOC_DPFA_CHEMNITZ');
-  assert.equal(fake.calls[0].params[2], 'bildung');
+  });
+  assert.equal(calls[0].params[0], 'acme');             // Mandant als $1
+  assert.equal(calls[0].params[1], 'LOC_DPFA_CHEMNITZ'); // location_key
+  assert.equal(calls[0].params[3], 'bildung');           // location_type
 });
 
 test('slugifyLocationKey transliteriert Umlaute und erzeugt LOC_-Prefix', () => {

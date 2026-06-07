@@ -393,8 +393,10 @@ const tenantDirectory = buildTenantDirectory();
 // (Fundament) absichtlich von KEINEM Endpunkt konsumiert — es wird in diesem Slice
 // kein Lesepfad migriert. Steht für die Slices #123ff. bereit (fail-closed, siehe
 // lib/tenant-db.js). `null` ohne konfiguriertes PG (Dev/Test).
+// #135 (Stufe 4): Der Pool wird zusätzlich übergeben, damit der transaktionale
+// Schreib-Modus `db.tx` einen DEDIZIERTEN Client (BEGIN/COMMIT/ROLLBACK) holen kann.
 const tenantDb = sharedPgQuery
-  ? createTenantDb({ query: sharedPgQuery, log: (...a) => console.error('[tenant-db]', ...a) })
+  ? createTenantDb({ query: sharedPgQuery, pool: sharedPgPool, log: (...a) => console.error('[tenant-db]', ...a) })
   : null;
 
 // Initialer Snapshot (non-blocking, wie die übrigen Startup-Checks). Erfolg ⇒
@@ -3483,7 +3485,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const raw = JSON.parse(body);
         const profile = buildLocationProfile(raw);
-        const saved = await upsertLocationPg(pgUrl, profile);
+        const saved = await upsertLocationPg(tenantDb, viewer.tenantId, profile); // #135: durch die Tür
         sendJson(res, 200, { ok: true, data: saved });
       } catch (err) {
         if (err.message.match(/name|status/i)) {
@@ -3609,7 +3611,7 @@ const server = http.createServer(async (req, res) => {
       if (!pgUrl) { sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } }); return; }
       try {
         const raw = JSON.parse(body || '{}');
-        const result = await deleteLocationPg(pgUrl, raw.location_key);
+        const result = await deleteLocationPg(tenantDb, viewer.tenantId, raw.location_key); // #135: durch die Tür
         sendJson(res, 200, { ok: true, data: result });
       } catch (err) {
         const code = err.code === 'LOCATION_NOT_EMPTY' ? 409
