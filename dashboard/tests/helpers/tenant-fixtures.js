@@ -38,6 +38,9 @@ const WRITE_PATH_TABLES = Object.freeze([
 // Promise.all (mehrere Reads gleichzeitig) — ein einzelner pg-Client kann aber
 // keine parallelen Queries fahren (Produktion nutzt einen Pool). Daher hier
 // serialisieren: jede Query wartet auf die vorherige. Reines Test-Hilfsmittel.
+// #144 (Stufe 5): AMBIENT-Tür — read()/write() setzen den RLS-GUC und laufen in
+// der bestehenden Sandbox-Transaktion (kein eigenes BEGIN/COMMIT, das den
+// äußeren ROLLBACK bräche). set_config(local) gilt für die äußere Transaktion.
 function doorForClient(client) {
   const { createTenantDb } = require('../../lib/tenant-db.js');
   let tail = Promise.resolve();
@@ -46,7 +49,7 @@ function doorForClient(client) {
     tail = result.catch(() => {}); // Kette auch nach Fehler am Leben halten
     return result;
   };
-  return createTenantDb({ query });
+  return createTenantDb({ query, ambient: true });
 }
 
 // Pool-Attrappe für db.tx() IM #94-Sandbox-Harness (#131): Der Sandbox-Client
@@ -67,7 +70,7 @@ function sandboxTxPool(client) {
       return {
         query: async (sql, params) => {
           const s = String(sql).trim().toUpperCase();
-          if (s === 'BEGIN') { opened = true; return client.query(`SAVEPOINT ${sp}`); }
+          if (s === 'BEGIN' || s === 'BEGIN READ ONLY') { opened = true; return client.query(`SAVEPOINT ${sp}`); } // #144: read() öffnet BEGIN READ ONLY
           if (s === 'COMMIT') return client.query(`RELEASE SAVEPOINT ${sp}`);
           if (s === 'ROLLBACK') return opened ? client.query(`ROLLBACK TO SAVEPOINT ${sp}`) : { rows: [], rowCount: 0 };
           return client.query(sql, params);
@@ -218,7 +221,19 @@ async function seedTenant(client, tenantId, opts = {}) {
 async function seedAcmeGlobex(client) {
   const acme = await seedTenant(client, 'acme', { revenueBase: 100 });
   const globex = await seedTenant(client, 'globex', { revenueBase: 250 });
+  await ensureInventoryValueView(client);
   return { acme, globex };
 }
 
-module.exports = { seedTenant, seedAcmeGlobex, READ_PATH_TABLES, WRITE_PATH_TABLES, doorForClient, sandboxTxPool };
+// #149 (Stufe 5): Die App liest mv_inventory_value_daily NUR noch über die
+// GUC-gefilterte Security-View v_inventory_value_daily (Migration 0026, da MatViews
+// keine RLS tragen). Tests, die economics/assortment über die Tür lesen, brauchen
+// die View. Minimal-DDL ohne Grants (Sandbox-Owner). HALTE IDENTISCH zu 0026 §4.
+async function ensureInventoryValueView(client) {
+  await client.query(
+    `CREATE OR REPLACE VIEW automatenlager.v_inventory_value_daily WITH (security_barrier = true) AS
+       SELECT * FROM automatenlager.mv_inventory_value_daily
+        WHERE tenant_id = current_setting('automatenlager.current_tenant')`);
+}
+
+module.exports = { seedTenant, seedAcmeGlobex, ensureInventoryValueView, READ_PATH_TABLES, WRITE_PATH_TABLES, doorForClient, sandboxTxPool };

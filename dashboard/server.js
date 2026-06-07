@@ -365,23 +365,43 @@ function dashboardV2PgUrl() {
 // EIN geteilter pg-Pool für die mandanten-bewusste Infrastruktur: Stufe-2-Registry
 // (lib/tenant-directory.js) UND Stufe-3-Mandanten-Tür (lib/tenant-db.js) teilen sich
 // denselben Pool (zentralisierter DB-Zugriff, SPEC §"DB-Zugriff zentralisiert").
-function buildSharedPgPool() {
-  const pgUrl = dashboardV2PgUrl();
-  if (!pgUrl) return null;
+// #144 (Stufe 5): ZWEI getrennte Verbindungen statt einer geteilten.
+//  - INFRA-Pool (Owner/BYPASSRLS-Rolle): Bootstrap (Verzeichnis-Lookup, der
+//    tenant_users/platform_admins liest, BEVOR ein Mandant feststeht → kein GUC
+//    setzbar), Migrationen, MatView-REFRESH. Umgeht RLS bewusst.
+//  - APP-Pool (RLS-unterworfene Rolle `automatenlager_app`): ALLER Mandanten-
+//    Verkehr durch die Tür. Fällt auf die Infra-URL zurück, solange
+//    DASHBOARD_V2_APP_PG_URL nicht gesetzt ist (Slice 1 inert; Slice 2 schaltet
+//    via .env.local die App-Rolle scharf).
+function buildPgPool(url) {
+  if (!url) return null;
   const { Pool } = require('pg');
-  const pool = new Pool({ connectionString: pgUrl, max: 5, connectionTimeoutMillis: 3000 });
+  const pool = new Pool({ connectionString: url, max: 5, connectionTimeoutMillis: 3000 });
   pool.on('error', (err) => console.error('[pg-pool] Pool-Fehler:', err && err.message));
   return pool;
 }
 
-const sharedPgPool = buildSharedPgPool();
-const sharedPgQuery = sharedPgPool ? (sql, params) => sharedPgPool.query(sql, params) : null;
+// Separate App-Rollen-URL (RLS). Prozess-Umgebung hat Vorrang vor .env.local;
+// fehlt der Schlüssel ⇒ Infra-URL (Slice-1-Verhalten: identische Rolle, inert).
+function dashboardV2AppPgUrl() {
+  const pe = process.env;
+  if (Object.prototype.hasOwnProperty.call(pe, 'DASHBOARD_V2_APP_PG_URL')) {
+    return String(pe.DASHBOARD_V2_APP_PG_URL || '').trim() || dashboardV2PgUrl();
+  }
+  const local = loadLocalEnv();
+  const fromLocal = String((local && local.DASHBOARD_V2_APP_PG_URL) || '').trim();
+  return fromLocal || dashboardV2PgUrl();
+}
+
+const infraPgPool = buildPgPool(dashboardV2PgUrl());
+const infraPgQuery = infraPgPool ? (sql, params) => infraPgPool.query(sql, params) : null;
+const appPgPool = buildPgPool(dashboardV2AppPgUrl());
 
 function buildTenantDirectory() {
-  if (!sharedPgQuery) return null;
+  if (!infraPgQuery) return null; // Verzeichnis läuft über die INFRA-Verbindung (RLS-umgehend, Bootstrap)
   const ttlEnv = Number(process.env.DASHBOARD_TENANT_DIR_TTL_MS);
   return createTenantDirectory({
-    query: sharedPgQuery,
+    query: infraPgQuery,
     ttlMs: Number.isFinite(ttlEnv) && ttlEnv > 0 ? ttlEnv : undefined,
     logger: (...a) => console.error('[tenant-directory]', ...a),
   });
@@ -395,8 +415,8 @@ const tenantDirectory = buildTenantDirectory();
 // lib/tenant-db.js). `null` ohne konfiguriertes PG (Dev/Test).
 // #135 (Stufe 4): Der Pool wird zusätzlich übergeben, damit der transaktionale
 // Schreib-Modus `db.tx` einen DEDIZIERTEN Client (BEGIN/COMMIT/ROLLBACK) holen kann.
-const tenantDb = sharedPgQuery
-  ? createTenantDb({ query: sharedPgQuery, pool: sharedPgPool, log: (...a) => console.error('[tenant-db]', ...a) })
+const tenantDb = appPgPool
+  ? createTenantDb({ query: (sql, params) => appPgPool.query(sql, params), pool: appPgPool, log: (...a) => console.error('[tenant-db]', ...a) })
   : null;
 
 // Initialer Snapshot (non-blocking, wie die übrigen Startup-Checks). Erfolg ⇒

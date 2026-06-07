@@ -1,54 +1,70 @@
 'use strict';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mandanten-Tür (Deep Module) — Issue #122, Stufe 3.
-// SPEC: docs/specs/multi-tenant-query-filter-stufe-3-v1.md
+// Mandanten-Tür (Deep Module) — Issue #122 (Stufe 3) · Stufe 4 (Schreib-Tx) ·
+// Stufe 5 (RLS-GUC, #144). SPEC: docs/specs/multi-tenant-rls-stufe-5-v1.md
 //
-// Die EINZIGE legitime Stelle für mandanten-bezogene DB-Reads. Statt 40-mal
+// Die EINZIGE legitime Stelle für mandanten-bezogene DB-Zugriffe. Statt 40-mal
 // kopierter `WHERE tenant_id = …`-Filter gibt es EINE Stelle, an der die
-// Mandanten-Bindung erzwungen wird. Direkte DB-Reads an der Tür vorbei sind
+// Mandanten-Bindung erzwungen wird. Direkte DB-Zugriffe an der Tür vorbei sind
 // verboten (No-Bypass) — der #107-Wächter (lib/query-filter-guard.js) markiert sie.
 //
-// VERTRAG (bewusst ehrlich, keine SQL-Magie — vgl. SPEC §"Vertrag"):
+// VERTRAG (bewusst ehrlich, keine SQL-Magie):
 //   (a) Die Tür ERZWINGT, dass ein Mandant deklariert ist (fail-closed).
 //   (b) Sie stellt den Mandanten-Wert jeder Abfrage EINHEITLICH als ERSTEN
 //       Positions-Parameter ($1) bereit; die Query trägt ihren tenant_id-Filter
 //       selbst (`WHERE x.tenant_id = $1`), eigene Parameter folgen ab $2.
-//   (c) Jeder Tür-Aufruf übergibt EXPLIZIT den/die Zieltabelle(n) — der eine
+//   (c) Jeder Tür-Aufruf übergibt EXPLIZIT die Zieltabelle(n) — der eine
 //       Kontrollpunkt, gegen den der #107-Wächter prüft.
 //
-// FEHLER-/LEERFALL-TAXONOMIE (konsistent zu Stufe 2):
-//   * kein/leerer/null Mandant  ⇒ LEERES Resultat, KEINE Abfrage (kein Default,
-//     kein „catch ⇒ alles zeigen"). Es wird für einen tenant-losen Aufrufer
-//     KEINE mandanten-bezogene Query ausgeführt.
-//   * technischer DB-/Pool-Fehler ⇒ Fehler PROPAGIEREN (await wirft) — NIE als
-//     „legitim leer" maskiert. Ein Aussetzer ist von „0 Zeilen" unterscheidbar.
+// STUFE-5-RLS (#144 — GEZÜNDET): read()/write()/tx() setzen jetzt die
+// transaktionslokale Sitzungsvariable `automatenlager.current_tenant` per
+// parametrisiertem `set_config(..., $1, true)` (NIE string-interpoliertes SET →
+// Injection-Korridor). So weist die DB fremde Zeilen selbst dann ab, wenn ein
+// tenant_id-Prädikat fehlte (RLS-Backstop, scharf ab Slice 3). Inert, solange
+// keine Policy existiert.
 //
-// DB-ZUGRIFF ZENTRALISIERT: Die Tür nimmt — wie die Stufe-2-Registry
-// (lib/tenant-directory.js) — eine injizierte `query`-Funktion entgegen (aus
-// EINEM geteilten Pool in server.js); sie kann alternativ einen Pool annehmen.
-// Die Tür ist die EINE erlaubte DB-Zugriffsschicht: der #107-Wächter klassifiziert
-// `lib/tenant-db.js` als Tür (DOOR_FILES) — „kein DB-Zugriff AUSSERHALB der Tür".
+//   * MANAGED-Modus (Produktion): die Tür hat einen Pool. Jeder read()/write()
+//     holt einen DEDIZIERTEN Client, öffnet eine Transaktion (read: BEGIN READ
+//     ONLY), setzt den GUC, führt die Query aus, COMMIT (ROLLBACK bei Fehler),
+//     gibt den Client frei. Pool-PFLICHT: read()/write() OHNE Pool werfen (kein
+//     stiller nicht-transaktionaler Fallback, der RLS umginge).
+//   * AMBIENT-Modus (Tür über EINEN bereits in einer Transaktion laufenden
+//     Client — asDoor(client), #94-Sandbox): set_config(local) + Query auf
+//     demselben Client, OHNE eigenes BEGIN/COMMIT (die umgebende Transaktion
+//     verwaltet der Aufrufer). Explizit via `ambient:true`.
 //
-// STUFE-5-HAKEN (gebaut, NICHT gezündet): Die Tür ist der eine Ort, an dem in
-// Stufe 5 zusätzlich die RLS-Sitzungsvariable `SET LOCAL automatenlager.current_tenant`
-// gesetzt wird (eigener Client + Transaktion), sodass die DB fremde Zeilen selbst
-// dann abweist, wenn ein tenant_id-Prädikat fehlte. In Stufe 3 bewusst inert:
-// die Filterung leisten die tenant_id-Prädikate; der Haken ist nur vorbereitet.
+// FEHLER-/LEERFALL-TAXONOMIE:
+//   * read() ohne Mandant ⇒ LEERES Resultat, KEINE Transaktion, KEINE Query.
+//   * write()/tx() ohne Mandant ⇒ geworfener FEHLER (fail-closed-werfend).
+//   * technischer DB-/Pool-Fehler ⇒ Fehler PROPAGIEREN (nie als „leer" maskiert).
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Kanonischer, parametrisierter GUC-Setzer. $1 = Mandant, dritter Parameter true
+// = transaktionslokal (kein Kleben an der gepoolten Verbindung). Namensraum
+// `automatenlager.current_tenant` (konsistent zu Seed-Migration 0018; NICHT app.*).
+const SET_TENANT_SQL = "SELECT set_config('automatenlager.current_tenant', $1, true)";
 
 function isValidTenant(tenant) {
   return typeof tenant === 'string' && tenant.trim() !== '';
 }
 
+// Erkennt RLS-Kontextfehler (fehlender/leerer GUC) für distinkte Auditierung.
+function isRlsContextError(err) {
+  const msg = err && (err.message || '');
+  const code = err && err.code;
+  return code === '22023' || /current_tenant|current_setting|configuration parameter/i.test(String(msg));
+}
+
 /**
  * @param {object} opts
  * @param {(sql:string, params:any[]) => Promise<{rows:any[], rowCount?:number}>} [opts.query]
- *        Injizierte DB-Query (aus dem geteilten Pool). Vorzugsweise diese Form.
- * @param {{query:Function}} [opts.pool]  Alternativ ein pg-Pool (es wird pool.query genutzt).
- * @param {(...a:any[]) => void} [opts.log]  optionaler Fehler-Logger
+ *        Injizierte DB-Query. Im AMBIENT-Modus MUSS sie an EINEN Client gebunden sein.
+ * @param {{query:Function, connect?:Function}} [opts.pool]  pg-Pool (MANAGED-Modus).
+ * @param {boolean} [opts.ambient]  true ⇒ AMBIENT-Modus (siehe Kopf).
+ * @param {(...a:any[]) => void} [opts.log]  optionaler Fehler-/Audit-Logger
  */
-function createTenantDb({ query, pool, log } = {}) {
+function createTenantDb({ query, pool, ambient = false, log } = {}) {
   let runQuery = typeof query === 'function' ? query : null;
   if (!runQuery && pool && typeof pool.query === 'function') {
     runQuery = (sql, params) => pool.query(sql, params);
@@ -56,10 +72,9 @@ function createTenantDb({ query, pool, log } = {}) {
   if (!runQuery) {
     throw new TypeError('tenant-db: query-Funktion oder pool erforderlich');
   }
+  const canManage = !!(pool && typeof pool.connect === 'function');
   const logfn = typeof log === 'function' ? log : () => {};
 
-  // Gemeinsame Vertrags-Prüfung: explizite Zieltabelle(n) + SQL-Text sind Pflicht
-  // (Programmierfehler ⇒ wirft, unabhängig vom Mandanten — gilt für read/write/tx).
   function assertTablesAndText(tables, text, who) {
     if (!Array.isArray(tables) || tables.length === 0) {
       throw new TypeError(`tenant-db: ${who}() verlangt explizite Zieltabelle(n) (tables: [...])`);
@@ -68,43 +83,56 @@ function createTenantDb({ query, pool, log } = {}) {
       throw new TypeError(`tenant-db: ${who}() verlangt SQL-Text (text)`);
     }
   }
-  // Mandant einheitlich als $1 voranstellen; eigene Parameter folgen ab $2.
   function withTenantParams(tenant, params) {
     return [tenant, ...(Array.isArray(params) ? params : [params])];
   }
 
+  // MANAGED: dedizierter Client + Transaktion + GUC. `beginSql` unterscheidet
+  // read (BEGIN READ ONLY) von write (BEGIN). Fehler → ROLLBACK + propagieren.
+  async function runManaged(beginSql, tenant, text, params) {
+    const client = await pool.connect();
+    try {
+      await client.query(beginSql);
+      await client.query(SET_TENANT_SQL, [tenant]);
+      const res = await client.query(text, withTenantParams(tenant, params));
+      await client.query('COMMIT');
+      return res;
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (rbErr) {
+        logfn('tenant-db: ROLLBACK fehlgeschlagen', rbErr && rbErr.message);
+      }
+      if (isRlsContextError(err)) logfn('tenant-db: RLS-Kontextfehler (GUC)', { tenant: !!tenant, msg: err && err.message });
+      throw err;
+    } finally {
+      if (typeof client.release === 'function') client.release();
+    }
+  }
+
+  // AMBIENT: GUC + Query auf der vom Aufrufer geöffneten Transaktion (kein BEGIN/COMMIT).
+  async function runAmbient(tenant, text, params) {
+    await runQuery(SET_TENANT_SQL, [tenant]);
+    return runQuery(text, withTenantParams(tenant, params));
+  }
+
   /**
-   * Mandanten-gebundener Read. Siehe VERTRAG oben.
-   * @param {object} req
-   * @param {string} req.tenant            effektiver Mandant (viewer.tenantId)
-   * @param {string[]} req.tables          explizite Zieltabelle(n) — Pflicht
-   * @param {string} req.text              SQL; $1 = Mandant, $2.. = eigene Parameter
-   * @param {any[]} [req.params]           eigene Parameter (landen ab $2)
+   * Mandanten-gebundener Read. fail-closed-LEER ohne Mandant (KEINE Transaktion).
    * @returns {Promise<{rows:any[], rowCount:number, tenantless?:boolean}>}
    */
   async function read({ tenant, tables, text, params = [] } = {}) {
     assertTablesAndText(tables, text, 'read');
     if (!isValidTenant(tenant)) {
-      // fail-closed-LEER: kein Mandant ⇒ leer, KEINE Abfrage, kein Default. „leer"
-      // ist ein GÜLTIGES Lese-Ergebnis (vgl. write(): dort ist es ein FEHLER).
       logfn('tenant-db: read ohne Mandant ⇒ leeres Resultat (fail-closed)', { tables });
       return { rows: [], rowCount: 0, tenantless: true };
     }
-    // ── Stufe-5-Haken (NICHT aktiv) ── Stufe 5 setzt hier zusätzlich
-    // `SET LOCAL automatenlager.current_tenant` auf demselben Client/Trx (RLS).
-    // Inert: in Stufe 3/4 leistet das tenant_id-Prädikat die Filterung.
-    // Technische Fehler propagieren — NIE als leer maskieren.
-    return runQuery(text, withTenantParams(tenant, params));
+    if (ambient) return runAmbient(tenant, text, params);
+    if (canManage) return runManaged('BEGIN READ ONLY', tenant, text, params);
+    // Kein Pool, kein Ambient ⇒ ein RLS-Read ohne eigene Transaktion ist verboten
+    // (würde den GUC nicht transaktionssicher setzen → stiller RLS-Bypass).
+    throw new TypeError('tenant-db: read() braucht einen Pool (eigene Transaktion für den RLS-GUC) oder ambient:true');
   }
 
   /**
-   * Mandanten-gebundener WRITE (Upsert/Insert/Update/Delete). Mechanisch wie read
-   * (Mandant als $1, eigene Parameter ab $2), aber als Schreibpfad.
-   *
-   * STUFE 4 — fail-closed-WERFEND: Kein/leerer Mandant ist beim Schreiben KEIN
-   * stilles `{rowCount:0}` mehr, sondern ein geworfener FEHLER. Damit kann ein
-   * Endpunkt nie „erfolgreich gespeichert" melden, während nichts geschrieben
-   * wurde. (Der Lese-Pfad bleibt fail-closed-LEER — die Asymmetrie ist Absicht.)
+   * Mandanten-gebundener WRITE. fail-closed-WERFEND ohne Mandant.
    * @returns {Promise<{rows:any[], rowCount:number}>}
    */
   async function write({ tenant, tables, text, params = [] } = {}) {
@@ -113,22 +141,15 @@ function createTenantDb({ query, pool, log } = {}) {
       logfn('tenant-db: write ohne Mandant ⇒ FEHLER (fail-closed-werfend)', { tables });
       throw new Error('tenant-db: kein Mandant beim Schreiben — Schreibzugriff verweigert (fail-closed)');
     }
-    return runQuery(text, withTenantParams(tenant, params));
+    if (ambient) return runAmbient(tenant, text, params);
+    if (canManage) return runManaged('BEGIN', tenant, text, params);
+    throw new TypeError('tenant-db: write() braucht einen Pool (eigene Transaktion für den RLS-GUC) oder ambient:true');
   }
 
   /**
-   * Transaktionaler Schreib-Modus (Stufe 4). Bindet einen Mandanten, nimmt einen
-   * DEDIZIERTEN Client aus dem geteilten Pool, öffnet eine Transaktion und übergibt
-   * `fn` eine tür-gebundene Schnittstelle, die LESEN und SCHREIBEN in DERSELBEN
-   * Transaktion erlaubt (Mandant je Query als $1). So laufen „Parent-Eigentum
-   * prüfen" und „schreiben" ATOMAR (TOCTOU-Schutz). COMMIT bei Erfolg, ROLLBACK
-   * bei geworfenem Fehler (Fehler wird propagiert), Client immer freigegeben.
-   *
-   * Genau diese Transaktion ist der vorbereitete (in Stufe 4 INERTE) Steckplatz
-   * für den Stufe-5-RLS-Haken (`SET LOCAL automatenlager.current_tenant`).
-   * @param {string} tenant  effektiver Mandant (viewer.tenantId) — Pflicht, sonst wirft
-   * @param {(door:{tenant:string, read:Function, write:Function}) => Promise<any>} fn
-   * @returns {Promise<any>}  der Rückgabewert von fn
+   * Transaktionaler Schreib-Modus (Stufe 4). Dedizierter Client, EINE Transaktion,
+   * Parent-Prüfung + Write atomar (TOCTOU-Schutz). Stufe 5: setzt den RLS-GUC
+   * EINMAL nach BEGIN — gilt für alle read/write der gebundenen Tür in dieser Tx.
    */
   async function tx(tenant, fn) {
     if (!isValidTenant(tenant)) {
@@ -144,13 +165,8 @@ function createTenantDb({ query, pool, log } = {}) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      // ── Stufe-5-RLS-Haken (GEBAUT, in Stufe 4 INERT) ─────────────────────────
-      // Genau hier setzt Stufe 5 zusätzlich die RLS-Sitzungsvariable auf DEMSELBEN
-      // Client innerhalb DIESER Transaktion:
-      //   await client.query('SET LOCAL automatenlager.current_tenant = $1', [tenant]);
-      // sodass die DB fremde Zeilen selbst dann abweist, wenn ein tenant_id-Prädikat
-      // fehlte. Bewusst auskommentiert: in Stufe 4 leisten die tenant_id-Prädikate
-      // (Mandant als $1) die Trennung; der Haken ist nur vorbereitet (RLS = Stufe 5).
+      // ── Stufe-5-RLS-GUC (gezündet, #144) ── transaktionslokal, parametrisiert.
+      await client.query(SET_TENANT_SQL, [tenant]);
       const result = await fn(makeBoundDoor(client, tenant));
       await client.query('COMMIT');
       return result;
@@ -158,6 +174,7 @@ function createTenantDb({ query, pool, log } = {}) {
       try { await client.query('ROLLBACK'); } catch (rbErr) {
         logfn('tenant-db: ROLLBACK fehlgeschlagen', rbErr && rbErr.message);
       }
+      if (isRlsContextError(err)) logfn('tenant-db: RLS-Kontextfehler (GUC) in tx', err && err.message);
       throw err; // Fehler propagieren — kein stiller No-Op
     } finally {
       if (typeof client.release === 'function') client.release();
@@ -165,7 +182,7 @@ function createTenantDb({ query, pool, log } = {}) {
   }
 
   // Tür-gebundene Schnittstelle INNERHALB einer tx: liest & schreibt auf DEMSELBEN
-  // Client, Mandant einheitlich als $1. Der Mandant ist hier bereits validiert.
+  // Client (GUC bereits in tx() gesetzt), Mandant einheitlich als $1.
   function makeBoundDoor(client, tenant) {
     const runOn = (text, params) => client.query(text, withTenantParams(tenant, params));
     return {
@@ -175,10 +192,6 @@ function createTenantDb({ query, pool, log } = {}) {
     };
   }
 
-  /**
-   * Ergonomische, an EINEN Mandanten gebundene Tür (für die Slice-Module).
-   * `forTenant('').read(...)` ist identisch fail-closed; `.write/.tx` werfen ohne Mandant.
-   */
   function forTenant(tenant) {
     return {
       tenant: isValidTenant(tenant) ? tenant : null,
@@ -188,26 +201,35 @@ function createTenantDb({ query, pool, log } = {}) {
     };
   }
 
-  /** Konsumiert den Stufe-2-Viewer: bindet auf dessen effektiven Mandanten. */
   function forViewer(viewer) {
-    return forTenant(viewer && viewer.tenantId);
+    const bound = forTenant(viewer && viewer.tenantId);
+    // #150 (Stufe 5): Break-Glass (Support-Sitzung) ist READ ONLY — an der Tür
+    // erzwungen, nicht nur per Capability. read() bleibt (intern BEGIN READ ONLY),
+    // write()/tx() werfen. Doppelter Schutz zur DB-seitigen Read-Only-Transaktion.
+    if (viewer && viewer.supportSession && viewer.supportSession.active) {
+      const denyWrite = async () => {
+        logfn('tenant-db: Break-Glass-Schreibversuch verweigert (read-only)');
+        throw new Error('tenant-db: Break-Glass-Sitzung ist read-only — Schreibzugriff verweigert');
+      };
+      return { tenant: bound.tenant, read: bound.read, write: denyWrite, tx: denyWrite };
+    }
+    return bound;
   }
 
   return { read, write, tx, forTenant, forViewer, isValidTenant };
 }
 
-// Migrations-Brücke: nimmt entweder eine fertige Tür (hat .read) ODER einen rohen
-// pg-Client (hat .query) und liefert immer eine Tür. So können geteilte Module
-// (category-config, settings-thresholds) tür-basiert lesen, während noch nicht
-// migrierte Aufrufer (z. B. inventory-mhd #126, Settings-Schreibendpunkte) weiter
-// ihren Client übergeben — der wird transparent in eine Tür gewrappt. Dadurch
-// trägt KEIN geteiltes Modul mehr ein rohes `client.query` (No-Bypass erfüllt).
+// Migrations-Brücke: nimmt eine fertige Tür (hat .read) ODER einen rohen pg-Client
+// (hat .query, läuft in einer vom Aufrufer verwalteten Transaktion) und liefert
+// immer eine Tür. Der Client-Fall baut eine AMBIENT-Tür (GUC + Query auf DEMSELBEN
+// Client, kein eigenes BEGIN/COMMIT). So trägt KEIN geteiltes Modul ein rohes
+// `client.query` (No-Bypass), und der RLS-GUC wird auch hier gesetzt.
 function asDoor(runner) {
   if (runner && typeof runner.read === 'function') return runner; // bereits eine Tür
   if (runner && typeof runner.query === 'function') {
-    return createTenantDb({ query: (sql, params) => runner.query(sql, params) });
+    return createTenantDb({ query: (sql, params) => runner.query(sql, params), ambient: true });
   }
   throw new TypeError('asDoor: Tür (.read) oder pg-Client (.query) erforderlich');
 }
 
-module.exports = { createTenantDb, isValidTenant, asDoor };
+module.exports = { createTenantDb, isValidTenant, asDoor, SET_TENANT_SQL };
