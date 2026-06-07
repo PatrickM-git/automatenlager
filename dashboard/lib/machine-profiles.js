@@ -32,22 +32,22 @@ function getMachineOptions() {
   };
 }
 
-async function queryMachineProfilesPg(pgUrl) {
-  const { Client } = require('pg');
-  const client = new Client({ connectionString: pgUrl });
-  await client.connect();
-  try {
-    const res = await client.query(
+// #127 (Stufe 3): mandantengetrennt durch die Mandanten-Tür (Lesepfad). Mandant = $1.
+// Schreibpfad upsertMachineProfilePg bleibt unverändert = Stufe 4.
+async function queryMachineProfilesPg(db, tenant) {
+  const res = await db.read({
+    tenant,
+    tables: ['machine_profiles', 'machines'],
+    text:
       `SELECT mp.machine_profile_id, mp.machine_id, mp.area, mp.type, mp.position, mp.nickname,
               COALESCE(m.active, TRUE) AS active
        FROM automatenlager.machine_profiles mp
-       LEFT JOIN automatenlager.machines m ON m.machine_key = mp.machine_id
-       ORDER BY mp.area NULLS LAST, mp.type NULLS LAST, mp.machine_id`
-    );
-    return res.rows.map((row) => ({ ...row, label: buildMachineLabel(row) }));
-  } finally {
-    await client.end();
-  }
+       LEFT JOIN automatenlager.machines m ON m.machine_key = mp.machine_id AND m.tenant_id = mp.tenant_id
+       WHERE mp.tenant_id = $1
+       ORDER BY mp.area NULLS LAST, mp.type NULLS LAST, mp.machine_id`,
+    params: [],
+  });
+  return res.rows.map((row) => ({ ...row, label: buildMachineLabel(row) }));
 }
 
 async function upsertMachineProfilePg(pgUrl, profileData) {

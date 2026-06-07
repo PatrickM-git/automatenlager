@@ -13,6 +13,7 @@
  */
 
 const { DEFAULT_CONFIG } = require('./category-config.js');
+const { asDoor } = require('./tenant-db.js'); // #125: getThresholds tür-fähig (No-Bypass)
 
 const CREATE_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS automatenlager.settings_thresholds (
@@ -50,24 +51,30 @@ async function ensureTable(client) {
  *
  * machineId: optional (integer); wenn gesetzt, wird zusätzlich der Automat-Override geladen.
  */
-async function getThresholds(client, tenantId, machineId) {
-  await ensureTable(client);
+// #125 (Stufe 3): READ tür-basiert (asDoor: Tür ODER roher Client→gewrappt). Kein
+// Runtime-CREATE TABLE mehr (Tabelle existiert via Migration 0002). Mandant = $1.
+async function getThresholds(dbOrClient, tenantId, machineId) {
+  const db = asDoor(dbOrClient);
   const tid = String(tenantId || '__default__');
   const mid = machineId != null ? Number(machineId) : null;
 
-  const globalRes = await client.query(
-    `SELECT key, value FROM automatenlager.settings_thresholds WHERE tenant_id = $1 AND machine_id IS NULL`,
-    [tid],
-  );
+  const globalRes = await db.read({
+    tenant: tid,
+    tables: ['settings_thresholds'],
+    text: `SELECT key, value FROM automatenlager.settings_thresholds WHERE tenant_id = $1 AND machine_id IS NULL`,
+    params: [],
+  });
   const globalOverrides = {};
   for (const r of globalRes.rows) globalOverrides[r.key] = r.value;
 
   const machineOverrides = {};
   if (mid != null) {
-    const machRes = await client.query(
-      `SELECT key, value FROM automatenlager.settings_thresholds WHERE tenant_id = $1 AND machine_id = $2`,
-      [tid, mid],
-    );
+    const machRes = await db.read({
+      tenant: tid,
+      tables: ['settings_thresholds'],
+      text: `SELECT key, value FROM automatenlager.settings_thresholds WHERE tenant_id = $1 AND machine_id = $2`,
+      params: [mid],
+    });
     for (const r of machRes.rows) machineOverrides[r.key] = r.value;
   }
 

@@ -29,6 +29,7 @@ const { queryEconomicsScopePg } = require('./lib/automaten-view.js');
 const { queryEconomicsLivePg } = require('./lib/economics-live.js');
 const { resolveViewer, objectAccessAllowed, breakGlassDecision } = require('./lib/auth.js');
 const { createTenantDirectory } = require('./lib/tenant-directory.js');
+const { createTenantDb } = require('./lib/tenant-db.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
 const { runStockCostCheck } = require('./lib/stock-cost-invariant.js');
@@ -346,21 +347,40 @@ function dashboardV2PgUrl() {
 // requireMachineAccess). Initialer Load-Fehler ⇒ Instanz bleibt „nicht bereit"
 // (isReady()===false) ⇒ Health-Check 503, IDOR-Hooks 503 (fail-closed) — es wird
 // NIE mit leerem Verzeichnis serviert und NIE auf einen Default-Mandanten gefallen.
-function buildTenantDirectory() {
+// EIN geteilter pg-Pool für die mandanten-bewusste Infrastruktur: Stufe-2-Registry
+// (lib/tenant-directory.js) UND Stufe-3-Mandanten-Tür (lib/tenant-db.js) teilen sich
+// denselben Pool (zentralisierter DB-Zugriff, SPEC §"DB-Zugriff zentralisiert").
+function buildSharedPgPool() {
   const pgUrl = dashboardV2PgUrl();
   if (!pgUrl) return null;
   const { Pool } = require('pg');
-  const pool = new Pool({ connectionString: pgUrl, max: 2, connectionTimeoutMillis: 3000 });
-  pool.on('error', (err) => console.error('[tenant-directory] Pool-Fehler:', err && err.message));
+  const pool = new Pool({ connectionString: pgUrl, max: 5, connectionTimeoutMillis: 3000 });
+  pool.on('error', (err) => console.error('[pg-pool] Pool-Fehler:', err && err.message));
+  return pool;
+}
+
+const sharedPgPool = buildSharedPgPool();
+const sharedPgQuery = sharedPgPool ? (sql, params) => sharedPgPool.query(sql, params) : null;
+
+function buildTenantDirectory() {
+  if (!sharedPgQuery) return null;
   const ttlEnv = Number(process.env.DASHBOARD_TENANT_DIR_TTL_MS);
   return createTenantDirectory({
-    query: (sql, params) => pool.query(sql, params),
+    query: sharedPgQuery,
     ttlMs: Number.isFinite(ttlEnv) && ttlEnv > 0 ? ttlEnv : undefined,
     logger: (...a) => console.error('[tenant-directory]', ...a),
   });
 }
 
 const tenantDirectory = buildTenantDirectory();
+
+// Stufe-3-Mandanten-Tür: die EINE Lese-Zugriffsschicht über demselben Pool. In #122
+// (Fundament) absichtlich von KEINEM Endpunkt konsumiert — es wird in diesem Slice
+// kein Lesepfad migriert. Steht für die Slices #123ff. bereit (fail-closed, siehe
+// lib/tenant-db.js). `null` ohne konfiguriertes PG (Dev/Test).
+const tenantDb = sharedPgQuery
+  ? createTenantDb({ query: sharedPgQuery, log: (...a) => console.error('[tenant-db]', ...a) })
+  : null;
 
 // Initialer Snapshot (non-blocking, wie die übrigen Startup-Checks). Erfolg ⇒
 // TTL-Auto-Refresh starten; Fehler ⇒ fail-closed (Instanz bleibt unready).
@@ -405,20 +425,31 @@ async function requireMachineAccess(viewer, machineKey, res, event) {
   return requireObjectAccess(viewer, objectTenantId, res, event);
 }
 
+// #123 (Stufe 3): technische Bereitschaft der mandanten-getrennten Lesepfade.
+// Ist PG konfiguriert, aber das Mandanten-Verzeichnis NICHT bereit (z. B. DB
+// unerreichbar), kann der effektive Mandant nicht aufgelöst werden ⇒ die Tür würde
+// fail-closed LEER liefern und damit einen TECHNISCHEN Fehler als „keine Daten"
+// maskieren. SPEC-Taxonomie: technischer Fehler ≠ leer ⇒ hier 503 (kein leeres
+// Resultat). Liefert true (bereit) oder false (503 bereits gesendet).
+function tenantReadReady(res) {
+  if (tenantDirectory && !tenantDirectory.isReady()) {
+    sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: 'Mandanten-Verzeichnis nicht bereit (DB nicht erreichbar).' } });
+    return false;
+  }
+  return true;
+}
+
 // Effektive Kategorie-/Schwellwert-Config (#63) für /einstellungen. Ohne erreichbare
 // DB fallen wir auf die Branchen-Anker-Defaults zurück (die Seite bleibt nutzbar).
 async function loadClassificationConfig(mandantId = DEFAULT_MANDANT) {
-  const pgUrl = dashboardV2PgUrl();
-  if (!pgUrl) return buildEffectiveConfig({});
-  const { Client } = require('pg');
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 3000 });
+  // #125: durch die Mandanten-Tür (geteilter Pool). Config liegt unter mandantId
+  // (Default __default__) — per-Mandant-Config ist Stufe 6. Fehler ⇒ Defaults
+  // (das Dashboard bleibt nutzbar).
+  if (!tenantDb) return buildEffectiveConfig({});
   try {
-    await client.connect();
-    return await loadEffectiveConfig(client, mandantId);
+    return await loadEffectiveConfig(tenantDb, mandantId);
   } catch {
     return buildEffectiveConfig({});
-  } finally {
-    try { await client.end(); } catch { /* ignore */ }
   }
 }
 
@@ -441,7 +472,7 @@ function mergeSettingsOverride(current = {}, incoming = {}) {
 // liest PG (aktive Slots + Nayax-Aliase + Produktnamen) und baut den Diff über
 // die getestete reine Logik in lib/nayax-abgleich.js. Wirft bei Webhook-/PG-
 // Fehlern (mit err.code) -> der Aufrufer mappt auf HTTP-Status.
-async function computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey) {
+async function computeNayaxAbgleichDiff(db, tenant, webhookUrl, machineKey) {
   const wfResp = await fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -462,25 +493,18 @@ async function computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey) {
     || [];
   const nayaxItems = normalizeNayaxItems(Array.isArray(rawItems) ? rawItems : []);
 
-  const { Client } = require('pg');
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  let pgSlots; let aliasRows; let idAliasRows; let productRows;
-  try {
-    const slotsQ = buildActiveSlotsQuery({ machineKey });
-    const aliasQ = buildNayaxAliasesQuery();
-    const idAliasQ = buildNayaxIdAliasesQuery();
-    const prodQ = buildProductsByIdQuery();
-    const [sRes, aRes, idRes, pRes] = await Promise.all([
-      client.query(slotsQ.text, slotsQ.values),
-      client.query(aliasQ.text, aliasQ.values),
-      client.query(idAliasQ.text, idAliasQ.values),
-      client.query(prodQ.text, prodQ.values),
-    ]);
-    pgSlots = sRes.rows; aliasRows = aRes.rows; idAliasRows = idRes.rows; productRows = pRes.rows;
-  } finally {
-    await client.end();
-  }
+  // #127: 4 Reads durch die Mandanten-Tür (tenant_id-Filter in den Buildern, Mandant=$1).
+  const slotsQ = buildActiveSlotsQuery({ machineKey });
+  const aliasQ = buildNayaxAliasesQuery();
+  const idAliasQ = buildNayaxIdAliasesQuery();
+  const prodQ = buildProductsByIdQuery();
+  const [sRes, aRes, idRes, pRes] = await Promise.all([
+    db.read({ tenant, tables: ['slot_assignments', 'products', 'machines'], text: slotsQ.text, params: slotsQ.values }),
+    db.read({ tenant, tables: ['product_aliases'], text: aliasQ.text, params: aliasQ.values }),
+    db.read({ tenant, tables: ['product_aliases'], text: idAliasQ.text, params: idAliasQ.values }),
+    db.read({ tenant, tables: ['products'], text: prodQ.text, params: prodQ.values }),
+  ]);
+  const pgSlots = sRes.rows; const aliasRows = aRes.rows; const idAliasRows = idRes.rows; const productRows = pRes.rows;
   const aliasIndex = buildAliasIndex(aliasRows);
   const idIndex = buildNayaxIdIndex(idAliasRows);
   // Fallback-Match ueber products.name (Produkte ohne gepflegten nayax-Alias).
@@ -784,7 +808,7 @@ function buildDashboardV2Error(area, code, message, status = 503) {
   };
 }
 
-async function buildDashboardV2Area(area, query = {}) {
+async function buildDashboardV2Area(area, query = {}, viewer = null) {
   if (!dashboardV2Areas.has(area)) {
     return buildDashboardV2Error(area, 'V2_AREA_NOT_FOUND', 'Dieser Dashboard-v2-Bereich ist nicht definiert.', 404);
   }
@@ -799,8 +823,15 @@ async function buildDashboardV2Area(area, query = {}) {
   }
 
   if (area === 'overview' || area === 'monitoring') {
+    // #124: technischer Ausfall (Verzeichnis nicht bereit) ⇒ 503, nicht leer.
+    if (tenantDirectory && !tenantDirectory.isReady()) {
+      return buildDashboardV2Error(area, 'PG_ERROR', 'Mandanten-Verzeichnis nicht bereit (DB nicht erreichbar).');
+    }
     try {
-      const raw = await queryOverviewMonitoringPg(pgUrl);
+      // #124: mandantengetrennt durch die Tür; Mandant aus dem Viewer, MHD-Fenster aus der Config.
+      const tenant = viewer && viewer.tenantId;
+      const cfg = await loadClassificationConfig(DEFAULT_MANDANT);
+      const raw = await queryOverviewMonitoringPg(tenantDb, tenant, { mhdDays: cfg.mhdRiskDays });
       const overview = buildOverviewData(raw);
       const monitoring = buildMonitoringData(raw);
       const now = new Date();
@@ -833,12 +864,21 @@ async function buildDashboardV2Area(area, query = {}) {
   }
 
   if (area === 'economics') {
+    // #123: technischer Ausfall (Verzeichnis nicht bereit) ⇒ 503, nicht leer.
+    if (tenantDirectory && !tenantDirectory.isReady()) {
+      return buildDashboardV2Error(area, 'PG_ERROR', 'Mandanten-Verzeichnis nicht bereit (DB nicht erreichbar).');
+    }
     try {
-      const pgRows = await queryEconomicsPg(pgUrl, query);
+      // #123: mandantengetrennt durch die Tür; effektiver Mandant aus dem Viewer.
+      const tenant = viewer && viewer.tenantId;
+      const pgRows = await queryEconomicsPg(tenantDb, tenant, query);
       // #40: laufender Tag (noch nicht von WF8 aggregiert) als vorläufige
       // Position ergänzen — Fehler hier dürfen die GuV nie kippen.
       try {
-        pgRows.provisional = await queryEconomicsProvisionalPg(pgUrl, query);
+        // Tax-Config (#56) des Mandanten laden und in den Live-Pfad reichen
+        // (kein DB-Zugriff in economics.js; classification_settings-Migration = #125).
+        const taxConfig = await loadClassificationConfig(DEFAULT_MANDANT);
+        pgRows.provisional = await queryEconomicsProvisionalPg(tenantDb, tenant, query, taxConfig);
       } catch (_) {
         pgRows.provisional = null;
       }
@@ -864,8 +904,14 @@ async function buildDashboardV2Area(area, query = {}) {
   }
 
   if (area === 'inventory-mhd') {
+    // #126: technischer Ausfall (Verzeichnis nicht bereit) ⇒ 503, nicht leer.
+    if (tenantDirectory && !tenantDirectory.isReady()) {
+      return buildDashboardV2Error(area, 'PG_ERROR', 'Mandanten-Verzeichnis nicht bereit (DB nicht erreichbar).');
+    }
     try {
-      const pgRows = await queryInventoryMhdPg(pgUrl, query);
+      // #126: mandantengetrennt durch die Tür; effektiver Mandant aus dem Viewer.
+      const tenant = viewer && viewer.tenantId;
+      const pgRows = await queryInventoryMhdPg(tenantDb, tenant, query);
       const data = buildInventoryMhdData(pgRows, query);
       const now = new Date();
       return {
@@ -901,8 +947,14 @@ async function buildDashboardV2Area(area, query = {}) {
   }
 
   if (area === 'assortment-slots') {
+    // #125: technischer Ausfall (Verzeichnis nicht bereit) ⇒ 503, nicht leer.
+    if (tenantDirectory && !tenantDirectory.isReady()) {
+      return buildDashboardV2Error(area, 'PG_ERROR', 'Mandanten-Verzeichnis nicht bereit (DB nicht erreichbar).');
+    }
     try {
-      const pgRows = await queryAssortmentSlotsPg(pgUrl, query);
+      // #125: mandantengetrennt durch die Tür; effektiver Mandant aus dem Viewer.
+      const tenant = viewer && viewer.tenantId;
+      const pgRows = await queryAssortmentSlotsPg(tenantDb, tenant, query);
       const data = buildAssortmentSlotsData(pgRows, query);
       const now = new Date();
       return {
@@ -1971,6 +2023,7 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, healthy ? 200 : 503, {
         ok: healthy,
         tenantDirectoryReady: !!(tenantDirectory && tenantDirectory.isReady()),
+        tenantDbReady: !!tenantDb, // #122: Stufe-3-Mandanten-Tür konstruiert (noch nicht konsumiert)
         pgConfigured: !!dashboardV2PgUrl(),
       });
       return;
@@ -2008,11 +2061,11 @@ const server = http.createServer(async (req, res) => {
     const v2Area = [...dashboardV2Areas.entries()]
       .find(([, config]) => parsed.pathname === config.path);
     if (v2Area && req.method === 'GET') {
+      const areaViewer = getViewer(req); // #123: Mandant für die mandanten-getrennten Lesepfade
       if (v2Area[0] === 'economics') { // #80: GuV ist finanzen.lesen-Bereich
-        const areaViewer = getViewer(req);
         if (!requireCapability(areaViewer, 'finanzen.lesen', res)) return;
       }
-      const result = await buildDashboardV2Area(v2Area[0], parsed.query);
+      const result = await buildDashboardV2Area(v2Area[0], parsed.query, areaViewer);
       sendJson(res, result.status, result.body);
       return;
     }
@@ -2047,17 +2100,20 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (parsed.pathname === '/api/v2/refill/search' && req.method === 'GET') {
+      const viewer = getViewer(req); // #126: Mandant für die Refill-Bestands-Vorschau
       const pgUrl = dashboardV2PgUrl();
       const q = clean(parsed.query.q || '');
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, results: [], error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const { Client } = require('pg');
-        const client = new Client({ connectionString: pgUrl });
-        await client.connect();
-        const { rows } = await client.query(`
+        // #126: durch die Mandanten-Tür mit tenant_id-Filter (kein Inline-Client).
+        const { rows } = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['slot_assignments', 'machines', 'locations', 'products'],
+          text: `
           SELECT
             sa.machine_id::text AS machine_id,
             m.name AS machine_label,
@@ -2069,13 +2125,14 @@ const server = http.createServer(async (req, res) => {
             sa.machine_capacity AS capacity,
             l.name AS location_name
           FROM automatenlager.slot_assignments sa
-          JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
-          JOIN automatenlager.locations l ON l.location_id = m.location_id
-          JOIN automatenlager.products p ON p.product_id = sa.product_id
-          WHERE sa.active = true
+          JOIN automatenlager.machines m ON m.machine_id = sa.machine_id AND m.tenant_id = sa.tenant_id
+          JOIN automatenlager.locations l ON l.location_id = m.location_id AND l.tenant_id = m.tenant_id
+          JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
+          WHERE sa.active = true AND sa.tenant_id = $1
           ORDER BY p.name, sa.machine_id, sa.mdb_code
-        `);
-        await client.end();
+        `,
+          params: [],
+        });
         const results = searchRefillTargets(q, rows.map((r) => ({ ...r, product_name: formatProductName(r.product_name || '') })));
         sendJson(res, 200, { ok: true, results });
       } catch (err) {
@@ -2085,6 +2142,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (parsed.pathname === '/api/v2/refill/details' && req.method === 'GET') {
+      const viewer = getViewer(req); // #126: Mandant für die Refill-Detail-Vorschau
       const pgUrl = dashboardV2PgUrl();
       const machineId = clean(parsed.query.machine_id || '');
       const mdbCode = parseInt(clean(parsed.query.mdb_code || ''), 10);
@@ -2096,11 +2154,13 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_PARAMS', message: 'machine_id und mdb_code erforderlich.' } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const { Client } = require('pg');
-        const client = new Client({ connectionString: pgUrl });
-        await client.connect();
-        const slotResult = await client.query(`
+        // #126: durch die Mandanten-Tür mit tenant_id-Filter (kein Inline-Client).
+        const slotResult = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['slot_assignments', 'machines', 'locations', 'products'],
+          text: `
           SELECT
             sa.machine_id::text AS machine_id,
             m.name AS machine_label,
@@ -2112,25 +2172,30 @@ const server = http.createServer(async (req, res) => {
             sa.machine_capacity AS capacity,
             l.name AS location_name
           FROM automatenlager.slot_assignments sa
-          JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
-          JOIN automatenlager.locations l ON l.location_id = m.location_id
-          JOIN automatenlager.products p ON p.product_id = sa.product_id
-          WHERE sa.machine_id = $1 AND sa.mdb_code = $2 AND sa.active = true
+          JOIN automatenlager.machines m ON m.machine_id = sa.machine_id AND m.tenant_id = sa.tenant_id
+          JOIN automatenlager.locations l ON l.location_id = m.location_id AND l.tenant_id = m.tenant_id
+          JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
+          WHERE sa.tenant_id = $1 AND sa.machine_id = $2 AND sa.mdb_code = $3 AND sa.active = true
           LIMIT 1
-        `, [machineId, mdbCode]);
+        `,
+          params: [machineId, mdbCode],
+        });
         if (!slotResult.rows.length) {
-          await client.end();
           sendJson(res, 404, { ok: false, error: { code: 'SLOT_NOT_FOUND', message: 'Slot nicht gefunden.' } });
           return;
         }
         const slotRow = slotResult.rows[0];
-        const batchResult = await client.query(`
+        const batchResult = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['stock_batches'],
+          text: `
           SELECT batch_key, product_id, remaining_qty, mhd_date::text AS mhd_date, status, unit_cost_net::text AS unit_cost_net
           FROM automatenlager.stock_batches
-          WHERE product_id = $1 AND remaining_qty > 0 AND status IN (${availableBatchStatusSqlList()})
+          WHERE tenant_id = $1 AND product_id = $2 AND remaining_qty > 0 AND status IN (${availableBatchStatusSqlList()})
           ORDER BY mhd_date ASC NULLS LAST
-        `, [slotRow.product_id]);
-        await client.end();
+        `,
+          params: [slotRow.product_id],
+        });
         const data = buildRefillDetails(slotRow, batchResult.rows, new Date());
         sendJson(res, 200, { ok: true, data });
       } catch (err) {
@@ -2362,8 +2427,9 @@ const server = http.createServer(async (req, res) => {
       }
       const viewer = getViewer(req);
       const isAdmin = viewer.role === 'admin';
+      if (!tenantReadReady(res)) return;
       try {
-        const rawData = await queryProductOnboardingPg(pgUrl);
+        const rawData = await queryProductOnboardingPg(tenantDb, viewer.tenantId);
         const data = buildProductOnboardingData(rawData);
         let wf2FormUrl = '';
         try {
@@ -2389,6 +2455,7 @@ const server = http.createServer(async (req, res) => {
     // ── Slot-Change routes ────────────────────────────────────────────────────
 
     if (parsed.pathname === '/api/v2/slot-change/preview' && req.method === 'GET') {
+      const viewer = getViewer(req); // #128: Mandant für die Slot-Umbuchungs-Vorschau
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
@@ -2401,37 +2468,40 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_PARAMS', message: 'slot_assignment_id oder machine_id+mdb_code erforderlich.' } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const { Client } = require('pg');
-        const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-        await client.connect();
+        // #128: durch die Mandanten-Tür mit tenant_id-Filter (kein Inline-Client).
         const whereClause = slotAssignmentId
-          ? 'sa.slot_assignment_id = $1'
-          : 'sa.machine_id = $1 AND sa.mdb_code = $2 AND sa.active = true';
+          ? 'sa.slot_assignment_id = $2'
+          : 'sa.machine_id = $2 AND sa.mdb_code = $3 AND sa.active = true';
         const queryParams = slotAssignmentId ? [slotAssignmentId] : [machineId, mdbCode];
-        const slotResult = await client.query(
+        const slotResult = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['slot_assignments', 'machines', 'locations', 'products'],
+          text:
           `SELECT sa.slot_assignment_id, sa.machine_id::text AS machine_id,
                   m.name AS machine_label, sa.mdb_code, sa.product_id,
                   p.name AS product_name, sa.current_machine_qty,
                   sa.target_stock, sa.machine_capacity,
                   l.name AS location_name
              FROM automatenlager.slot_assignments sa
-             JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
-             JOIN automatenlager.locations l ON l.location_id = m.location_id
-             JOIN automatenlager.products p ON p.product_id = sa.product_id
-            WHERE ${whereClause}
+             JOIN automatenlager.machines m ON m.machine_id = sa.machine_id AND m.tenant_id = sa.tenant_id
+             JOIN automatenlager.locations l ON l.location_id = m.location_id AND l.tenant_id = m.tenant_id
+             JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
+            WHERE sa.tenant_id = $1 AND ${whereClause}
             LIMIT 1`,
-          queryParams,
-        );
+          params: queryParams,
+        });
         if (!slotResult.rows.length) {
-          await client.end();
           sendJson(res, 404, { ok: false, error: { code: 'SLOT_NOT_FOUND', message: 'Slot nicht gefunden.' } });
           return;
         }
-        const productResult = await client.query(
-          'SELECT product_id, name FROM automatenlager.products WHERE active = true ORDER BY name',
-        );
-        await client.end();
+        const productResult = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['products'],
+          text: 'SELECT product_id, name FROM automatenlager.products WHERE active = true AND tenant_id = $1 ORDER BY name',
+          params: [],
+        });
         const preview = buildSlotChangePreview(slotResult.rows[0], productResult.rows);
         sendJson(res, 200, { ok: true, ...preview });
       } catch (err) {
@@ -2897,7 +2967,9 @@ const server = http.createServer(async (req, res) => {
     // ── Reports export route ──────────────────────────────────────────────────
 
     if (parsed.pathname === '/api/v2/reports/export' && req.method === 'GET') {
-      if (!requireCapability(getViewer(req), 'finanzen.lesen', res)) return; // #80
+      const viewer = getViewer(req); // #123: Mandant für den Finanz-Export
+      if (!requireCapability(viewer, 'finanzen.lesen', res)) return; // #80
+      if (!tenantReadReady(res)) return; // #123: DB/Verzeichnis-Ausfall ⇒ 503, nicht leer
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
@@ -2914,7 +2986,7 @@ const server = http.createServer(async (req, res) => {
         machines: clean(parsed.query.machines),
       };
       try {
-        const rawData = await queryEconomicsPg(pgUrl, exportQuery);
+        const rawData = await queryEconomicsPg(tenantDb, viewer.tenantId, exportQuery);
         const economicsData = buildEconomicsData(rawData, exportQuery);
         const { from, to } = economicsData.period;
         // Brutto-Werte wie auf der Seite, sortiert nach Brutto-Umsatz,
@@ -2936,7 +3008,9 @@ const server = http.createServer(async (req, res) => {
     // ── PDF-Export (GuV-Bericht als echte Datei) ──────────────────────────────
 
     if (parsed.pathname === '/api/v2/reports/pdf' && req.method === 'GET') {
-      if (!requireCapability(getViewer(req), 'finanzen.lesen', res)) return; // #80: viewer war undefiniert
+      const viewer = getViewer(req); // #123: Mandant für den GuV-PDF-Report
+      if (!requireCapability(viewer, 'finanzen.lesen', res)) return; // #80: viewer war undefiniert
+      if (!tenantReadReady(res)) return; // #123: DB/Verzeichnis-Ausfall ⇒ 503, nicht leer
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
@@ -2951,7 +3025,7 @@ const server = http.createServer(async (req, res) => {
         machines: clean(parsed.query.machines),
       };
       try {
-        const rawData = await queryEconomicsPg(pgUrl, exportQuery);
+        const rawData = await queryEconomicsPg(tenantDb, viewer.tenantId, exportQuery);
         const economicsData = buildEconomicsData(rawData, exportQuery);
         const { from, to } = economicsData.period;
         const rows = [...economicsData.byProduct].sort((a, b) => b.revenue_gross - a.revenue_gross);
@@ -3038,16 +3112,13 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
-      const { Client } = require('pg');
-      const client = new Client({ connectionString: pgUrl });
       try {
-        await client.connect();
-        // Bestehenden Override lesen und mit den eingehenden Feldern mergen, damit
-        // ein Teil-Speichern nicht die übrigen Werte verwirft.
-        const current = await readOverride(client, DEFAULT_MANDANT);
+        // #125: durch die Mandanten-Tür (kein Inline-Client). Config unter __default__
+        // (per-Mandant-Config = Stufe 6). readOverride/writeOverride nehmen die Tür.
+        const current = await readOverride(tenantDb, DEFAULT_MANDANT);
         const incoming = sanitizeOverride(body && body.config ? body.config : body);
         const mergedOverride = mergeSettingsOverride(current, incoming);
-        const config = await writeOverride(client, DEFAULT_MANDANT, mergedOverride);
+        const config = await writeOverride(tenantDb, DEFAULT_MANDANT, mergedOverride);
         // #32: Schwellwert-Änderung protokollieren — nur die geänderten Schlüssel,
         // KEINE Werte (Audit-Hygiene; Schwellwerte sind zwar keine Secrets, aber wir
         // halten den Trail bewusst schlank + secret-frei).
@@ -3055,8 +3126,6 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, { ok: true, definitions: { slowMover: SLOW_MOVER, config } });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
-      } finally {
-        await client.end();
       }
       return;
     }
@@ -3231,14 +3300,16 @@ const server = http.createServer(async (req, res) => {
     // ── GuV-Filter: Auswahlbaum Standorte + Automaten ─────────────────────────
 
     if (parsed.pathname === '/api/v2/economics/scope' && req.method === 'GET') {
-      if (!requireCapability(getViewer(req), 'finanzen.lesen', res)) return; // #28: GuV nur mit finanzen.lesen
+      const viewer = getViewer(req); // #124: Mandant für den Automaten-/Standort-Scope
+      if (!requireCapability(viewer, 'finanzen.lesen', res)) return; // #28: GuV nur mit finanzen.lesen
+      if (!tenantReadReady(res)) return; // #124: DB/Verzeichnis-Ausfall ⇒ 503, nicht leer
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
       try {
-        const scope = await queryEconomicsScopePg(pgUrl);
+        const scope = await queryEconomicsScopePg(tenantDb, viewer.tenantId);
         sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), data: scope });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
@@ -3251,14 +3322,16 @@ const server = http.createServer(async (req, res) => {
     // v3-Live-Kachel; Filter machines=ID1,ID2 und limit wie bei /economics.
 
     if (parsed.pathname === '/api/v2/economics/live' && req.method === 'GET') {
-      if (!requireCapability(getViewer(req), 'finanzen.lesen', res)) return; // #28: GuV nur mit finanzen.lesen
+      const viewer = getViewer(req); // #123: Mandant für den Live-Umsatz
+      if (!requireCapability(viewer, 'finanzen.lesen', res)) return; // #28: GuV nur mit finanzen.lesen
+      if (!tenantReadReady(res)) return; // #123: DB/Verzeichnis-Ausfall ⇒ 503, nicht leer
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
       try {
-        const live = await queryEconomicsLivePg(pgUrl, parsed.query || {});
+        const live = await queryEconomicsLivePg(tenantDb, viewer.tenantId, parsed.query || {});
         sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), data: live });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
@@ -3276,11 +3349,39 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
+      // #124: Hintergrund-Job ohne Viewer. Verzeichnis nicht bereit ⇒ 503 (kein Default).
+      if (!tenantReadReady(res)) return;
+      const q = parsed.query || {};
+      const lowBatchThreshold = Number(q.lowBatchThreshold);
+      const opts = Number.isFinite(lowBatchThreshold) ? { lowBatchThreshold } : {};
+      // EXPLIZITE Mandanten-Quelle: ?tenant=<id> ODER alle realen Mandanten aus dem
+      // Verzeichnis (pro Mandant). NIE ein Default-Mandant.
+      const explicit = clean(q.tenant);
+      let tenants;
+      if (explicit) {
+        if (!tenantDirectory || !tenantDirectory.tenantExists(explicit)) {
+          sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: 'Mandant nicht gefunden.' } });
+          return;
+        }
+        tenants = [explicit];
+      } else {
+        tenants = tenantDirectory ? tenantDirectory.listTenantIds() : [];
+      }
       try {
-        const lowBatchThreshold = Number((parsed.query || {}).lowBatchThreshold);
-        const raw = await queryAlertDigestPg(pgUrl, Number.isFinite(lowBatchThreshold) ? { lowBatchThreshold } : {});
-        const data = buildAlertDigest(raw);
-        sendJson(res, 200, { ok: true, source: 'postgres', generatedAt: new Date().toISOString(), data });
+        if (tenants.length <= 1) {
+          // Genau ein (oder — Randfall — kein) Mandant ⇒ bestehende Antwort-Form
+          // (WF5-kompatibel; kein Mandant ⇒ leerer Digest, der Job verschickt nichts).
+          const tenant = tenants[0] || null;
+          const data = buildAlertDigest(await queryAlertDigestPg(tenantDb, tenant, opts));
+          sendJson(res, 200, { ok: true, source: 'postgres', generatedAt: new Date().toISOString(), tenant, data });
+          return;
+        }
+        // Mehrere Mandanten ⇒ per-Mandant (Stufe 6 verdrahtet WF5 pro Mandant/Mail).
+        const perTenant = {};
+        for (const tid of tenants) {
+          perTenant[tid] = buildAlertDigest(await queryAlertDigestPg(tenantDb, tid, opts));
+        }
+        sendJson(res, 200, { ok: true, source: 'postgres', generatedAt: new Date().toISOString(), perTenant });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
       }
@@ -3290,13 +3391,15 @@ const server = http.createServer(async (req, res) => {
     // ── Locations routes ──────────────────────────────────────────────────────
 
     if (parsed.pathname === '/api/v2/locations' && req.method === 'GET') {
+      const viewer = getViewer(req); // #127: Mandant für die Standort-Liste
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const profiles = await queryLocationsPg(pgUrl);
+        const profiles = await queryLocationsPg(tenantDb, viewer.tenantId);
         const kpiRows = [];
         const comparison = buildLocationComparison(profiles, kpiRows);
         sendJson(res, 200, {
@@ -3350,7 +3453,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       try {
-        const data = await queryMachineProfilesPg(pgUrl);
+        if (!tenantReadReady(res)) return;
+        const data = await queryMachineProfilesPg(tenantDb, viewer.tenantId);
         sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), data, options, is_admin: viewer.canTriggerActions });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
@@ -3466,10 +3570,11 @@ const server = http.createServer(async (req, res) => {
     // #3: Verfügbare Nayax-Geräte fürs Anlege-Combobox (liest den DB-Spiegel,
     // markiert bereits angelegte). Leere Liste -> Frontend fällt auf Freitext.
     if (parsed.pathname === '/api/v2/nayax-devices' && req.method === 'GET') {
+      const viewer = getViewer(req); // #127: Mandant für die nutzersichtbare Geräte-Liste
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) { sendJson(res, 200, { ok: true, data: [] }); return; }
       try {
-        const rows = await queryNayaxDevicesPg(pgUrl);
+        const rows = await queryNayaxDevicesPg(tenantDb, viewer.tenantId);
         sendJson(res, 200, { ok: true, data: shapeNayaxDevices(rows) });
       } catch (err) {
         sendJson(res, 200, { ok: true, data: [], error: { code: 'PG_ERROR', message: err.message } });
@@ -3487,8 +3592,9 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, { ok: true, is_admin: isAdmin, generatedAt: new Date().toISOString(), cases: [], counts: { mdb_proposals: 0, unknown_products: 0, correction_warnings: 0, total: 0 } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const raw = await queryCorrectionCasesPg(pgUrl);
+        const raw = await queryCorrectionCasesPg(tenantDb, viewer.tenantId);
         const { cases, counts } = buildCorrectionCases(raw);
         sendJson(res, 200, { ok: true, is_admin: isAdmin, generatedAt: new Date().toISOString(), cases, counts });
       } catch (err) {
@@ -3506,25 +3612,20 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_CASE_ID', message: 'case_id erforderlich.' } });
         return;
       }
+      const viewer = getViewer(req); // #128: Mandant für die Korrektur-Vorschau (suggest)
       const pgUrl = dashboardV2PgUrl();
       let correctionCase = null;
       let allProducts = [];
       if (pgUrl) {
         try {
-          const { Client } = require('pg');
-          const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-          await client.connect();
-          try {
-            const [rawCases, prodRes] = await Promise.all([
-              queryCorrectionCasesPg(pgUrl).catch(() => ({ proposals: [], unknownTxGroups: [], correctionWarnings: [] })),
-              client.query('SELECT product_id, name FROM automatenlager.products ORDER BY name'),
-            ]);
-            const { cases } = buildCorrectionCases(rawCases);
-            correctionCase = cases.find((c) => c.case_id === caseId) ?? null;
-            allProducts = prodRes.rows.map((r) => ({ ...r, name: formatProductName(r.name) ?? r.name }));
-          } finally {
-            await client.end();
-          }
+          // #128: durch die Mandanten-Tür (tenant_id-Filter), kein Inline-Client.
+          const [rawCases, prodRes] = await Promise.all([
+            queryCorrectionCasesPg(tenantDb, viewer.tenantId).catch(() => ({ proposals: [], unknownTxGroups: [], correctionWarnings: [] })),
+            tenantDb.read({ tenant: viewer.tenantId, tables: ['products'], text: 'SELECT product_id, name FROM automatenlager.products WHERE tenant_id = $1 ORDER BY name', params: [] }),
+          ]);
+          const { cases } = buildCorrectionCases(rawCases);
+          correctionCase = cases.find((c) => c.case_id === caseId) ?? null;
+          allProducts = prodRes.rows.map((r) => ({ ...r, name: formatProductName(r.name) ?? r.name }));
         } catch { /* fall through to empty response */ }
       }
       const { suggestion, products } = buildProductSuggestion(correctionCase ?? { case_id: caseId, suggested_product_id: null, suggested_product_name: null }, allProducts);
@@ -3601,6 +3702,7 @@ const server = http.createServer(async (req, res) => {
     // Vorschau (read-only, auch für Gäste): vollständiger Diff aus Slotbelegung
     // (Umbuchung alt->neu) + Menge (alt->neu) + Onboarding-Liste + PG-only-Slots.
     if (parsed.pathname === '/api/v2/nayax-abgleich/preview' && req.method === 'GET') {
+      const viewer = getViewer(req); // #127: Mandant für den Nayax-Abgleich-Preview
       const machineKey = clean(parsed.query.machine || parsed.query.machine_id || '');
       if (!machineKey) {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_PARAMS', message: 'machine (Nayax-Nummer) erforderlich.' } });
@@ -3616,8 +3718,9 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 503, { ok: false, error: { code: 'NAYAX_WEBHOOK_UNCONFIGURED', message: 'NAYAX_ABGLEICH_WEBHOOK_URL nicht gesetzt.' } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const { diff } = await computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey);
+        const { diff } = await computeNayaxAbgleichDiff(tenantDb, viewer.tenantId, webhookUrl, machineKey);
         sendJson(res, 200, { ok: true, ...diff });
       } catch (err) {
         const code = err.code === 'NAYAX_WEBHOOK_ERROR' ? 502 : 503;
@@ -3669,7 +3772,7 @@ const server = http.createServer(async (req, res) => {
       }
       let plan; let diff; let events;
       try {
-        const result = await computeNayaxAbgleichDiff(pgUrl, webhookUrl, machineKey);
+        const result = await computeNayaxAbgleichDiff(tenantDb, viewer.tenantId, webhookUrl, machineKey);
         diff = result.diff;
         plan = buildApplyPlan(diff);
         const nowIso = new Date().toISOString();
@@ -3833,30 +3936,24 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_PARAMS', message: 'product_id erforderlich.' } });
         return;
       }
+      const viewer = getViewer(req); // #128: Mandant für die Slot-Zuweisungs-Vorschau
+      if (!tenantReadReady(res)) return;
       try {
-        const { Client } = require('pg');
-        const client = new Client({ connectionString: pgUrl });
-        await client.connect();
-        let productRow, machineRows;
-        try {
-          const [pRes, mRes] = await Promise.all([
-            client.query(
-              `SELECT p.product_id, p.product_key, p.name
-               FROM automatenlager.products p
-               WHERE p.product_id = $1 LIMIT 1`,
-              [Number(productId)]
-            ),
-            client.query(
-              `SELECT machine_id, area, type, position, nickname
-               FROM automatenlager.machine_profiles
-               ORDER BY area NULLS LAST, machine_id`
-            ),
-          ]);
-          productRow  = pRes.rows[0] || null;
-          machineRows = mRes.rows;
-        } finally {
-          await client.end();
-        }
+        // #128: durch die Mandanten-Tür mit tenant_id-Filter (kein Inline-Client).
+        const [pRes, mRes] = await Promise.all([
+          tenantDb.read({
+            tenant: viewer.tenantId, tables: ['products'],
+            text: `SELECT p.product_id, p.product_key, p.name FROM automatenlager.products p WHERE p.tenant_id = $1 AND p.product_id = $2 LIMIT 1`,
+            params: [Number(productId)],
+          }),
+          tenantDb.read({
+            tenant: viewer.tenantId, tables: ['machine_profiles'],
+            text: `SELECT machine_id, area, type, position, nickname FROM automatenlager.machine_profiles WHERE tenant_id = $1 ORDER BY area NULLS LAST, machine_id`,
+            params: [],
+          }),
+        ]);
+        const productRow  = pRes.rows[0] || null;
+        const machineRows = mRes.rows;
         if (!productRow) {
           sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: `Produkt ${productId} nicht gefunden.` } });
           return;
@@ -3966,10 +4063,15 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
+  // #127: Mandanten-Registry VOR dem Ready-Signal laden. Der Server lauscht bereits;
+  // nur das „running"-Log (Bereitschafts-Signal für Aufrufer/Tests) verschiebt sich,
+  // bis die Registry ready/failed ist. Sonst läuft ein sofort feuernder Aufrufer in
+  // das Startup-Race „Verzeichnis noch nicht bereit ⇒ 503" der tenant-getrennten
+  // Lesepfade. initTenantDirectory ist fail-closed und wirft nicht (fängt intern);
+  // ohne konfiguriertes PG kehrt es sofort zurück.
+  await initTenantDirectory(); // #117: Mandanten-Registry laden (fail-closed)
   console.log(`Automatenlager dashboard running at http://localhost:${PORT}`);
-  // Nicht awaiten: Startup nicht blockieren, nur informativ loggen.
-  initTenantDirectory(); // #117: Mandanten-Registry laden (non-blocking, fail-closed)
   logStartupSchemaCheck();
   logStartupStockCostCheck();
 });

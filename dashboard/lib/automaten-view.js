@@ -107,12 +107,14 @@ function buildEconomicsScope(machineRows = []) {
 // DB-Zugriff: liefert je echtem Automaten eine Zeile mit Standort + Profil-Label.
 // machine_profiles ist auf die Nayax-Nr (machine_key) ODER die interne ID
 // geschlüsselt → Join auf beide Varianten, damit das Label sicher andockt.
-async function queryEconomicsScopePg(pgUrl) {
-  const { Client } = require('pg');
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  try {
-    const res = await client.query(
+// #124 (Stufe 3): mandantengetrennt durch die Mandanten-Tür. machines/locations/
+// machine_profiles sind tenant-pflichtig — Filter auf $1 (Mandant) + mandanten-treue
+// Joins. Kein Mandant ⇒ leerer Scope (fail-closed).
+async function queryEconomicsScopePg(db, tenant) {
+  const res = await db.read({
+    tenant,
+    tables: ['machines', 'locations', 'machine_profiles'],
+    text:
       `SELECT m.machine_id,
               m.machine_key,
               m.active,
@@ -120,15 +122,14 @@ async function queryEconomicsScopePg(pgUrl) {
               l.name        AS location_name,
               mp.area, mp.type, mp.position, mp.nickname
          FROM automatenlager.machines m
-         LEFT JOIN automatenlager.locations l ON l.location_id = m.location_id
+         LEFT JOIN automatenlager.locations l ON l.location_id = m.location_id AND l.tenant_id = m.tenant_id
          LEFT JOIN automatenlager.machine_profiles mp
-                ON mp.machine_id::text IN (m.machine_id::text, m.machine_key::text)
+                ON mp.machine_id::text IN (m.machine_id::text, m.machine_key::text) AND mp.tenant_id = m.tenant_id
+        WHERE m.tenant_id = $1
         ORDER BY l.name NULLS LAST, m.machine_id`,
-    );
-    return buildEconomicsScope(res.rows);
-  } finally {
-    await client.end();
-  }
+    params: [],
+  });
+  return buildEconomicsScope(res.rows);
 }
 
 module.exports = { buildAutomatenView, buildEconomicsScope, queryEconomicsScopePg };

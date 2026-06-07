@@ -234,12 +234,15 @@ test('GET /api/v2/onboarding returns is_admin false for guest (non-admin tailsca
   });
   t.after(() => child.kill());
 
-  // Guest gets 503 because PG is unreachable, but response includes is_admin: false
+  // #128 (Stufe 3): Bei unerreichbarer DB ist das Mandanten-Verzeichnis NICHT bereit
+  // ⇒ der effektive Mandant ist nicht auflösbar ⇒ technischer 503 (kein leeres
+  // Resultat, das einen Ausfall maskiert). Die generische technische Fehlerform
+  // trägt kein data.is_admin mehr (das Gast/Admin-Verhalten prüfen die Auth-Tests).
   const res = await request(port, '/api/v2/onboarding', { 'tailscale-user-login': 'guest@example.test' });
   assert.equal(res.status, 503);
   const body = res.json();
   assert.equal(body.ok, false);
-  assert.equal(body.data?.is_admin, false);
+  assert.ok(body.error && body.error.code, 'technischer 503 trägt einen Fehlercode');
 });
 
 test('GET /api/v2/onboarding returns 503 when PG unreachable', async (t) => {

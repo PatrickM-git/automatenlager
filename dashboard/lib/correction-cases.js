@@ -92,33 +92,24 @@ function buildCorrectionCases({ proposals = [], unknownTxGroups = [], correction
   };
 }
 
-async function queryCorrectionCasesPg(pgUrl) {
-  const { Client } = require('pg');
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  try {
-    const [proposalsRes, unknownTxRes, warningsRes] = await Promise.all([
-      client.query(`
+// #128 (Stufe 3): mandantengetrennt durch die Mandanten-Tür (Lesepfad). Mandant = $1.
+// Schreib-Aktion (Korrektur-Bestätigung) liegt in correction-action.js = Stufe 4.
+async function queryCorrectionCasesPg(db, tenant) {
+  const [proposalsRes, unknownTxRes, warningsRes] = await Promise.all([
+    db.read({ tenant, tables: ['product_change_proposals', 'products'], params: [], text: `
         SELECT
-          pcp.proposal_id,
-          pcp.proposal_key,
-          pcp.proposal_type,
-          pcp.machine_id,
-          pcp.mdb_code,
-          pcp.product_id,
-          p.name AS product_name,
-          pcp.reason,
-          pcp.status,
-          pcp.payload,
-          pcp.created_at::text AS created_at
+          pcp.proposal_id, pcp.proposal_key, pcp.proposal_type, pcp.machine_id,
+          pcp.mdb_code, pcp.product_id, p.name AS product_name, pcp.reason,
+          pcp.status, pcp.payload, pcp.created_at::text AS created_at
         FROM automatenlager.product_change_proposals pcp
-        LEFT JOIN automatenlager.products p ON p.product_id = pcp.product_id
-        WHERE pcp.status = 'open'
+        LEFT JOIN automatenlager.products p ON p.product_id = pcp.product_id AND p.tenant_id = pcp.tenant_id
+        WHERE pcp.tenant_id = $1
+          AND pcp.status = 'open'
           AND pcp.proposal_type IN ('MDB_PRODUCT_MAPPING_MISMATCH', 'MDB_CODE_CHANGED_FOR_PRODUCT')
         ORDER BY pcp.created_at DESC
         LIMIT 100
-      `),
-      client.query(`
+      ` }),
+    db.read({ tenant, tables: ['sales_transactions'], params: [], text: `
         SELECT
           st.product_name_raw      AS product_key,
           st.product_name_raw,
@@ -128,7 +119,8 @@ async function queryCorrectionCasesPg(pgUrl) {
           MIN(st.settlement_at)::text AS first_seen_at,
           MAX(st.settlement_at)::text AS last_seen_at
         FROM automatenlager.sales_transactions st
-        WHERE st.product_id IS NULL
+        WHERE st.tenant_id = $1
+          AND st.product_id IS NULL
           AND st.product_name_raw IS NOT NULL
           AND st.product_name_raw <> ''
           AND st.product_name_raw <> 'Unbekannt'
@@ -136,35 +128,26 @@ async function queryCorrectionCasesPg(pgUrl) {
         GROUP BY st.product_name_raw
         ORDER BY tx_count DESC
         LIMIT 100
-      `),
-      client.query(`
+      ` }),
+    db.read({ tenant, tables: ['warnings'], params: [], text: `
         SELECT
-          w.warning_id,
-          w.warning_key,
-          w.warning_type,
-          w.severity,
-          w.product_id,
-          w.machine_id,
-          w.mdb_code,
-          w.slot_assignment_id,
-          w.message,
+          w.warning_id, w.warning_key, w.warning_type, w.severity, w.product_id,
+          w.machine_id, w.mdb_code, w.slot_assignment_id, w.message,
           w.created_at::text AS created_at
         FROM automatenlager.warnings w
-        WHERE w.resolved = FALSE
+        WHERE w.tenant_id = $1
+          AND w.resolved = FALSE
           AND w.warning_type IN ('MDB_CODE_CHANGED_FOR_PRODUCT', 'UNMATCHED_PRODUCT')
         ORDER BY w.created_at DESC
         LIMIT 100
-      `),
-    ]);
+      ` }),
+  ]);
 
-    return {
-      proposals: proposalsRes.rows,
-      unknownTxGroups: unknownTxRes.rows,
-      correctionWarnings: warningsRes.rows,
-    };
-  } finally {
-    await client.end();
-  }
+  return {
+    proposals: proposalsRes.rows,
+    unknownTxGroups: unknownTxRes.rows,
+    correctionWarnings: warningsRes.rows,
+  };
 }
 
 module.exports = {

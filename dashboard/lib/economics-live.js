@@ -62,35 +62,44 @@ function shapeLiveData({ todayRow, recentRows = [] }) {
   return { today, recent, lastSaleAt };
 }
 
-async function queryEconomicsLivePg(pgUrl, query = {}) {
-  const { Client } = require('pg');
+// #123 (Stufe 3): mandantengetrennt durch die Mandanten-Tür. Mandant = $1 (Tür);
+// optionaler Automaten-Filter / LIMIT folgen ab $2. Kein Mandant ⇒ leer (fail-closed).
+async function queryEconomicsLivePg(db, tenant, query = {}) {
   const machines = parseMachineFilter(query.machines != null ? query.machines : query.machine);
   const recentLimit = clampRecentLimit(query.limit);
 
-  // Optionaler Automaten-Filter als ANY(array); machine_id ist bigint → Cast auf text.
-  const machineClause = machines.length ? 'AND s.machine_id::text = ANY($1::text[])' : '';
-  const params = machines.length ? [machines] : [];
-  const limitParam = '$' + (params.length + 1);
-  params.push(recentLimit);
+  // Tages-Aggregat: Mandant=$1, optional Automat=$2.
+  const machineClauseToday = machines.length ? 'AND s.machine_id::text = ANY($2::text[])' : '';
+  const todayParams = machines.length ? [machines] : [];
 
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  try {
-    const [todayRes, recentRes] = await Promise.all([
-      client.query(
+  // recent: Mandant=$1, optional Automat=$2, dann LIMIT (Platzhalter +2 wg. Mandant).
+  const recentParams = machines.length ? [machines] : [];
+  const limitParam = '$' + (recentParams.length + 2);
+  recentParams.push(recentLimit);
+  const machineClauseRecent = machines.length ? 'AND s.machine_id::text = ANY($2::text[])' : '';
+
+  const [todayRes, recentRes] = await Promise.all([
+    db.read({
+      tenant,
+      tables: ['sales_transactions'],
+      text:
         `SELECT COUNT(*)::int                       AS verkaeufe,
                 COALESCE(SUM(s.quantity), 0)::int    AS stueck,
                 COALESCE(SUM(s.gross_amount), 0)     AS umsatz_brutto
            FROM automatenlager.sales_transactions s
-          WHERE s.source <> '${HISTORIC_SOURCE}'
+          WHERE s.tenant_id = $1
+            AND s.source <> '${HISTORIC_SOURCE}'
             AND (s.settlement_at AT TIME ZONE 'Europe/Berlin')::date
                 = (now() AT TIME ZONE 'Europe/Berlin')::date
-            ${machineClause}`,
-        machines.length ? [machines] : [],
-      ),
-      client.query(
-        // Nur die HEUTIGEN Verkäufe (Europe/Berlin), nicht die letzten N
-        // datumsunabhängig — deckungsgleich mit dem Tages-Aggregat oben.
+            ${machineClauseToday}`,
+      params: todayParams,
+    }),
+    db.read({
+      tenant,
+      tables: ['sales_transactions', 'products'],
+      // Nur die HEUTIGEN Verkäufe (Europe/Berlin), nicht die letzten N
+      // datumsunabhängig — deckungsgleich mit dem Tages-Aggregat oben.
+      text:
         `SELECT s.nayax_transaction_id,
                 s.settlement_at,
                 s.machine_id,
@@ -99,21 +108,19 @@ async function queryEconomicsLivePg(pgUrl, query = {}) {
                 s.product_name_raw,
                 p.name AS product_name
            FROM automatenlager.sales_transactions s
-           LEFT JOIN automatenlager.products p ON p.product_id = s.product_id
-          WHERE s.source <> '${HISTORIC_SOURCE}'
+           LEFT JOIN automatenlager.products p ON p.product_id = s.product_id AND p.tenant_id = s.tenant_id
+          WHERE s.tenant_id = $1
+            AND s.source <> '${HISTORIC_SOURCE}'
             AND (s.settlement_at AT TIME ZONE 'Europe/Berlin')::date
                 = (now() AT TIME ZONE 'Europe/Berlin')::date
-            ${machineClause}
+            ${machineClauseRecent}
           ORDER BY s.settlement_at DESC NULLS LAST
           LIMIT ${limitParam}`,
-        params,
-      ),
-    ]);
+      params: recentParams,
+    }),
+  ]);
 
-    return shapeLiveData({ todayRow: todayRes.rows[0], recentRows: recentRes.rows });
-  } finally {
-    await client.end();
-  }
+  return shapeLiveData({ todayRow: todayRes.rows[0], recentRows: recentRes.rows });
 }
 
 module.exports = {

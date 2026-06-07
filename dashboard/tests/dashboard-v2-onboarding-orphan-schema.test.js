@@ -36,7 +36,8 @@ test('Orphan-Query selektiert product_name_raw und aliasiert es als product_key'
 });
 
 test('Orphan-Query filtert auf product_name_raw statt der Phantom-Spalte product_key', () => {
-  assert.match(ONBOARDING_SRC, /WHERE\s+st\.product_id\s+IS\s+NULL/i);
+  // #128: seit dem Mandanten-Filter steht `st.tenant_id = $1 AND` vor dem Orphan-Filter.
+  assert.match(ONBOARDING_SRC, /st\.product_id\s+IS\s+NULL/i);
   assert.match(ONBOARDING_SRC, /st\.product_name_raw\s+IS\s+NOT\s+NULL/i);
   assert.match(ONBOARDING_SRC, /st\.product_name_raw\s*<>\s*''/i);
 });

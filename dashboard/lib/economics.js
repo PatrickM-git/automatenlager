@@ -629,31 +629,32 @@ function buildEconomicsData(pgRows, query = {}) {
   };
 }
 
-async function queryEconomicsPg(pgUrl, query = {}) {
-  const { Client } = require('pg');
+// #123 (Stufe 3): liest mandantengetrennt durch die Mandanten-Tür (lib/tenant-db.js).
+// `db` ist die Tür, `tenant` der effektive Mandant (viewer.tenantId). Die Tür stellt
+// den Mandanten als $1-Parameter bereit; eigene Parameter folgen ab $2. Kein/leerer
+// Mandant ⇒ jede Tür-Abfrage liefert leer (fail-closed) ⇒ leeres GuV-Panel.
+async function queryEconomicsPg(db, tenant, query = {}) {
   const machines = parseMachineFilter(query.machines != null ? query.machines : query.machine);
   // Taggenaue Grenzen (Monat/Quartal/Jahr → Monatsränder, Woche/Custom → Tage).
   const { fromDate, toDate, granularity } = resolveDateRange(query);
 
-  // Optionaler Standort-/Automaten-Filter als ANY(array). $3 nur belegen, wenn
-  // gefiltert wird; sonst fällt die Klausel weg und alle Automaten zählen.
-  // machine_id ist in der DB ein bigint – Cast auf text macht den Vergleich
-  // unabhängig vom Spaltentyp (Scope liefert die IDs als String).
-  const machineClause = machines.length ? 'AND g.machine_id::text = ANY($3::text[])' : '';
+  // Mandant = $1 (Tür). fromDate=$2, toDate=$3, optionaler Automaten-Filter=$4.
+  const machineClause = machines.length ? 'AND g.machine_id::text = ANY($4::text[])' : '';
   const params = machines.length ? [fromDate, toDate, machines] : [fromDate, toDate];
 
   // posting_date direkt vergleichen (tagesgenau, inklusive beider Ränder).
   const periodWhere = `
-            WHERE g.source != 'historic_backfill'
-              AND g.posting_date >= $1::date
-              AND g.posting_date <= $2::date
+            WHERE g.tenant_id = $1
+              AND g.source != 'historic_backfill'
+              AND g.posting_date >= $2::date
+              AND g.posting_date <= $3::date
               ${machineClause}`;
 
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  try {
-    const [pr, sr, ser] = await Promise.all([
-      client.query(
+  const [pr, sr, ser] = await Promise.all([
+    db.read({
+      tenant,
+      tables: ['guv_daily', 'products'],
+      text:
         `SELECT g.product_id,
                 p.name                                     AS product_name,
                 date_trunc('month', g.posting_date)::DATE  AS month,
@@ -663,12 +664,15 @@ async function queryEconomicsPg(pgUrl, query = {}) {
                 SUM(g.revenue_gross - g.cost_of_goods)     AS gross_profit,
                 SUM(g.revenue_net - g.cost_of_goods * g.revenue_net / NULLIF(g.revenue_gross, 0)) AS db_net
            FROM automatenlager.guv_daily g
-           LEFT JOIN automatenlager.products p ON p.product_id = g.product_id
+           LEFT JOIN automatenlager.products p ON p.product_id = g.product_id AND p.tenant_id = g.tenant_id
           ${periodWhere}
           GROUP BY g.product_id, p.name, date_trunc('month', g.posting_date)::DATE`,
-        params,
-      ),
-      client.query(
+      params,
+    }),
+    db.read({
+      tenant,
+      tables: ['guv_daily'],
+      text:
         `SELECT g.machine_id,
                 g.mdb_code,
                 date_trunc('month', g.posting_date)::DATE  AS month,
@@ -680,9 +684,12 @@ async function queryEconomicsPg(pgUrl, query = {}) {
            FROM automatenlager.guv_daily g
           ${periodWhere}
           GROUP BY g.machine_id, g.mdb_code, date_trunc('month', g.posting_date)::DATE`,
-        params,
-      ),
-      client.query(
+      params,
+    }),
+    db.read({
+      tenant,
+      tables: ['guv_daily'],
+      text:
         `SELECT date_trunc('${granularity}', g.posting_date)::DATE  AS bucket,
                 SUM(g.quantity_sold)::int                  AS qty,
                 SUM(g.revenue_net)                         AS revenue_net,
@@ -693,37 +700,43 @@ async function queryEconomicsPg(pgUrl, query = {}) {
           ${periodWhere}
           GROUP BY date_trunc('${granularity}', g.posting_date)::DATE
           ORDER BY 1`,
-        params,
-      ),
-    ]);
+      params,
+    }),
+  ]);
 
-    const inventoryResult = await client.query(
-      `SELECT * FROM automatenlager.mv_inventory_value_daily`,
-    );
+  // MatView durch die Tür mit tenant_id-Filter (kein roher Bypass, SPEC §"(Mat)Views").
+  const inventoryResult = await db.read({
+    tenant,
+    tables: ['mv_inventory_value_daily'],
+    text: `SELECT * FROM automatenlager.mv_inventory_value_daily WHERE tenant_id = $1`,
+    params: [],
+  });
 
-    // Aktive Chargen mit Restbestand, aber ohne Einkaufspreis (unit_cost_net<=0).
-    // Diese verfälschen FIFO-Kosten/Marge -> auf dem Dashboard sichtbar machen,
-    // damit der User den EK aus der gescannten Rechnung nachträgt.
-    const missingRes = await client.query(
+  // Aktive Chargen mit Restbestand, aber ohne Einkaufspreis (unit_cost_net<=0).
+  // Diese verfälschen FIFO-Kosten/Marge -> auf dem Dashboard sichtbar machen,
+  // damit der User den EK aus der gescannten Rechnung nachträgt.
+  const missingRes = await db.read({
+    tenant,
+    tables: ['stock_batches', 'products'],
+    text:
       `SELECT b.product_id, p.name AS product_name, b.batch_key, b.remaining_qty
          FROM automatenlager.stock_batches b
-         LEFT JOIN automatenlager.products p ON p.product_id = b.product_id
-        WHERE (b.unit_cost_net IS NULL OR b.unit_cost_net <= 0)
+         LEFT JOIN automatenlager.products p ON p.product_id = b.product_id AND p.tenant_id = b.tenant_id
+        WHERE b.tenant_id = $1
+          AND (b.unit_cost_net IS NULL OR b.unit_cost_net <= 0)
           AND b.remaining_qty > 0
         ORDER BY p.name NULLS LAST, b.batch_key`,
-    );
+    params: [],
+  });
 
-    return {
-      byProduct: pr.rows,
-      bySlot: sr.rows,
-      series: ser.rows,
-      granularity,
-      inventoryValue: inventoryResult.rows,
-      missingCostBatches: missingRes.rows,
-    };
-  } finally {
-    await client.end();
-  }
+  return {
+    byProduct: pr.rows,
+    bySlot: sr.rows,
+    series: ser.rows,
+    granularity,
+    inventoryValue: inventoryResult.rows,
+    missingCostBatches: missingRes.rows,
+  };
 }
 
 // #40 / Live-FIFO: Vorläufige (noch nicht von WF8 aggregierte) Verkäufe.
@@ -732,68 +745,70 @@ async function queryEconomicsPg(pgUrl, query = {}) {
 // und bis heute liegen — keine Doppelzählung mit dem Aggregat. Nur relevant,
 // wenn der gewählte Zeitraum den heutigen Tag einschließt; sonst null
 // (Vergangenheit ist vollständig in guv_daily).
-async function queryEconomicsProvisionalPg(pgUrl, query = {}) {
+// #123 (Stufe 3): liest mandantengetrennt durch die Tür. `taxConfig` (Besteuerungs-
+// modell, #56) wird vom Endpunkt geladen und hereingereicht (kein eigener DB-Zugriff
+// auf classification_settings in diesem Modul — dessen Migration ist Slice #125).
+// Mandant = $1 (Tür); dynamische Parameter folgen ab $2 (daher +1-Offset).
+async function queryEconomicsProvisionalPg(db, tenant, query = {}, taxConfig = null) {
   const { fromDate, toDate } = resolveDateRange(query);
   const today = currentBerlinDay();
   if (toDate < today || fromDate > today) return null; // kein Schnitt mit „heute"
   const upperBound = today; // bis einschließlich heute (toDate liegt >= heute)
 
-  const { Client } = require('pg');
   const machines = parseMachineFilter(query.machines != null ? query.machines : query.machine);
   const machineArr = machines.length ? machines : null;
 
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  try {
-    // Issue #56: Besteuerungsmodell des Mandanten (Kleinunternehmer → Brutto-EK
-    // als Wareneinsatz, sonst Netto). EINE Quelle (classification_settings, DB);
-    // wirkt NUR auf diesen vorläufigen Live-Pfad — guv_daily-Historie bleibt
-    // unangetastet (die wird von WF8 mit derselben Logik gebucht).
-    const { loadEffectiveConfig, resolveCategory } = require('./category-config.js');
-    const { costBasisMultiplier } = require('./guv-ek.js');
-    const taxConfig = await loadEffectiveConfig(client);
+  const { resolveCategory } = require('./category-config.js');
+  const { costBasisMultiplier } = require('./guv-ek.js');
+  const tax = taxConfig || { kleinunternehmerAktiv: false };
 
-    // Letzter bereits aggregierter Tag im Zeitraum/Scope (Berlin). Fehlt er,
-    // gilt der Tag vor Periodenbeginn -> die ganze Periode ist „vorläufig".
-    const covParams = machineArr ? [fromDate, machineArr] : [fromDate];
-    const covRes = await client.query(
+  // Letzter bereits aggregierter Tag im Zeitraum/Scope (Berlin). Mandant=$1,
+  // fromDate=$2, optionaler Automat=$3.
+  const covParams = machineArr ? [fromDate, machineArr] : [fromDate];
+  const covRes = await db.read({
+    tenant,
+    tables: ['guv_daily'],
+    text:
       `SELECT MAX(g.posting_date)::date AS latest
          FROM automatenlager.guv_daily g
-        WHERE g.source <> 'historic_backfill'
-          AND g.posting_date >= $1::date
-          ${machineArr ? 'AND g.machine_id::text = ANY($2::text[])' : ''}`,
-      covParams,
-    );
-    const latest = covRes.rows[0] && covRes.rows[0].latest; // Date | null
+        WHERE g.tenant_id = $1
+          AND g.source <> 'historic_backfill'
+          AND g.posting_date >= $2::date
+          ${machineArr ? 'AND g.machine_id::text = ANY($3::text[])' : ''}`,
+    params: covParams,
+  });
+  const latest = covRes.rows[0] && covRes.rows[0].latest; // Date | null
 
-    // Parameter strikt in Referenz-Reihenfolge aufbauen, damit kein Parameter
-    // ungenutzt bleibt (sonst: "could not determine data type").
-    const provParams = [];
-    let lowerBound;
-    if (latest) {
-      provParams.push(dayKeyBerlin(latest));
-      lowerBound = `(s.settlement_at AT TIME ZONE 'Europe/Berlin')::date > $${provParams.length}::date`;
-    } else {
-      provParams.push(fromDate);
-      lowerBound = `(s.settlement_at AT TIME ZONE 'Europe/Berlin')::date >= $${provParams.length}::date`;
-    }
-    provParams.push(upperBound);
-    const upperIdx = provParams.length;
-    let salesMachine = '';
-    if (machineArr) {
-      provParams.push(machineArr);
-      salesMachine = `AND s.machine_id::text = ANY($${provParams.length}::text[])`;
-    }
+  // Parameter ab $2 aufbauen (Mandant belegt $1 in der Tür) — daher length+1.
+  const provParams = [];
+  let lowerBound;
+  if (latest) {
+    provParams.push(dayKeyBerlin(latest));
+    lowerBound = `(s.settlement_at AT TIME ZONE 'Europe/Berlin')::date > $${provParams.length + 1}::date`;
+  } else {
+    provParams.push(fromDate);
+    lowerBound = `(s.settlement_at AT TIME ZONE 'Europe/Berlin')::date >= $${provParams.length + 1}::date`;
+  }
+  provParams.push(upperBound);
+  const upperPlaceholder = provParams.length + 1;
+  let salesMachine = '';
+  if (machineArr) {
+    provParams.push(machineArr);
+    salesMachine = `AND s.machine_id::text = ANY($${provParams.length + 1}::text[])`;
+  }
 
-    const windowWhere = `
-        WHERE s.source <> 'historic_backfill'
+  const windowWhere = `
+        WHERE s.tenant_id = $1
+          AND s.source <> 'historic_backfill'
           AND ${lowerBound}
-          AND (s.settlement_at AT TIME ZONE 'Europe/Berlin')::date <= $${upperIdx}::date
+          AND (s.settlement_at AT TIME ZONE 'Europe/Berlin')::date <= $${upperPlaceholder}::date
           ${salesMachine}`;
 
-    // Vorläufige Verkäufe je Produkt + Gesamt-Datumsspanne (für den Serienpunkt).
-    // Sequenziell — ein pg-Client führt keine zwei Queries gleichzeitig aus.
-    const byProdRes = await client.query(
+  // Vorläufige Verkäufe je Produkt + Gesamt-Datumsspanne (für den Serienpunkt).
+  const byProdRes = await db.read({
+    tenant,
+    tables: ['sales_transactions', 'products'],
+    text:
       `SELECT s.product_id,
               p.name                            AS product_name,
               p.category                        AS category,
@@ -801,89 +816,90 @@ async function queryEconomicsProvisionalPg(pgUrl, query = {}) {
               COALESCE(SUM(s.gross_amount), 0)  AS revenue_gross,
               COALESCE(SUM(s.net_amount), 0)    AS revenue_net
          FROM automatenlager.sales_transactions s
-         LEFT JOIN automatenlager.products p ON p.product_id = s.product_id
+         LEFT JOIN automatenlager.products p ON p.product_id = s.product_id AND p.tenant_id = s.tenant_id
         ${windowWhere}
         GROUP BY s.product_id, p.name, p.category`,
-      provParams,
-    );
-    const spanRes = await client.query(
+    params: provParams,
+  });
+  const spanRes = await db.read({
+    tenant,
+    tables: ['sales_transactions'],
+    text:
       `SELECT MIN((s.settlement_at AT TIME ZONE 'Europe/Berlin')::date) AS from_date,
               MAX((s.settlement_at AT TIME ZONE 'Europe/Berlin')::date) AS to_date
          FROM automatenlager.sales_transactions s
         ${windowWhere}`,
-      provParams,
-    );
+    params: provParams,
+  });
 
-    const prodRows = byProdRes.rows;
-    if (prodRows.length === 0) {
-      return { revenue_gross: 0, qty: 0, cost: 0, costMissing: false, byProduct: [], from_date: null, to_date: null };
-    }
+  const prodRows = byProdRes.rows;
+  if (prodRows.length === 0) {
+    return { revenue_gross: 0, qty: 0, cost: 0, costMissing: false, byProduct: [], from_date: null, to_date: null };
+  }
 
-    // FIFO-Bewertung: Chargen der beteiligten Produkte einmal laden.
-    const productIds = prodRows.map((r) => r.product_id).filter((id) => id != null);
-    const batchesByProduct = new Map();
-    if (productIds.length) {
-      const bRes = await client.query(
+  // FIFO-Bewertung: Chargen der beteiligten Produkte einmal laden (Mandant=$1, ids=$2).
+  const productIds = prodRows.map((r) => r.product_id).filter((id) => id != null);
+  const batchesByProduct = new Map();
+  if (productIds.length) {
+    const bRes = await db.read({
+      tenant,
+      tables: ['stock_batches'],
+      text:
         `SELECT b.product_id, b.batch_id, b.initial_qty, b.remaining_qty, b.unit_cost_net, b.received_at
            FROM automatenlager.stock_batches b
-          WHERE b.product_id = ANY($1::bigint[])`,
-        [productIds],
-      );
-      for (const b of bRes.rows) {
-        const id = String(b.product_id);
-        if (!batchesByProduct.has(id)) batchesByProduct.set(id, []);
-        batchesByProduct.get(id).push(b);
-      }
+          WHERE b.tenant_id = $1
+            AND b.product_id = ANY($2::bigint[])`,
+      params: [productIds],
+    });
+    for (const b of bRes.rows) {
+      const id = String(b.product_id);
+      if (!batchesByProduct.has(id)) batchesByProduct.set(id, []);
+      batchesByProduct.get(id).push(b);
     }
-
-    let totalGross = 0;
-    let totalNet = 0;
-    let totalQty = 0;
-    let totalCost = 0;
-    let costMissing = false;
-    const byProduct = [];
-    for (const r of prodRows) {
-      const qty = toNum(r.qty);
-      const batches = batchesByProduct.get(String(r.product_id)) || [];
-      const fifo = fifoProvisionalCostForProduct(batches, qty);
-      if (fifo.missingCost) costMissing = true;
-      // Issue #56: Netto-FIFO-Wareneinsatz auf die Kostenbasis des Mandanten
-      // heben. Alle Chargen eines Produkts teilen die Kategorie → eine MwSt →
-      // ein Multiplikator (round-genau wie WF8 pro Posten).
-      const catMwst = resolveCategory(taxConfig, r.category).mwstPct;
-      const mult = costBasisMultiplier(catMwst, { kleinunternehmer: taxConfig.kleinunternehmerAktiv });
-      const cost = round2(fifo.cost * mult);
-      const rg = toNum(r.revenue_gross);
-      const rn = toNum(r.revenue_net);
-      totalGross += rg;
-      totalNet += rn;
-      totalQty += qty;
-      totalCost += cost;
-      byProduct.push({
-        product_id: r.product_id,
-        product_name: r.product_name,
-        qty,
-        revenue_gross: rg,
-        revenue_net: rn,
-        cost,
-        cost_missing: fifo.missingCost,
-      });
-    }
-
-    const span = spanRes.rows[0] || {};
-    return {
-      revenue_gross: round2(totalGross),
-      revenue_net: round2(totalNet),
-      qty: totalQty,
-      cost: round2(totalCost),
-      costMissing,
-      byProduct,
-      from_date: span.from_date ? dayKeyBerlin(span.from_date) : null,
-      to_date: span.to_date ? dayKeyBerlin(span.to_date) : null,
-    };
-  } finally {
-    await client.end();
   }
+
+  let totalGross = 0;
+  let totalNet = 0;
+  let totalQty = 0;
+  let totalCost = 0;
+  let costMissing = false;
+  const byProduct = [];
+  for (const r of prodRows) {
+    const qty = toNum(r.qty);
+    const batches = batchesByProduct.get(String(r.product_id)) || [];
+    const fifo = fifoProvisionalCostForProduct(batches, qty);
+    if (fifo.missingCost) costMissing = true;
+    const catMwst = resolveCategory(tax, r.category).mwstPct;
+    const mult = costBasisMultiplier(catMwst, { kleinunternehmer: tax.kleinunternehmerAktiv });
+    const cost = round2(fifo.cost * mult);
+    const rg = toNum(r.revenue_gross);
+    const rn = toNum(r.revenue_net);
+    totalGross += rg;
+    totalNet += rn;
+    totalQty += qty;
+    totalCost += cost;
+    byProduct.push({
+      product_id: r.product_id,
+      product_name: r.product_name,
+      qty,
+      revenue_gross: rg,
+      revenue_net: rn,
+      cost,
+      cost_missing: fifo.missingCost,
+    });
+  }
+
+  const span = spanRes.rows[0] || {};
+  return {
+    revenue_gross: round2(totalGross),
+    revenue_net: round2(totalNet),
+    qty: totalQty,
+    cost: round2(totalCost),
+    costMissing,
+    byProduct,
+    from_date: span.from_date ? dayKeyBerlin(span.from_date) : null,
+    to_date: span.to_date ? dayKeyBerlin(span.to_date) : null,
+  };
 }
 
 module.exports = {
