@@ -30,6 +30,7 @@ const { queryEconomicsLivePg } = require('./lib/economics-live.js');
 const { resolveViewer, objectAccessAllowed, breakGlassDecision } = require('./lib/auth.js');
 const { createTenantDirectory } = require('./lib/tenant-directory.js');
 const { createTenantDb } = require('./lib/tenant-db.js');
+const { rejectBodyTenant } = require('./lib/write-guards.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
 const { runStockCostCheck } = require('./lib/stock-cost-invariant.js');
@@ -319,6 +320,20 @@ function auditGuestAccess(viewer, event, details = {}) {
 
 function clean(value) {
   return String(value ?? '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Liest den Request-Body und parst ihn als JSON (leerer Body ⇒ {}). Wirft bei
+// ungültigem JSON, sodass der Aufrufer mit 400 antworten kann. (Der Name wurde am
+// slot-assign-inline/confirm-Endpunkt bereits verwendet, war aber nie definiert —
+// der Body kam dort immer als {} an [latenter Bug]; #133 zieht ihn nach, weil das
+// Autorisierungs-Tor die machine_id aus dem Body braucht.)
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk) => { data += chunk; });
+    req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(e); } });
+    req.on('error', reject);
+  });
 }
 
 function formatBerlinDateTime(date) {
@@ -2226,11 +2241,17 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON im Request-Body.' } });
         return;
       }
+      // #133 (Stufe 4): Mandant kommt NUR aus dem Viewer — tenant_id/mandant_id im Body ⇒ 400 + Audit.
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
       const { machine_id, mdb_code, product_id, qty, product_name, notes } = body || {};
       if (!machine_id || !mdb_code || !product_id || !qty) {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: 'machine_id, mdb_code, product_id, qty erforderlich.' } });
         return;
       }
+      // #133 (Stufe 4, IDOR): Automat muss real zum Mandanten des Viewers gehören.
+      // Nach der Pflichtfeld-Validierung (malformte Requests ⇒ 400, kein Lookup);
+      // fremd/unbekannt ⇒ 404 + Audit, BEVOR der n8n-Webhook ausgelöst wird.
+      if (!(await requireMachineAccess(viewer, machine_id, res, 'idor:refill'))) return;
       const cfg = dashboardConfig();
       const n8nBase = cfg.n8nBaseUrl;
       const qs = new URLSearchParams({
@@ -3976,6 +3997,8 @@ const server = http.createServer(async (req, res) => {
       }
       let body;
       try { body = await readJsonBody(req); } catch { body = {}; }
+      // #133 (Stufe 4): Mandant kommt NUR aus dem Viewer — tenant_id/mandant_id im Body ⇒ 400 + Audit.
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
       const { product_id, product_key, machine_id, mdb_code, qty, start_date } = body || {};
 
       const productRow = { product_id: product_id ?? null, product_key: product_key ?? null, name: '' };
@@ -3987,6 +4010,9 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: missingFields.map((e) => e.message).join(' '), fields: missingFields } });
         return;
       }
+      // #133 (Stufe 4, IDOR): Automat muss real zum Mandanten des Viewers gehören.
+      // Nach der Validierung; fremd/unbekannt ⇒ 404 + Audit, BEVOR der n8n-Webhook läuft.
+      if (!(await requireMachineAccess(viewer, machine_id, res, 'idor:slot-assign-inline'))) return;
 
       const payload  = buildSlotAssignPayload(productRow, { machine_id, mdb_code, qty, start_date });
       const webhookUrl = process.env.SLOT_ASSIGN_INLINE_WEBHOOK_URL || '';
