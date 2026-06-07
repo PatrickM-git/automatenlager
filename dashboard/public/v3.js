@@ -1394,10 +1394,16 @@
             'title="Aussortieren">×</button>'
         : '';
       var machineQty = typeof b.machine_qty === 'number' ? b.machine_qty : null;
-      var hasDrift = machineQty !== null && Math.abs(b.remaining_qty - machineQty) > 0;
-      var driftNote = hasDrift
-        ? ' <span class="v3-lager-drift" title="Chargenrest (' + b.remaining_qty + ') weicht vom Nayax-Abgleich (' + machineQty + ') ab">⚠</span>'
-        : '';
+      // #152: Chargenrest (Lager) ist für Admins editierbar (Inline-Inventur).
+      // Der frühere Drift-⚠ (Chargenrest vs. Nayax) ist entfernt — er verglich
+      // Lager gegen Maschine (getrennte Töpfe) und war das falsche Signal.
+      var qtyCell = (_lagerCanEdit && b.batch_key)
+        ? '<button type="button" class="v3-lager-row__setcount" data-setcount-btn ' +
+            'data-batch-key="' + esc(b.batch_key) + '" ' +
+            'data-product-name="' + esc(b.product_name) + '" ' +
+            'data-remaining="' + b.remaining_qty + '" ' +
+            'title="Lagerbestand korrigieren (Inventur)">' + b.remaining_qty + ' Stk. <span class="v3-lager-row__edit" aria-hidden="true">✎</span></button>'
+        : (b.remaining_qty + ' Stk.');
       return '<tr class="v3-lager-row' + sevCls + '">' +
         '<td class="v3-lager-td v3-lager-td--name">' + esc(b.product_name) + '</td>' +
         '<td class="v3-lager-td v3-lager-td--mhd">' + esc(mhdDisplay) + '</td>' +
@@ -1406,7 +1412,7 @@
         '</td>' +
         '<td class="v3-lager-td v3-lager-td--qty v3-lager-td--machine">' +
           (machineQty !== null ? machineQty + ' Stk.' : '–') + '</td>' +
-        '<td class="v3-lager-td v3-lager-td--qty">' + b.remaining_qty + ' Stk.' + driftNote + '</td>' +
+        '<td class="v3-lager-td v3-lager-td--qty">' + qtyCell + '</td>' +
         (_lagerCanEdit ? '<td class="v3-lager-td v3-lager-td--action">' + writeOffBtn + '</td>' : '') +
       '</tr>';
     }).join('');
@@ -1419,7 +1425,7 @@
           '<th class="v3-lager-th v3-lager-th--sortable" data-sort="mhd_date">MHD ' + sortArrow('mhd_date') + '</th>' +
           '<th class="v3-lager-th">Dringlichkeit</th>' +
           '<th class="v3-lager-th v3-lager-th--sortable" data-sort="machine_qty" title="Aktueller Bestand im Automaten (Nayax-Abgleich #17)">Im Automaten ' + sortArrow('machine_qty') + '</th>' +
-          '<th class="v3-lager-th v3-lager-th--sortable" data-sort="remaining_qty" title="Buchhalterischer Chargenrest (kann driften – #87)">Chargenrest ' + sortArrow('remaining_qty') + '</th>' +
+          '<th class="v3-lager-th v3-lager-th--sortable" data-sort="remaining_qty" title="Dein Lagerbestand laut Buchung – per Klick korrigierbar (Inventur)">Chargenrest ' + sortArrow('remaining_qty') + '</th>' +
           actionCol +
         '</tr></thead>' +
         '<tbody>' + rows + '</tbody>' +
@@ -1473,13 +1479,81 @@
     var table = viewEl.querySelector('[data-lager-table]');
     if (!table || !_lagerCanEdit) { return; }
     table.addEventListener('click', function (ev) {
-      var btn = ev.target && ev.target.closest ? ev.target.closest('[data-writeoff-btn]') : null;
+      var t = ev.target;
+      // #152: Inline-Inventur (Chargenrest setzen) — vor dem Aussortieren-Check.
+      var setBtn = t && t.closest ? t.closest('[data-setcount-btn]') : null;
+      if (setBtn) {
+        openSetCountDialog({
+          batch_key:    setBtn.getAttribute('data-batch-key') || '',
+          product_name: setBtn.getAttribute('data-product-name') || '',
+          remaining:    Number(setBtn.getAttribute('data-remaining')) || 0,
+        });
+        return;
+      }
+      var btn = t && t.closest ? t.closest('[data-writeoff-btn]') : null;
       if (!btn) { return; }
       openWriteOffDialog({
         batch_key:    btn.getAttribute('data-batch-key') || '',
         product_name: btn.getAttribute('data-product-name') || '',
         remaining:    Number(btn.getAttribute('data-remaining')) || 0,
         batch_count:  Number(btn.getAttribute('data-batch-count')) || 1,
+      });
+    });
+  }
+
+  /* #152 Inline-Inventur: gezählten Lager-Chargenrest setzen (NUR remaining_qty,
+     nie machine_qty). Schreibt via POST /api/v2/inventory/set-count. */
+  function openSetCountDialog(info) {
+    var body = '' +
+      '<p class="v3-slots-dialog__eyebrow">Inventur</p>' +
+      '<p class="v3-slots-dialog__note"><b>' + esc(info.product_name) + '</b> — gezählten Lagerbestand eintragen. ' +
+        'Aktuell gebucht: <b>' + esc(String(info.remaining)) + ' Stk.</b> Die Zahl „Im Automaten" (Nayax) bleibt unberührt.</p>' +
+      '<div class="v3-writeoff__fields">' +
+        '<label class="v3-writeoff__label" for="v3-setcount-qty">Gezählter Bestand (Stk.)</label>' +
+        '<input type="number" id="v3-setcount-qty" class="v3-writeoff__note" data-setcount-qty min="0" step="1" value="' + esc(String(info.remaining)) + '" aria-label="Gezählter Bestand" />' +
+      '</div>' +
+      '<p class="v3-slots-dialog__error" data-setcount-error hidden></p>' +
+      '<div class="v3-slots-dialog__actions">' +
+        '<button type="button" class="v3-btn" data-dialog-cancel>Abbrechen</button>' +
+        '<button type="button" class="v3-btn v3-btn--brand" data-setcount-confirm>Bestand speichern</button>' +
+      '</div>';
+    var modal = mountSlotDialog(body, 'Lagerbestand korrigieren');
+    var card = modal.card;
+    var confirmBtn = card.querySelector('[data-setcount-confirm]');
+    var errEl = card.querySelector('[data-setcount-error]');
+    var input = card.querySelector('[data-setcount-qty]');
+    confirmBtn.addEventListener('click', function () {
+      var val = input ? String(input.value).trim() : '';
+      var n = Number(val);
+      if (val === '' || !isFinite(n) || Math.floor(n) !== n || n < 0) {
+        errEl.textContent = 'Bitte eine ganze Zahl >= 0 eingeben.';
+        errEl.hidden = false;
+        return;
+      }
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Wird gespeichert …';
+      errEl.hidden = true;
+      postJson('/api/v2/inventory/set-count', {
+        batch_key: info.batch_key,
+        new_qty: n,
+        expected_remaining_qty: info.remaining,
+      }).then(function (res) {
+        if (res.ok && res.json && res.json.ok) {
+          modal.close();
+          showSlotToast((res.json && res.json.message) || ('Bestand gespeichert: ' + n + ' Stk.'));
+          renderRoute(ROUTE_BY_PATH['/lager']);
+        } else {
+          errEl.textContent = (res.json && res.json.error && res.json.error.message) ||
+            ('Speichern fehlgeschlagen (' + res.status + ').');
+          errEl.hidden = false;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Bestand speichern';
+        }
+      }).catch(function () {
+        errEl.textContent = 'Netzwerkfehler. Bitte erneut versuchen.';
+        errEl.hidden = false;
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Bestand speichern';
       });
     });
   }

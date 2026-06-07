@@ -12,6 +12,7 @@ const { buildAlertDigest, queryAlertDigestPg } = require('./lib/alert-digest.js'
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
 const { availableBatchStatusSqlList } = require('./lib/stock-status.js');
 const { validateWriteOff, buildWriteOffAuditEntry, writeOffBatchPg } = require('./lib/write-off.js'); // #138: writeOffBatchPg geht durch die Tür
+const { validateInventoryCount, buildInventoryCountAuditEntry, setBatchCountPg } = require('./lib/inventory-count.js'); // #152: Inline-Inventur (Chargenrest setzen)
 const { buildSlotChangePreview, validateSlotChange, buildSlotChangePayload, buildSlotChangeAuditEntry } = require('./lib/slot-change.js');
 const { buildProductOnboardingData, queryProductOnboardingPg } = require('./lib/product-onboarding.js');
 const { buildReportCsv, buildReportFilename } = require('./lib/reports.js');
@@ -2421,6 +2422,68 @@ const server = http.createServer(async (req, res) => {
         fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
       } catch { /* audit write failure must not block response */ }
       sendJson(res, 200, { ok: true, data: { batch_key: check.batch_key, product_id: outcome.product_id, written_off_qty: outcome.written_off_qty }, message: outcome.message });
+      return;
+    }
+
+    // ── Inline-Inventur: Chargenrest (Lager) auf gezählten Ist-Wert setzen ─────
+    // #152: Setzt NUR stock_batches.remaining_qty (durch die Tür, atomar in db.tx,
+    // optimistic lock). machine_qty ("Im Automaten", Nayax) bleibt unberührt.
+    if (parsed.pathname === '/api/v2/inventory/set-count' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.can('bestand.schreiben')) {
+        auditDenied(viewer, 'inventory_set_count_denied', {});
+        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer dürfen den Bestand nicht ändern.' } });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await new Promise((resolve, reject) => {
+          let data = '';
+          req.on('data', (chunk) => { data += chunk; });
+          req.on('end', () => resolve(data));
+          req.on('error', reject);
+        }));
+      } catch {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON im Request-Body.' } });
+        return;
+      }
+      // Mandant kommt NUR aus dem Viewer — tenant_id/mandant_id im Body ⇒ 400 + Audit.
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
+      const check = validateInventoryCount(body);
+      if (!check.valid) {
+        sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: check.errors.map((e) => e.message).join(' ') } });
+        return;
+      }
+      if (!tenantDb) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      let outcome;
+      try {
+        outcome = await setBatchCountPg(tenantDb, viewer.tenantId, check.batch_key, check.new_qty, body && body.expected_remaining_qty);
+      } catch (err) {
+        if (['NOT_FOUND', 'ALREADY_WRITTEN_OFF', 'OUT_OF_RANGE', 'DRIFT'].includes(err.code)) {
+          const statusCode = err.code === 'NOT_FOUND' ? 404 : 409;
+          const messages = {
+            NOT_FOUND: 'Charge nicht gefunden.',
+            ALREADY_WRITTEN_OFF: 'Charge ist ausgebucht — nutze stattdessen Aussortieren.',
+            OUT_OF_RANGE: `Wert muss zwischen 0 und ${err.verdict && err.verdict.initial_qty} liegen (Chargengröße).`,
+            DRIFT: `Bestand hat sich geändert (jetzt ${err.verdict && err.verdict.remaining_qty}). Bitte neu laden.`,
+          };
+          sendJson(res, statusCode, { ok: false, error: { code: err.code, message: messages[err.code] || 'Bestand setzen nicht möglich.' } });
+          return;
+        }
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+        return;
+      }
+      outcome.message = `Chargenrest auf ${outcome.new_qty} Stk. gesetzt (war ${outcome.previous_qty}).`;
+      const auditEntry = buildInventoryCountAuditEntry(viewer, body, outcome);
+      const auditPath = path.join(__dirname, 'logs', 'inventory-count-actions.jsonl');
+      try {
+        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
+        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
+      } catch { /* audit write failure must not block response */ }
+      sendJson(res, 200, { ok: true, data: { batch_key: check.batch_key, product_id: outcome.product_id, previous_qty: outcome.previous_qty, new_qty: outcome.new_qty }, message: outcome.message });
       return;
     }
 

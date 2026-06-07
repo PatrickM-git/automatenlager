@@ -91,9 +91,11 @@ test('#145 SET ROLE smoke: App-Rolle liest operative Tabellen, Registry verweige
     await withRollback(client, async () => {
       await applyMigration(client, 22);
       await client.query('SET ROLE automatenlager_app');
-      // operativer Read funktioniert (noch ohne Policies ⇒ sieht alles)
+      // products trägt live RLS (Stufe 5 scharf) ⇒ GUC setzen wie die Tür; mit
+      // gültigem Mandanten liefert der operative Read (kein fail-closed).
+      await client.query("SELECT set_config('automatenlager.current_tenant','t_faltrix',true)");
       await client.query('SELECT 1 FROM automatenlager.products LIMIT 1');
-      // Registry-Read verweigert (permission denied, 42501)
+      // Registry-Read verweigert (GRANT entzogen, permission denied) — unabhängig vom GUC.
       await expectReject(client, 'SELECT 1 FROM automatenlager.tenants LIMIT 1', /permission denied/i,
         'App-Rolle darf Registry nicht direkt lesen');
       await client.query('RESET ROLE');
