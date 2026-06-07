@@ -833,8 +833,15 @@ async function buildDashboardV2Area(area, query = {}, viewer = null) {
   }
 
   if (area === 'overview' || area === 'monitoring') {
+    // #124: technischer Ausfall (Verzeichnis nicht bereit) ⇒ 503, nicht leer.
+    if (tenantDirectory && !tenantDirectory.isReady()) {
+      return buildDashboardV2Error(area, 'PG_ERROR', 'Mandanten-Verzeichnis nicht bereit (DB nicht erreichbar).');
+    }
     try {
-      const raw = await queryOverviewMonitoringPg(pgUrl);
+      // #124: mandantengetrennt durch die Tür; Mandant aus dem Viewer, MHD-Fenster aus der Config.
+      const tenant = viewer && viewer.tenantId;
+      const cfg = await loadClassificationConfig(tenant || DEFAULT_MANDANT);
+      const raw = await queryOverviewMonitoringPg(tenantDb, tenant, { mhdDays: cfg.mhdRiskDays });
       const overview = buildOverviewData(raw);
       const monitoring = buildMonitoringData(raw);
       const now = new Date();
@@ -3279,14 +3286,16 @@ const server = http.createServer(async (req, res) => {
     // ── GuV-Filter: Auswahlbaum Standorte + Automaten ─────────────────────────
 
     if (parsed.pathname === '/api/v2/economics/scope' && req.method === 'GET') {
-      if (!requireCapability(getViewer(req), 'finanzen.lesen', res)) return; // #28: GuV nur mit finanzen.lesen
+      const viewer = getViewer(req); // #124: Mandant für den Automaten-/Standort-Scope
+      if (!requireCapability(viewer, 'finanzen.lesen', res)) return; // #28: GuV nur mit finanzen.lesen
+      if (!tenantReadReady(res)) return; // #124: DB/Verzeichnis-Ausfall ⇒ 503, nicht leer
       const pgUrl = dashboardV2PgUrl();
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
       try {
-        const scope = await queryEconomicsScopePg(pgUrl);
+        const scope = await queryEconomicsScopePg(tenantDb, viewer.tenantId);
         sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), data: scope });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
@@ -3326,11 +3335,39 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
+      // #124: Hintergrund-Job ohne Viewer. Verzeichnis nicht bereit ⇒ 503 (kein Default).
+      if (!tenantReadReady(res)) return;
+      const q = parsed.query || {};
+      const lowBatchThreshold = Number(q.lowBatchThreshold);
+      const opts = Number.isFinite(lowBatchThreshold) ? { lowBatchThreshold } : {};
+      // EXPLIZITE Mandanten-Quelle: ?tenant=<id> ODER alle realen Mandanten aus dem
+      // Verzeichnis (pro Mandant). NIE ein Default-Mandant.
+      const explicit = clean(q.tenant);
+      let tenants;
+      if (explicit) {
+        if (!tenantDirectory || !tenantDirectory.tenantExists(explicit)) {
+          sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: 'Mandant nicht gefunden.' } });
+          return;
+        }
+        tenants = [explicit];
+      } else {
+        tenants = tenantDirectory ? tenantDirectory.listTenantIds() : [];
+      }
       try {
-        const lowBatchThreshold = Number((parsed.query || {}).lowBatchThreshold);
-        const raw = await queryAlertDigestPg(pgUrl, Number.isFinite(lowBatchThreshold) ? { lowBatchThreshold } : {});
-        const data = buildAlertDigest(raw);
-        sendJson(res, 200, { ok: true, source: 'postgres', generatedAt: new Date().toISOString(), data });
+        if (tenants.length <= 1) {
+          // Genau ein (oder — Randfall — kein) Mandant ⇒ bestehende Antwort-Form
+          // (WF5-kompatibel; kein Mandant ⇒ leerer Digest, der Job verschickt nichts).
+          const tenant = tenants[0] || null;
+          const data = buildAlertDigest(await queryAlertDigestPg(tenantDb, tenant, opts));
+          sendJson(res, 200, { ok: true, source: 'postgres', generatedAt: new Date().toISOString(), tenant, data });
+          return;
+        }
+        // Mehrere Mandanten ⇒ per-Mandant (Stufe 6 verdrahtet WF5 pro Mandant/Mail).
+        const perTenant = {};
+        for (const tid of tenants) {
+          perTenant[tid] = buildAlertDigest(await queryAlertDigestPg(tenantDb, tid, opts));
+        }
+        sendJson(res, 200, { ok: true, source: 'postgres', generatedAt: new Date().toISOString(), perTenant });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
       }

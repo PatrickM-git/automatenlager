@@ -31,7 +31,7 @@ test('#122 Guard Melde-Modus: Worklist aller noch ungefilterten Lesepfade, brich
   assert.ok(report.bypass.length > 0, 'Melde-Modus listet noch-ungefilterte Lesepfade');
   const files = report.bypass.map((b) => b.file);
   // Stabile Vertreter, die heute noch direkt pg nutzen (noch nicht migriert):
-  for (const known of ['inventory-mhd.js', 'assortment-slots.js', 'overview-monitoring.js']) {
+  for (const known of ['inventory-mhd.js', 'assortment-slots.js', 'correction-cases.js']) {
     assert.ok(files.includes(known), `Worklist enthält ${known}`);
   }
   // Jeder Eintrag trägt eine Begründung (welches Muster).
@@ -92,13 +92,15 @@ test('#122 Guard findViolations: schrumpfende Allowlist (bereichsweise scharf)',
 // KLEINER; im Endzustand (#129) bleibt nur die Infrastruktur-Ausnahme. Migrierte
 // Module dürfen hier NICHT stehen — sonst könnten sie unbemerkt zurückfallen.
 const STILL_BYPASSING = [
-  'alert-digest.js', 'assortment-slots.js', 'automaten-view.js', 'category-config.js',
-  'correction-cases.js', 'db-schema.js', 'inventory-mhd.js', 'location-profiles.js',
-  'machine-create.js', 'machine-profiles.js', 'nayax-devices.js', 'overview-monitoring.js',
-  'product-onboarding.js', 'settings-thresholds.js', 'stock-cost-invariant.js',
+  'assortment-slots.js', 'category-config.js', 'correction-cases.js', 'db-schema.js',
+  'inventory-mhd.js', 'location-profiles.js', 'machine-create.js', 'machine-profiles.js',
+  'nayax-devices.js', 'product-onboarding.js', 'settings-thresholds.js', 'stock-cost-invariant.js',
 ];
 // Pro Slice durch die Tür geführte (migrierte) Lesemodule.
-const MIGRATED = ['economics.js', 'economics-live.js']; // #123 Finanzen/GuV
+const MIGRATED = [
+  'economics.js', 'economics-live.js',                                  // #123 Finanzen/GuV
+  'overview-monitoring.js', 'automaten-view.js', 'alert-digest.js',     // #124 Übersicht/Cockpit/Monitoring
+];
 
 test('#123 Guard scharf: kein Bypass außerhalb der schrumpfenden Allowlist (Default-Deny)', () => {
   const violations = guard.findViolations({ libDir: LIB_DIR, allowlist: STILL_BYPASSING });

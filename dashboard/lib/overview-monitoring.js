@@ -1,7 +1,8 @@
 'use strict';
 
 const { availableBatchStatusSqlList } = require('./stock-status.js');
-const { loadEffectiveConfig, DEFAULT_MANDANT } = require('./category-config.js'); // #34: MHD-Fenster aus Settings
+// #124: MHD-Fenster (mhdDays) wird jetzt vom Endpunkt in queryOverviewMonitoringPg
+// gereicht — keine eigene classification_settings-Abfrage mehr in diesem Modul.
 
 const PIPELINE_STALE_THRESHOLD_MINUTES = 24 * 60;
 
@@ -12,19 +13,23 @@ const PIPELINE_STALE_THRESHOLD_MINUTES = 24 * 60;
 // Betriebswarnungen (CONTAINER_DOWN, WORKFLOW_ERROR, …) bleiben unberuehrt.
 // #34: MHD-Fenster (mhdDays) aus der Settings-Quelle parametrisiert — als Funktion,
 // damit der per-Request geladene Wert einfließt (vorher fixes Modul-Literal).
+// #124 (Stufe 3): die korrelierten Subqueries tragen zusätzlich `tenant_id = w.tenant_id`
+// (defensiv mandanten-treu; product_id ist zwar global-eindeutig, der explizite Filter
+// macht die Mandanten-Bindung aber sichtbar und überlebt spätere per-Mandant-Schlüssel).
 function liveWarningReconcileSql(mhdDays) {
   return `
   CASE
     WHEN w.warning_type IN ('MHD_NEAR', 'MHD_EXPIRED') THEN EXISTS (
       SELECT 1 FROM automatenlager.stock_batches sb
        WHERE sb.product_id = w.product_id
+         AND sb.tenant_id = w.tenant_id
          AND sb.remaining_qty > 0
          AND sb.status IN (${availableBatchStatusSqlList()})
          AND sb.mhd_date <= CURRENT_DATE + INTERVAL '${mhdDays} days'
     )
     WHEN w.warning_type = 'LOW_STOCK' THEN EXISTS (
       SELECT 1 FROM automatenlager.slot_assignments sa
-       WHERE sa.product_id = w.product_id AND sa.active = TRUE
+       WHERE sa.product_id = w.product_id AND sa.tenant_id = w.tenant_id AND sa.active = TRUE
          AND sa.current_machine_qty = 0
     )
     WHEN w.warning_type = 'LOW_BATCH' THEN (
@@ -33,11 +38,12 @@ function liveWarningReconcileSql(mhdDays) {
       -- "0 <= 5" liefe als Dauer-"leer"-Warnung weiter (Red Bull Spring, 2026-06-05).
       EXISTS (
         SELECT 1 FROM automatenlager.slot_assignments sa
-         WHERE sa.product_id = w.product_id AND sa.active = TRUE
+         WHERE sa.product_id = w.product_id AND sa.tenant_id = w.tenant_id AND sa.active = TRUE
       )
       AND (
         SELECT COALESCE(SUM(sb.remaining_qty), 0) FROM automatenlager.stock_batches sb
          WHERE sb.product_id = w.product_id
+           AND sb.tenant_id = w.tenant_id
            AND sb.status IN (${availableBatchStatusSqlList()})
       ) <= 5
     )
@@ -235,86 +241,80 @@ function buildOverviewData(raw = {}) {
   };
 }
 
-async function queryOverviewMonitoringPg(pgUrl) {
-  const { Client } = require('pg');
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  try {
-    const mhdDays = (await loadEffectiveConfig(client, DEFAULT_MANDANT)).mhdRiskDays; // #34: eine Quelle
-    const [
-      openWarningsResult,
-      mhdItemsResult,
-      lowStockItemsResult,
-      economicsResult,
-      workflowRunsResult,
-      warningsResult,
-      backupOkResult,
-    ] = await Promise.all([
-      client.query(
-        // BACKUP_OK ist eine Erfolgsmeldung, keine offene Warnung — wie in der
-        // Warnungs-Liste unten ausschließen, sonst bläht es den Cockpit-Zähler auf.
-        `SELECT COUNT(*)::int AS count FROM (
+// #124 (Stufe 3): mandantengetrennt durch die Mandanten-Tür. `db` = Tür, `tenant` =
+// effektiver Mandant; `opts.mhdDays` (MHD-Fenster) wird vom Endpunkt gereicht (keine
+// eigene classification_settings-Abfrage in diesem Modul). audit.workflow_runs ist
+// System-Telemetrie OHNE tenant_id (geteilte Pipeline) — tenant-gated via
+// `$1::text IS NOT NULL`, nicht tenant-partitioniert. Kein Mandant ⇒ alles leer.
+async function queryOverviewMonitoringPg(db, tenant, opts = {}) {
+  const mhdDays = Number.isFinite(Number(opts.mhdDays)) ? Number(opts.mhdDays) : 30; // #34-Fenster vom Endpunkt
+  const [
+    openWarningsResult,
+    mhdItemsResult,
+    lowStockItemsResult,
+    economicsResult,
+    workflowRunsResult,
+    warningsResult,
+    backupOkResult,
+  ] = await Promise.all([
+    db.read({ tenant, tables: ['warnings', 'slot_assignments'], params: [], text:
+      // BACKUP_OK ist eine Erfolgsmeldung, keine offene Warnung — wie in der
+      // Warnungs-Liste unten ausschließen, sonst bläht es den Cockpit-Zähler auf.
+      `SELECT COUNT(*)::int AS count FROM (
            SELECT DISTINCT ON (warning_type, COALESCE(product_id::text, warning_key))
              warning_id
            FROM automatenlager.warnings w
-           WHERE w.resolved = FALSE
+           WHERE w.tenant_id = $1
+             AND w.resolved = FALSE
              AND w.warning_type != 'BACKUP_OK'
              AND NOT (
                w.warning_type = 'MDB_CODE_CHANGED_FOR_PRODUCT'
                AND w.product_id IS NOT NULL
-               AND (SELECT COUNT(*) FROM automatenlager.slot_assignments sa WHERE sa.active = TRUE AND sa.product_id = w.product_id) > 1
+               AND (SELECT COUNT(*) FROM automatenlager.slot_assignments sa WHERE sa.active = TRUE AND sa.product_id = w.product_id AND sa.tenant_id = w.tenant_id) > 1
              )
              AND (${liveWarningReconcileSql(mhdDays)})
            ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
-         ) d`,
-      ),
-      // MHD-Risiko: 30-Tage-Fenster wie bisher (KPI-deckungsgleich mit dem
-      // v3-Cockpit), liefert jetzt zusaetzlich die Chargen-Zeilen inkl.
-      // days_remaining fuer den Overview-Drilldown. Bereits abgelaufene Chargen
-      // (days_remaining < 0) sind eingeschlossen und eskalieren die Prioritaet.
-      client.query(
-        `SELECT p.name AS product_name, sb.batch_key, sb.mhd_date::text,
+         ) d` }),
+    // MHD-Risiko: 30-Tage-Fenster wie bisher (KPI-deckungsgleich mit dem v3-Cockpit).
+    db.read({ tenant, tables: ['stock_batches', 'products'], params: [], text:
+      `SELECT p.name AS product_name, sb.batch_key, sb.mhd_date::text,
                 (sb.mhd_date - CURRENT_DATE)::int AS days_remaining
            FROM automatenlager.stock_batches sb
-           JOIN automatenlager.products p ON p.product_id = sb.product_id
-          WHERE sb.status IN (${availableBatchStatusSqlList()})
+           JOIN automatenlager.products p ON p.product_id = sb.product_id AND p.tenant_id = sb.tenant_id
+          WHERE sb.tenant_id = $1
+            AND sb.status IN (${availableBatchStatusSqlList()})
             AND sb.remaining_qty > 0
             AND sb.mhd_date IS NOT NULL
             AND sb.mhd_date <= CURRENT_DATE + INTERVAL '${mhdDays} days'
-          ORDER BY sb.mhd_date`,
-      ),
-      // Cockpit-KPI "Leere Slots": nur wirklich leere Slots (= 0), deckungsgleich
-      // mit der Detailseite (inventory-mhd.js). "Unter Zielbestand" war als Cockpit-
-      // Signal zu laut (Normalzustand), die echte Aktion ist der leere Slot.
-      // Liefert zusaetzlich die Slot-Zeilen fuer den Overview-Drilldown.
-      client.query(
-        `SELECT sa.product_slot_key, sa.machine_id, p.name AS product_name,
+          ORDER BY sb.mhd_date` }),
+    // Cockpit-KPI "Leere Slots": nur wirklich leere Slots (= 0).
+    db.read({ tenant, tables: ['slot_assignments', 'products'], params: [], text:
+      `SELECT sa.product_slot_key, sa.machine_id, p.name AS product_name,
                 sa.current_machine_qty
            FROM automatenlager.slot_assignments sa
-           JOIN automatenlager.products p ON p.product_id = sa.product_id
-          WHERE sa.active = TRUE
+           JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
+          WHERE sa.tenant_id = $1
+            AND sa.active = TRUE
             AND sa.current_machine_qty = 0
-          ORDER BY sa.machine_id, sa.product_slot_key`,
-      ),
-      // Umsatz HEUTE live aus sales_transactions (von WF3 befüllt), NICHT aus
-      // guv_daily — letzteres wird erst nachts (WF8, 02:00) aggregiert und ist
-      // tagsüber 0. Brutto, konsistent zur GuV-Live-Kachel (economics-live.js).
-      client.query(
-        `SELECT COALESCE(SUM(gross_amount), 0)::numeric AS revenue_gross,
+          ORDER BY sa.machine_id, sa.product_slot_key` }),
+    // Umsatz HEUTE live aus sales_transactions (von WF3 befüllt), Brutto.
+    db.read({ tenant, tables: ['sales_transactions'], params: [], text:
+      `SELECT COALESCE(SUM(gross_amount), 0)::numeric AS revenue_gross,
                 COALESCE(SUM(net_amount), 0)::numeric   AS revenue_net,
                 COALESCE(SUM(quantity), 0)::int         AS quantity
            FROM automatenlager.sales_transactions
-          WHERE (settlement_at AT TIME ZONE 'Europe/Berlin')::date
+          WHERE tenant_id = $1
+            AND (settlement_at AT TIME ZONE 'Europe/Berlin')::date
                 = (now() AT TIME ZONE 'Europe/Berlin')::date
-            AND source <> 'historic_backfill'`,
-      ),
-      client.query(
-        `SELECT workflow_key, started_at, finished_at, status
+            AND source <> 'historic_backfill'` }),
+    // System-Telemetrie (geteilte n8n-Pipeline) — kein tenant_id; tenant-gated.
+    db.read({ tenant, tables: ['workflow_runs'], params: [], text:
+      `SELECT workflow_key, started_at, finished_at, status
            FROM audit.workflow_runs
           WHERE started_at >= now() - INTERVAL '3 days'
+            AND $1::text IS NOT NULL
           ORDER BY started_at DESC
-          LIMIT 80`,
-      ),
+          LIMIT 80` }),
       // Bestands-Warnungen (LOW_BATCH/LOW_STOCK) tragen einen von WF5
       // EINGEFRORENEN Meldungstext mit veralteter Stückzahl (z. B. „Nur noch 5
       // im Lager", obwohl längst leer). Das Cockpit prüft die Bedingung zwar
@@ -323,8 +323,9 @@ async function queryOverviewMonitoringPg(pgUrl) {
       // GREATEST(SUM(remaining_qty) − SUM(current_machine_qty), 0), exakt wie
       // inventory-mhd.js / alert-digest.js. MHD-/System-Warnungen bleiben
       // unverändert (ihr Text ist datums-/zustandsbasiert).
-      client.query(
-        `WITH live_stock AS (
+    // Warnungs-Liste mit live nachgebautem Text (Lager/Automat). CTEs tenant-gefiltert.
+    db.read({ tenant, tables: ['products', 'stock_batches', 'slot_assignments', 'warnings'], params: [], text:
+      `WITH live_stock AS (
            SELECT p.product_id, p.name,
                   GREATEST(COALESCE(b.total, 0) - COALESCE(s.mq, 0), 0)::int AS backstock,
                   COALESCE(s.mq, 0)::int AS machine_qty
@@ -332,27 +333,29 @@ async function queryOverviewMonitoringPg(pgUrl) {
              LEFT JOIN (
                SELECT product_id, SUM(remaining_qty)::int AS total
                  FROM automatenlager.stock_batches
-                WHERE status IN (${availableBatchStatusSqlList()})
+                WHERE status IN (${availableBatchStatusSqlList()}) AND tenant_id = $1
                 GROUP BY product_id
              ) b ON b.product_id = p.product_id
              LEFT JOIN (
                SELECT product_id, SUM(current_machine_qty)::int AS mq
                  FROM automatenlager.slot_assignments
-                WHERE active = TRUE
+                WHERE active = TRUE AND tenant_id = $1
                 GROUP BY product_id
              ) s ON s.product_id = p.product_id
+            WHERE p.tenant_id = $1
          ),
          filtered AS (
            SELECT DISTINCT ON (warning_type, COALESCE(product_id::text, warning_key))
              warning_type, severity, resolved, created_at, warning_key, message, product_id
            FROM automatenlager.warnings w
-           WHERE w.created_at >= now() - INTERVAL '7 days'
+           WHERE w.tenant_id = $1
+             AND w.created_at >= now() - INTERVAL '7 days'
              AND w.warning_type != 'BACKUP_OK'
              AND w.resolved = FALSE
              AND NOT (
                w.warning_type = 'MDB_CODE_CHANGED_FOR_PRODUCT'
                AND w.product_id IS NOT NULL
-               AND (SELECT COUNT(*) FROM automatenlager.slot_assignments sa WHERE sa.active = TRUE AND sa.product_id = w.product_id) > 1
+               AND (SELECT COUNT(*) FROM automatenlager.slot_assignments sa WHERE sa.active = TRUE AND sa.product_id = w.product_id AND sa.tenant_id = w.tenant_id) > 1
              )
              AND (${liveWarningReconcileSql(mhdDays)})
            ORDER BY warning_type, COALESCE(product_id::text, warning_key), created_at DESC
@@ -372,40 +375,35 @@ async function queryOverviewMonitoringPg(pgUrl) {
          ORDER BY
            CASE f.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
            f.created_at DESC
-         LIMIT 40`,
-      ),
-      // BACKUP_OK separat zaehlen: aus der Warnungs-Liste oben gefiltert, aber
-      // fuer die Backup-Ampel (gruen bei frischem BACKUP_OK) weiterhin noetig.
-      client.query(
-        `SELECT COUNT(*)::int AS count FROM automatenlager.warnings
-          WHERE warning_type = 'BACKUP_OK'
+         LIMIT 40` }),
+    // BACKUP_OK separat zaehlen (Backup-Ampel, gruen bei frischem BACKUP_OK).
+    db.read({ tenant, tables: ['warnings'], params: [], text:
+      `SELECT COUNT(*)::int AS count FROM automatenlager.warnings
+          WHERE tenant_id = $1
+            AND warning_type = 'BACKUP_OK'
             AND resolved = FALSE
-            AND created_at >= now() - INTERVAL '3 days'`,
-      ),
-    ]);
+            AND created_at >= now() - INTERVAL '3 days'` }),
+  ]);
 
-    const mhdItems = mhdItemsResult.rows || [];
-    const lowStockItems = lowStockItemsResult.rows || [];
+  const mhdItems = mhdItemsResult.rows || [];
+  const lowStockItems = lowStockItemsResult.rows || [];
 
-    return {
-      nowIso: new Date().toISOString(),
-      openWarningsCount: toNum(openWarningsResult.rows?.[0]?.count),
-      mhdRiskCount: mhdItems.length,
-      mhdItems,
-      lowStockCount: lowStockItems.length,
-      lowStockItems,
-      hasBackupOk: toNum(backupOkResult.rows?.[0]?.count) > 0,
-      economicsToday: {
-        revenueGross: toNum(economicsResult.rows?.[0]?.revenue_gross),
-        revenueNet: toNum(economicsResult.rows?.[0]?.revenue_net),
-        quantity: toNum(economicsResult.rows?.[0]?.quantity),
-      },
-      workflowRuns: workflowRunsResult.rows || [],
-      warnings: warningsResult.rows || [],
-    };
-  } finally {
-    await client.end();
-  }
+  return {
+    nowIso: new Date().toISOString(),
+    openWarningsCount: toNum(openWarningsResult.rows?.[0]?.count),
+    mhdRiskCount: mhdItems.length,
+    mhdItems,
+    lowStockCount: lowStockItems.length,
+    lowStockItems,
+    hasBackupOk: toNum(backupOkResult.rows?.[0]?.count) > 0,
+    economicsToday: {
+      revenueGross: toNum(economicsResult.rows?.[0]?.revenue_gross),
+      revenueNet: toNum(economicsResult.rows?.[0]?.revenue_net),
+      quantity: toNum(economicsResult.rows?.[0]?.quantity),
+    },
+    workflowRuns: workflowRunsResult.rows || [],
+    warnings: warningsResult.rows || [],
+  };
 }
 
 const CORRECTION_LINK_TYPES = new Set([

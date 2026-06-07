@@ -29,6 +29,14 @@ const path = require('node:path');
 const DASHBOARD_ROOT = path.join(__dirname, '..', '..'); // tests/helpers -> dashboard
 const MIGRATIONS_DIR = path.join(DASHBOARD_ROOT, 'db-migrations');
 
+// #124: node --test fährt Testdateien PARALLEL. Migrations-Tests nehmen für
+// `ALTER TABLE … ADD COLUMN` einen AccessExclusiveLock auf operative Tabellen,
+// Fixture-Seeder (tenant-fixtures.js) INSERTen gleichzeitig in dieselben Tabellen
+// (RowExclusiveLock) → DDL-vs-DML-Deadlock über konkurrierende Sandbox-Transaktionen.
+// Ein gemeinsamer transaktions-weiter Advisory-Lock serialisiert DDL UND Fixture-DML
+// (gleicher Schlüssel hier und in tenant-fixtures.js); der ROLLBACK gibt ihn frei.
+const SANDBOX_LOCK_KEY = 4242;
+
 // PG-URL aus Env oder .env.local (Projekt- oder dashboard-Ebene) — identisch zur
 // bestehenden Test-Praxis. Gibt KEINE Secrets aus.
 function resolvePgUrl() {
@@ -71,6 +79,7 @@ function readMigration(num) {
 }
 
 async function applyMigration(client, num) {
+  await client.query('SELECT pg_advisory_xact_lock($1)', [SANDBOX_LOCK_KEY]); // DDL-vs-DML-Serialisierung
   await client.query(readMigration(num));
 }
 
@@ -87,6 +96,7 @@ function listMigrations(fromNum = 1) {
 // die jeweils frueheren Migrationen bereits in der DB sind (committed) ODER in
 // derselben Transaktion zuvor angewendet wurden.
 async function applyMigrationsFrom(client, fromNum = 7) {
+  await client.query('SELECT pg_advisory_xact_lock($1)', [SANDBOX_LOCK_KEY]); // DDL-vs-DML-Serialisierung
   for (const m of listMigrations(fromNum)) {
     await client.query(fs.readFileSync(path.join(MIGRATIONS_DIR, m.file), 'utf8'));
   }
@@ -128,6 +138,7 @@ async function inSandbox(t, fn, timeoutMs = 4000) {
 module.exports = {
   DASHBOARD_ROOT,
   MIGRATIONS_DIR,
+  SANDBOX_LOCK_KEY,
   resolvePgUrl,
   connectOrSkip,
   migrationFilePath,

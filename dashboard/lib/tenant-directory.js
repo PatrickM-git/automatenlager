@@ -123,6 +123,14 @@ function createTenantDirectory({ query, ttlMs, negativeTtlMs, now, logger } = {}
     return tenantId != null && tenantId !== '' && snapshot.knownTenants.has(tenantId);
   }
 
+  // #124: explizite Mandanten-Quelle für Hintergrund-Jobs (alert-digest). Liefert
+  // die REALEN Mandanten (ohne das Migrations-Sicherheitsnetz '__default__'). Vor
+  // Bereitschaft leer (fail-closed) — ein Job ohne Verzeichnis bekommt NICHTS.
+  function listTenantIds() {
+    if (!ready || !snapshot) return [];
+    return [...snapshot.knownTenants].filter((t) => t && t !== '__default__');
+  }
+
   // ── Asynchroner Maschinen-Lookup (Cache + autoritativer Miss-Recheck) ──────
   async function machineTenant(machineKey) {
     const key = clean(machineKey);
@@ -158,6 +166,7 @@ function createTenantDirectory({ query, ttlMs, negativeTtlMs, now, logger } = {}
     loginTenant,
     isPlatformAdmin,
     tenantExists,
+    listTenantIds,
     machineTenant,
   };
   return api;

@@ -172,105 +172,92 @@ function buildAlertDigest(raw = {}) {
   };
 }
 
-async function queryAlertDigestPg(pgUrl, opts = {}) {
-  const { Client } = require('pg');
+// #124 (Stufe 3): Hintergrund-/zeitgesteuerter Lesepfad OHNE Viewer. Der Mandant wird
+// EXPLIZIT übergeben (vom Endpunkt aus dem Verzeichnis abgeleitet, pro Mandant) —
+// NIEMALS ein Default-Mandant. Liest mandantengetrennt durch die Mandanten-Tür.
+// Kein/leerer Mandant ⇒ leerer Digest (fail-closed): der Job verschickt dann nichts
+// (statt fremde Warnungen). `audit.workflow_runs` ist System-Telemetrie ohne
+// tenant_id (geteilte Pipeline) — tenant-gated via `$1::text IS NOT NULL`.
+async function queryAlertDigestPg(db, tenant, opts = {}) {
   const lowBatchThreshold = Number.isFinite(Number(opts.lowBatchThreshold))
     ? Number(opts.lowBatchThreshold)
     : DEFAULT_LOW_BATCH_THRESHOLD;
   const mhdDays = Number.isFinite(Number(opts.mhdDays))
     ? Number(opts.mhdDays)
     : DEFAULT_MHD_DAYS;
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  try {
-    const availableStatuses = availableBatchStatusSqlList();
-    const [mhdResult, batchResult, slotsResult, warningsResult, workflowResult] = await Promise.all([
-      // MHD: 30-Tage-Fenster inkl. bereits abgelaufener Chargen (days < 0),
-      // deckungsgleich mit dem v3-Cockpit (overview-monitoring.js).
-      client.query(
-        `SELECT p.name AS product_name, sb.batch_key, sb.mhd_date::text,
+  const availableStatuses = availableBatchStatusSqlList();
+  const [mhdResult, batchResult, slotsResult, warningsResult, workflowResult] = await Promise.all([
+    // MHD: 30-Tage-Fenster inkl. bereits abgelaufener Chargen (days < 0).
+    db.read({ tenant, tables: ['stock_batches', 'products'], params: [], text:
+      `SELECT p.name AS product_name, sb.batch_key, sb.mhd_date::text,
                 sb.remaining_qty,
                 (sb.mhd_date - CURRENT_DATE)::int AS days_remaining
            FROM automatenlager.stock_batches sb
-           JOIN automatenlager.products p ON p.product_id = sb.product_id
-          WHERE sb.status IN (${availableStatuses})
+           JOIN automatenlager.products p ON p.product_id = sb.product_id AND p.tenant_id = sb.tenant_id
+          WHERE sb.tenant_id = $1
+            AND sb.status IN (${availableStatuses})
             AND sb.remaining_qty > 0
             AND sb.mhd_date IS NOT NULL
             AND sb.mhd_date <= CURRENT_DATE + INTERVAL '30 days'
-          ORDER BY sb.mhd_date`,
-      ),
-      // LAGER-Bestand (Backstock) je Produkt, verankert an aktiven Slots —
-      // exakt wie inventory-mhd.js: backstock = GREATEST(SUMME(remaining_qty der
-      // verfügbaren Chargen) − SUMME(current_machine_qty der aktiven Slots), 0).
-      // remaining_qty ist Gesamt-Modell (Maschine+Lager), daher Maschinen-Anteil
-      // abziehen. Beispiel: 1 Charge-Stück, 1 im Automat → Lager 0 (nicht 1).
-      client.query(
-        `WITH batch_totals AS (
+          ORDER BY sb.mhd_date` }),
+    // LAGER-Bestand (Backstock) je Produkt, verankert an aktiven Slots. Mandant=$1,
+    // Schwellwert=$2 (Tür stellt $1 voran).
+    db.read({ tenant, tables: ['stock_batches', 'slot_assignments', 'products'], params: [lowBatchThreshold], text:
+      `WITH batch_totals AS (
            SELECT product_id, SUM(remaining_qty)::int AS total_qty
              FROM automatenlager.stock_batches
-            WHERE status IN (${availableStatuses})
+            WHERE status IN (${availableStatuses}) AND tenant_id = $1
             GROUP BY product_id
          )
          SELECT p.name AS product_name, p.product_key,
                 GREATEST(COALESCE(bt.total_qty, 0) - COALESCE(SUM(sa.current_machine_qty), 0), 0)::int AS backstock_qty
            FROM automatenlager.slot_assignments sa
-           JOIN automatenlager.products p ON p.product_id = sa.product_id
+           JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
            LEFT JOIN batch_totals bt ON bt.product_id = sa.product_id
-          WHERE sa.active = TRUE
+          WHERE sa.active = TRUE AND sa.tenant_id = $1
           GROUP BY p.product_id, p.name, p.product_key, bt.total_qty
-         HAVING GREATEST(COALESCE(bt.total_qty, 0) - COALESCE(SUM(sa.current_machine_qty), 0), 0) <= $1
-          ORDER BY backstock_qty, product_name`,
-        [lowBatchThreshold],
-      ),
-      // Niedriger Bestand = aktive Slots mit Bestand 0 (PG-Fakt), exakt wie die
-      // „Leere Slots"-KPI im Cockpit. KEINE Sheet-Quelle mehr.
-      client.query(
-        `SELECT sa.product_slot_key, sa.machine_id::text AS machine_id, sa.mdb_code,
+         HAVING GREATEST(COALESCE(bt.total_qty, 0) - COALESCE(SUM(sa.current_machine_qty), 0), 0) <= $2
+          ORDER BY backstock_qty, product_name` }),
+    // Niedriger Bestand = aktive Slots mit Bestand 0 (PG-Fakt).
+    db.read({ tenant, tables: ['slot_assignments', 'products'], params: [], text:
+      `SELECT sa.product_slot_key, sa.machine_id::text AS machine_id, sa.mdb_code,
                 p.name AS product_name, sa.current_machine_qty
            FROM automatenlager.slot_assignments sa
-           JOIN automatenlager.products p ON p.product_id = sa.product_id
-          WHERE sa.active = TRUE
+           JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
+          WHERE sa.tenant_id = $1
+            AND sa.active = TRUE
             AND sa.current_machine_qty = 0
-          ORDER BY sa.machine_id, sa.product_slot_key`,
-      ),
-      // Operative Warnungen (offen) der letzten 7 Tage — Filterung/Klassifizierung
-      // passiert in buildAlertDigest (isOperationalIssue).
-      client.query(
-        // Self-Healing: bestandsbezogene Warnungen (MHD/LOW_STOCK/LOW_BATCH) nur,
-        // wenn die Bedingung im AKTUELLEN PG-Stand noch zutrifft — identisch zum
-        // Cockpit (liveWarningReconcileSql). Sonst landen veraltete WF5-Warnungen
-        // (z. B. aussortierte Produkte) in der täglichen Alert-Mail.
-        `SELECT w.warning_type, w.severity, w.resolved, w.created_at, w.warning_key, w.message
+          ORDER BY sa.machine_id, sa.product_slot_key` }),
+    // Operative Warnungen (offen) der letzten 7 Tage, self-healing via liveWarningReconcileSql.
+    db.read({ tenant, tables: ['warnings', 'stock_batches', 'slot_assignments'], params: [], text:
+      `SELECT w.warning_type, w.severity, w.resolved, w.created_at, w.warning_key, w.message
            FROM automatenlager.warnings w
-          WHERE w.resolved = FALSE
+          WHERE w.tenant_id = $1
+            AND w.resolved = FALSE
             AND w.created_at >= now() - INTERVAL '7 days'
             AND (${liveWarningReconcileSql(mhdDays)})
           ORDER BY w.created_at DESC
-          LIMIT 200`,
-      ),
-      // Fehlgeschlagene Workflow-Läufe der letzten 24 h (echte Fehler).
-      client.query(
-        `SELECT DISTINCT ON (workflow_key) workflow_key, started_at, finished_at, status
+          LIMIT 200` }),
+    // Fehlgeschlagene Workflow-Läufe der letzten 24 h — System-Telemetrie, tenant-gated.
+    db.read({ tenant, tables: ['workflow_runs'], params: [], text:
+      `SELECT DISTINCT ON (workflow_key) workflow_key, started_at, finished_at, status
            FROM audit.workflow_runs
           WHERE started_at >= now() - INTERVAL '24 hours'
+            AND $1::text IS NOT NULL
             AND lower(status) NOT IN ('success', 'succeeded', 'ok', 'running', 'new', 'waiting')
           ORDER BY workflow_key, started_at DESC
-          LIMIT 50`,
-      ),
-    ]);
+          LIMIT 50` }),
+  ]);
 
-    return {
-      nowIso: new Date().toISOString(),
-      lowBatchThreshold,
-      mhdBatches: mhdResult.rows || [],
-      batchTotals: batchResult.rows || [],
-      emptySlots: slotsResult.rows || [],
-      warnings: warningsResult.rows || [],
-      workflowFailures: workflowResult.rows || [],
-    };
-  } finally {
-    await client.end();
-  }
+  return {
+    nowIso: new Date().toISOString(),
+    lowBatchThreshold,
+    mhdBatches: mhdResult.rows || [],
+    batchTotals: batchResult.rows || [],
+    emptySlots: slotsResult.rows || [],
+    warnings: warningsResult.rows || [],
+    workflowFailures: workflowResult.rows || [],
+  };
 }
 
 module.exports = {

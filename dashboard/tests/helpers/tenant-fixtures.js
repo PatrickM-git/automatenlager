@@ -47,9 +47,17 @@ function round2(n) { return Math.round(n * 100) / 100; }
  * @param {number} [opts.revenueBase]   Brutto-Basisbetrag (macht Aggregate unterscheidbar)
  * @returns {Promise<object>}           erzeugte IDs/Marker für Assertions
  */
+// Gemeinsamer Advisory-Lock-Schlüssel (eine Quelle: migration-sandbox.js). Serialisiert
+// Fixture-DML mit Migrations-DDL über konkurrierende Sandbox-Transaktionen (node --test
+// fährt Dateien parallel) — sonst DDL(ALTER)-vs-DML(INSERT)-Deadlock. ROLLBACK gibt frei.
+const { SANDBOX_LOCK_KEY } = require('./migration-sandbox.js');
+
 async function seedTenant(client, tenantId, opts = {}) {
   if (!tenantId) throw new Error('seedTenant: tenantId erforderlich');
   const tid = String(tenantId);
+
+  // Konkurrierende Sandbox-Transaktionen (DDL + DML) serialisieren (Deadlock-Schutz).
+  await client.query('SELECT pg_advisory_xact_lock($1)', [SANDBOX_LOCK_KEY]);
   const base = Number.isFinite(opts.revenueBase) ? opts.revenueBase : 100;
   const vat = 19;
   const gross = round2(base);
@@ -116,12 +124,14 @@ async function seedTenant(client, tenantId, opts = {}) {
     [`guv_${tid}_20260515`, machineId, productId, gross, net, cost, grossProfit, tid],
   );
 
-  // 8) Warnung (Monitoring/MHD-Lesepfad)
+  // 8) Warnung (Monitoring/Alert-Lesepfad). Typ WORKFLOW_ERROR ⇒ überlebt den
+  // liveWarningReconcileSql-Self-Healing-Filter (ELSE TRUE), damit Monitoring-
+  // Isolationstests nicht-vakuös sind (kein Slot-Fixture nötig).
   await client.query(
     `INSERT INTO automatenlager.warnings
        (warning_key, warning_type, message, source_workflow, machine_id, product_id, tenant_id)
-       VALUES ($1, 'LOW_STOCK', $2, 'wf5', $3, $4, $5)`,
-    [`warn_${tid}`, `Niedriger Bestand ${tid}`, machineId, productId, tid],
+       VALUES ($1, 'WORKFLOW_ERROR', $2, 'wf5', $3, $4, $5)`,
+    [`warn_${tid}`, `Test-Warnung ${tid}`, machineId, productId, tid],
   );
 
   return { tenantId: tid, locationId, machineId, productId, productName, revenueGross: gross };
