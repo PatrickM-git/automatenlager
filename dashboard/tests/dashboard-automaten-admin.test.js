@@ -40,8 +40,9 @@ test('buildLocationDeleteGuard: unbekannte Zahl defensiv -> blockiert', () => {
 test('buildMachineActiveSql: aussondern setzt active=false per machine_key', () => {
   const { sql, values } = buildMachineActiveSql('457107528', false);
   assert.match(sql, /UPDATE automatenlager\.machines/i);
-  assert.match(sql, /SET active\s*=\s*\$2/i);
-  assert.match(sql, /WHERE machine_key\s*=\s*\$1/i);
+  // #136: durch die Tür — Mandant als $1, machine_key $2, active $3 (mandantengebunden).
+  assert.match(sql, /SET active\s*=\s*\$3/i);
+  assert.match(sql, /WHERE tenant_id\s*=\s*\$1 AND machine_key\s*=\s*\$2/i);
   assert.deepEqual(values, ['457107528', false]);
 });
 

@@ -3534,7 +3534,7 @@ const server = http.createServer(async (req, res) => {
           sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
           return;
         }
-        const saved = await upsertMachineProfilePg(pgUrl, profile);
+        const saved = await upsertMachineProfilePg(tenantDb, viewer.tenantId, profile); // #136: durch die Tür
         sendJson(res, 200, { ok: true, data: saved });
       } catch (err) {
         if (err.message.includes('machine_id')) {
@@ -3562,9 +3562,13 @@ const server = http.createServer(async (req, res) => {
       }
       try {
         const payload = buildMachineCreatePayload(JSON.parse(body || '{}'));
-        const saved = await createMachinePg(pgUrl, payload);
+        const saved = await createMachinePg(tenantDb, viewer.tenantId, payload); // #136: durch die Tür (Parent-Standort transaktional geprüft)
         sendJson(res, 200, { ok: true, data: saved });
       } catch (err) {
+        if (err.code === 'NOT_FOUND') { // #136: fremder/unbekannter Standort ⇒ 404, kein Existenz-Leak
+          sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: err.message } });
+          return;
+        }
         const isValidation = /erforderlich|existiert nicht|Standort/i.test(err.message);
         sendJson(res, isValidation ? 400 : 503, {
           ok: false,
@@ -3588,7 +3592,7 @@ const server = http.createServer(async (req, res) => {
       if (!pgUrl) { sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } }); return; }
       try {
         const raw = JSON.parse(body || '{}');
-        const saved = await setMachineActivePg(pgUrl, raw.machine_key, raw.active === true || raw.active === 'true');
+        const saved = await setMachineActivePg(tenantDb, viewer.tenantId, raw.machine_key, raw.active === true || raw.active === 'true'); // #136: durch die Tür
         sendJson(res, 200, { ok: true, data: saved });
       } catch (err) {
         const code = err.code === 'NOT_FOUND' ? 404 : (/machine_key/i.test(err.message) ? 400 : 503);

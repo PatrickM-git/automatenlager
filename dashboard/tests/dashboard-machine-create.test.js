@@ -49,19 +49,20 @@ test('buildMachineCreatePayload: optionale Felder fehlen -> null/leer, slot_coun
   assert.equal(p.nickname, null);
 });
 
-test('buildMachineInsertPlan: liefert idempotente Upserts für machines UND machine_profiles', () => {
+test('buildMachineInsertPlan: liefert mandantengetrennte Upserts für machines UND machine_profiles (#136)', () => {
   const plan = buildMachineInsertPlan(buildMachineCreatePayload({
     machine_key: '457107529', name: 'Foyer-Automat', location_key: 'LOC_X',
     area: '1.OG', type: 'Snack', nickname: 'Foyer',
-  }));
-  // machines-Upsert per machine_key, location aufgelöst über location_key
+  }), 42); // location_id ist bereits (mandanten-geprüft) aufgelöst
+  // #136: machines-Upsert mandantengetrennt (tenant_id als $1); location_id als Wert, kein Sub-SELECT mehr
   assert.match(plan.machineSql, /INSERT INTO automatenlager\.machines/i);
-  assert.match(plan.machineSql, /ON CONFLICT \(machine_key\) DO UPDATE/i);
-  assert.match(plan.machineSql, /\(SELECT location_id FROM automatenlager\.locations WHERE location_key\s*=\s*\$3\)/i);
+  assert.match(plan.machineSql, /ON CONFLICT \(tenant_id, machine_key\) DO UPDATE/i);
+  assert.doesNotMatch(plan.machineSql, /SELECT location_id FROM automatenlager\.locations/i);
   // machine_profiles-Upsert (machine_id = machine_key) -> erscheint auf der Seite
   assert.match(plan.profileSql, /INSERT INTO automatenlager\.machine_profiles/i);
-  assert.match(plan.profileSql, /ON CONFLICT \(machine_id\) DO UPDATE/i);
-  // keine bigint-Verwechslung: profile.machine_id trägt den machine_key
+  assert.match(plan.profileSql, /ON CONFLICT \(tenant_id, machine_id\) DO UPDATE/i);
+  // keine bigint-Verwechslung: profile.machine_id trägt den machine_key; location_id als Wert
   assert.equal(plan.machineValues[0], '457107529');
+  assert.equal(plan.machineValues[2], 42);
   assert.equal(plan.profileValues[0], '457107529');
 });

@@ -53,30 +53,30 @@ function buildMachineCreatePayload(raw = {}) {
 }
 
 /**
- * Aus dem Payload die zwei idempotenten Upserts bauen (reine Funktion, testbar
- * ohne DB). location_id wird per Sub-SELECT über location_key aufgelöst.
+ * Aus dem Payload + dem (bereits mandanten-geprüft aufgelösten) location_id die zwei
+ * idempotenten Upserts bauen (reine Funktion, testbar ohne DB). #136 (Stufe 4): durch
+ * die Tür — Mandant als $1 (eigene Parameter ab $2), ON CONFLICT-Ziele mandantengetrennt
+ * ((tenant_id, machine_key) bzw. (tenant_id, machine_id), Constraints aus #132). Der
+ * Standort wird NICHT mehr per Sub-SELECT aufgelöst, sondern als bereits mandanten-
+ * geprüfter location_id übergeben (Parent-Prüfung passiert in derselben Transaktion).
  */
-function buildMachineInsertPlan(payload) {
+function buildMachineInsertPlan(payload, locationId) {
   const machineSql = `
-    INSERT INTO automatenlager.machines (machine_key, name, location_id, machine_type, slot_count)
-    VALUES (
-      $1, $2,
-      (SELECT location_id FROM automatenlager.locations WHERE location_key = $3),
-      $4, $5
-    )
-    ON CONFLICT (machine_key) DO UPDATE SET
+    INSERT INTO automatenlager.machines (tenant_id, machine_key, name, location_id, machine_type, slot_count)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    ON CONFLICT (tenant_id, machine_key) DO UPDATE SET
       name         = EXCLUDED.name,
       location_id  = EXCLUDED.location_id,
       machine_type = COALESCE(EXCLUDED.machine_type, automatenlager.machines.machine_type),
       slot_count   = COALESCE(EXCLUDED.slot_count, automatenlager.machines.slot_count),
       updated_at   = now()
     RETURNING machine_id, machine_key, name, location_id`;
-  const machineValues = [payload.machine_key, payload.name, payload.location_key, payload.machine_type, payload.slot_count];
+  const machineValues = [payload.machine_key, payload.name, locationId, payload.machine_type, payload.slot_count];
 
   const profileSql = `
-    INSERT INTO automatenlager.machine_profiles (machine_id, area, type, position, nickname)
-    VALUES ($1, $2, $3, $4, $5)
-    ON CONFLICT (machine_id) DO UPDATE SET
+    INSERT INTO automatenlager.machine_profiles (tenant_id, machine_id, area, type, position, nickname)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    ON CONFLICT (tenant_id, machine_id) DO UPDATE SET
       area     = EXCLUDED.area,
       type     = EXCLUDED.type,
       position = EXCLUDED.position,
@@ -88,65 +88,57 @@ function buildMachineInsertPlan(payload) {
 }
 
 /**
- * Anlegen gegen PG (machines + machine_profiles, in einer Transaktion). Wirft
- * mit klarer Meldung, wenn der Standort nicht existiert (location_id NOT NULL).
+ * Anlegen durch die Mandanten-Tür (machines + machine_profiles), atomar in db.tx.
+ * #136 (Stufe 4): Der Parent-Standort (location_key) wird IN DERSELBEN Transaktion
+ * auf Mandanten-Eigentum geprüft — gehört er einem fremden Mandanten oder existiert
+ * er nicht, wird mit NOT_FOUND geworfen (Endpunkt → 404) und KEINE Maschine angelegt
+ * (kein TOCTOU-Fenster). Der aufgelöste location_id wird als Wert in den Upsert gegeben.
  */
-async function createMachinePg(pgUrl, payload, clientFactory) {
-  const { Client } = require('pg');
-  const client = clientFactory ? clientFactory(pgUrl) : new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  const plan = buildMachineInsertPlan(payload);
-  try {
-    await client.query('BEGIN');
-    let machineRow;
-    try {
-      machineRow = (await client.query(plan.machineSql, plan.machineValues)).rows[0];
-    } catch (err) {
-      if (/null value in column "location_id"/i.test(err.message)) {
-        throw new Error(`Standort "${payload.location_key}" existiert nicht.`);
-      }
+async function createMachinePg(db, tenant, payload) {
+  return db.tx(tenant, async (door) => {
+    // Parent-Eigentumsprüfung: Standort muss dem Mandanten gehören.
+    const loc = await door.read({
+      tables: ['locations'],
+      text: `SELECT location_id FROM automatenlager.locations WHERE tenant_id = $1 AND location_key = $2`,
+      params: [payload.location_key],
+    });
+    if (loc.rows.length === 0) {
+      const err = new Error(`Standort "${payload.location_key}" nicht gefunden.`);
+      err.code = 'NOT_FOUND';
       throw err;
     }
-    await client.query(plan.profileSql, plan.profileValues);
-    await client.query('COMMIT');
+    const plan = buildMachineInsertPlan(payload, loc.rows[0].location_id);
+    const machineRow = (await door.write({ tables: ['machines'], text: plan.machineSql, params: plan.machineValues })).rows[0];
+    await door.write({ tables: ['machine_profiles'], text: plan.profileSql, params: plan.profileValues });
     return machineRow;
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    throw err;
-  } finally {
-    await client.end();
-  }
+  });
 }
 
 // #2: Automat aussondern/reaktivieren = Soft-Delete (machines.active). Hartes
 // Löschen scheidet aus (FK von sales_transactions/slot_assignments/guv_daily/…
 // und Historienverlust). Reine SQL-Bauteile -> testbar ohne DB.
+// #136 (Stufe 4): durch die Tür — Mandant als $1, machine_key $2, active $3. Das
+// UPDATE trifft nur eigene Maschinen (WHERE tenant_id = $1): ein fremder Automat
+// ergibt rowCount 0 ⇒ NOT_FOUND (Endpunkt → 404), kein Cross-Tenant-Soft-Delete.
 function buildMachineActiveSql(machineKey, active) {
   const key = s(machineKey);
   if (!key) throw new Error('machine_key ist erforderlich.');
   const sql = `UPDATE automatenlager.machines
-                  SET active = $2, updated_at = now()
-                WHERE machine_key = $1
+                  SET active = $3, updated_at = now()
+                WHERE tenant_id = $1 AND machine_key = $2
                 RETURNING machine_id, machine_key, name, active`;
   return { sql, values: [key, !!active] };
 }
 
-async function setMachineActivePg(pgUrl, machineKey, active, clientFactory) {
-  const { Client } = require('pg');
+async function setMachineActivePg(db, tenant, machineKey, active) {
   const { sql, values } = buildMachineActiveSql(machineKey, active);
-  const client = clientFactory ? clientFactory(pgUrl) : new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  try {
-    const res = await client.query(sql, values);
-    if (res.rowCount === 0) {
-      const err = new Error(`Automat "${values[0]}" nicht gefunden.`);
-      err.code = 'NOT_FOUND';
-      throw err;
-    }
-    return res.rows[0];
-  } finally {
-    await client.end();
+  const res = await db.write({ tenant, tables: ['machines'], text: sql, params: values });
+  if (res.rowCount === 0) {
+    const err = new Error(`Automat "${values[0]}" nicht gefunden.`);
+    err.code = 'NOT_FOUND';
+    throw err;
   }
+  return res.rows[0];
 }
 
 module.exports = {
