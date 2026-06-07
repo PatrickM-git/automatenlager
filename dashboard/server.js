@@ -2133,22 +2133,24 @@ const server = http.createServer(async (req, res) => {
     // Slot), damit neue Produkte überhaupt zugewiesen werden können. Bewusst
     // getrennt von /refill/search (das nur belegte Slots liefert).
     if (parsed.pathname === '/api/v2/products/catalog' && req.method === 'GET') {
-      const pgUrl = dashboardV2PgUrl();
+      const viewer = getViewer(req); // #141: Mandant für den tenant-gefilterten Produkt-Katalog
       const q = clean(parsed.query.q || '');
-      if (!pgUrl) {
+      if (!tenantDb) {
         sendJson(res, 503, { ok: false, results: [], error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const { Client } = require('pg');
-        const client = new Client({ connectionString: pgUrl });
-        await client.connect();
-        const { rows } = await client.query(`
-          SELECT p.product_id, p.product_key, p.name
-          FROM automatenlager.products p
-          ORDER BY p.name
-        `);
-        await client.end();
+        // #141: durch die Mandanten-Tür mit tenant_id-Filter (kein Inline-Client).
+        const { rows } = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['products'],
+          text: `SELECT p.product_id, p.product_key, p.name
+                 FROM automatenlager.products p
+                 WHERE p.tenant_id = $1
+                 ORDER BY p.name`,
+          params: [],
+        });
         sendJson(res, 200, { ok: true, results: buildProductCatalog(rows, q) });
       } catch (err) {
         sendJson(res, 503, { ok: false, results: [], error: { code: 'PG_ERROR', message: err.message } });
@@ -2415,34 +2417,31 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, { ok: true, batches: [] });
         return;
       }
-      const pgUrl = dashboardV2PgUrl();
-      if (!pgUrl) {
-        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
-        return;
-      }
+      if (!tenantReadReady(res)) return;
       try {
-        const { Client } = require('pg');
-        const client = new Client({ connectionString: pgUrl });
-        await client.connect();
-        const result = await client.query(
-          `SELECT
-             sb.batch_key,
-             sb.batch_id,
-             sb.remaining_qty,
-             sb.status,
-             sb.mhd_date::text    AS mhd_date,
-             sb.received_at::text AS received_at,
-             p.name               AS product_name,
-             p.product_id
-           FROM automatenlager.stock_batches sb
-           JOIN automatenlager.products p ON p.product_id = sb.product_id
-           WHERE p.name ILIKE $1
-             AND sb.status <> 'ausgesondert'
-           ORDER BY p.name, sb.received_at ASC
-           LIMIT 50`,
-          [`%${q}%`],
-        );
-        await client.end();
+        // #141: durch die Mandanten-Tür mit tenant_id-Filter (kein Inline-Client).
+        const result = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['stock_batches', 'products'],
+          text: `SELECT
+                   sb.batch_key,
+                   sb.batch_id,
+                   sb.remaining_qty,
+                   sb.status,
+                   sb.mhd_date::text    AS mhd_date,
+                   sb.received_at::text AS received_at,
+                   p.name               AS product_name,
+                   p.product_id
+                 FROM automatenlager.stock_batches sb
+                 JOIN automatenlager.products p
+                   ON p.product_id = sb.product_id AND p.tenant_id = sb.tenant_id
+                 WHERE sb.tenant_id = $1
+                   AND p.name ILIKE $2
+                   AND sb.status <> 'ausgesondert'
+                 ORDER BY p.name, sb.received_at ASC
+                 LIMIT 50`,
+          params: [`%${q}%`],
+        });
         sendJson(res, 200, { ok: true, batches: result.rows });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });

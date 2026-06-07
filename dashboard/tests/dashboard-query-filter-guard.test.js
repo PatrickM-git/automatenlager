@@ -106,6 +106,7 @@ test('#122 Guard findViolations: schrumpfende Allowlist (bereichsweise scharf)',
 //      machine-profiles, settings-thresholds.
 const STILL_BYPASSING = [
   'db-schema.js', 'stock-cost-invariant.js',
+  'server.js', // #141: Infra-Ausnahme (Startup/Diagnostik) — HTTP-Layer-Bypässe entfernt
 ];
 // Pro Slice durch die Tür geführte (migrierte) Lese-Module bzw. -pfade.
 const MIGRATED = [
@@ -163,7 +164,15 @@ test('#122 Guard: Global-Allowlist ist bewusst eng (keine schleichende Aufblähu
 // Ab jetzt bricht JEDER neue rohe/ungefilterte Read AUSSERHALB dieser Allowlist
 // den Build (build-blocking, nicht nur Warnung).
 // ─────────────────────────────────────────────────────────────────────────────
-const INFRASTRUCTURE_ALLOWLIST = ['db-schema.js', 'stock-cost-invariant.js'];
+const INFRASTRUCTURE_ALLOWLIST = [
+  'db-schema.js',          // information_schema/Invarianten-Check — kein Mandanten-Datenpfad
+  'stock-cost-invariant.js', // Invarianten-Check — kein Mandanten-Datenpfad
+  'server.js',             // #141: Startup-/Diagnostik-Checks (logStartupSchemaCheck,
+                           // logStartupStockCostCheck, /api/v2/_diagnostics/*) lesen
+                           // information_schema/Invarianten via new Client — KEINE
+                           // Mandantendaten. HTTP-Layer-Bypässe (catalog/batch-search)
+                           // sind durch die Tür migriert; nur Infra-rohes-pg verbleibt.
+];
 // Nach #135–#137 sind ALLE lib-Schreibpfade durch die Tür ⇒ leer. (Der verbleibende
 // rohe Schreib-Einstieg ist die write-off-Transaktion in server.js — #138/#139, via
 // entryFiles erfasst, nicht über libDir.)
@@ -194,4 +203,24 @@ test('#129 Guard (Testfall 12+13): künstlicher roher/ungefilterter Read bräche
   const simulatedNewBypass = FINAL_ALLOWLIST; // ein NEUES Modul stünde hier NICHT drin
   assert.ok(!simulatedNewBypass.includes('a-new-unfiltered-read-module.js'),
     'ein neues ungefiltertes Lesemodul ist per Definition nicht allowlistet ⇒ Build rot');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #141 — server.js IM STANDARD-SCAN (entryFiles)
+// Vor #141 wurde server.js nicht gescannt (nur lib/). server.js hat jedoch rohes
+// pg in Startup-/Diagnostik-Pfaden (information_schema/Invarianten, KEINE
+// Mandantendaten — kein HTTP-Datenpfad) und hatte in #141 zwei HTTP-Layer-
+// Bypässe (products/catalog + inventory/batch-search) ohne tenant_id-Filter.
+// Nach #141 sind die Bypässe entfernt; server.js steht als Infra-Ausnahme auf der
+// Allowlist (Startup/Diagnostik bleiben rohes pg, begründet und dokumentiert).
+// Dieser Test ist ROT, solange server.js rohes pg trägt UND nicht auf
+// FINAL_ALLOWLIST steht — GREEN erst durch BEIDE: Fix + Allowlist-Eintrag.
+// ─────────────────────────────────────────────────────────────────────────────
+test('#141 Guard: server.js im Standard-Scan — kein Bypass außerhalb Infra-Allowlist', () => {
+  const serverJsPath = path.join(__dirname, '..', 'server.js');
+  // FINAL_ALLOWLIST enthält server.js als Infra-Ausnahme (Startup/Diagnostik).
+  // ROT, solange server.js rohes pg hat UND hier fehlt.
+  const violations = guard.findViolations({ libDir: LIB_DIR, entryFiles: [serverJsPath], allowlist: FINAL_ALLOWLIST });
+  assert.deepEqual(violations.map((v) => v.file), [],
+    'server.js darf nur Infra-rohes-pg tragen (Startup/Diagnostik); kein HTTP-Layer-Bypass erlaubt');
 });
