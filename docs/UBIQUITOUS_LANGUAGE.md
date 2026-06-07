@@ -301,6 +301,37 @@ RLS (Stufe 5) **ist** der Laufzeit-Backstop unter App-Filter (Stufe 3) + Wächte
 
 ---
 
+## Mandantenfähigkeit: n8n-Ablösung (Stufe 6) *(neu)*
+
+> Quelle: SPEC `docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md` (gegen die **echten WF-JSONs + Dashboard-Code**
+> verifiziert). Stufe 6 **ersetzt alle n8n-Workflows durch eigenen Backend-Code** und schaltet n8n ab; danach verliert
+> `n8n_app` `BYPASSRLS` → der RLS-Backstop (Stufe 5) ist **erst jetzt** systemweit dicht. Baut auf Mandanten-Tür
+> (Stufe 3/4) + RLS (Stufe 5) auf und ist Voraussetzung für die Cloud-Migration (Phase B).
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **n8n-Ablösung** | Vollständiger **Ersatz** aller n8n-Workflows durch eigenen, getesteten Backend-Code — nicht „n8n absichern/tenant-aware machen", sondern entfernen. | „n8n-Absicherung", „n8n-Härtung" |
+| **RLS systemweit** | Endzustand: **kein** Schreibpfad umgeht mehr RLS — `n8n_app` verliert `BYPASSRLS`, ein Schreiben ohne GUC kracht. Hauptsicherheitsgewinn von Stufe 6; erst damit ist der Backstop lückenlos. | „RLS ist schon dicht" (gilt erst nach Stufe 6) |
+| **Job-Modul (`lib/jobs/*`)** | Ein als **Deep Module** gekapselter Ex-Workflow mit kleiner Schnittstelle `(db, kontext, opts) → ergebnis`, **einzeln** aufrufbar (`node jobs/<name>.js`) **und** in-process; Vorbild `lib/alert-digest.js`. | „Skript", „n8n-Workflow im Code" |
+| **Worker-Dienst** | Separater Prozess mit **`node-cron`** als eigener docker-compose-Service (`restart: always`, self-healing), getrennt vom Web-Prozess; ersetzt n8n als **Scheduler**; 1:1 nach Render (Background Worker / Cron Job) portierbar. | „Cron im Web-Prozess"; „n8n-Ersatz" pauschal |
+| **Schattenbetrieb** | Cutover-Art für **datenkritische Ingestion** (WF3/WF1/WF2): der neue Job rechnet die beabsichtigten Writes parallel zu n8n und **vergleicht** (Compute-+-Compare), schreibt aber **nicht** — erst bei Deckungsgleichheit Cutover. | „parallel laufen lassen" (= Doppel-Schreiben) |
+| **Trigger-Umlegung** | Cutover-Art für **benutzerausgelöste** Webhooks: das Dashboard ruft statt `fetch(n8n-Webhook)` direkt das In-Process-Modul auf (WF7/WF9); n8n-WF danach aus, Rückweg = Trigger zurücklegen. | „Webhook abschalten" |
+| **Direkter Wechsel** | Cutover-Art für **idempotente/ableitbare** Prozesse (WF8/MatView-Refresh/Val/Monitor/Devices-Sync): portieren → Smoke → n8n-WF aus, kein Schatten nötig. | „einfach umstellen" pauschal |
+| **WF-PGW / `pgw_write()`** | Der zentrale n8n-Schreib-**Durchreicher**: ein Sub-Workflow, der nur `automatenlager.pgw_write(event_type, batch_run_id, data jsonb)` aufruft — die echte Schreiblogik liegt in dieser **out-of-band DB-Funktion** (nicht im Repo). Wird im Abschluss stillgelegt. | „PostgreSQL Writer" als Black Box belassen |
+| **Event-Typ (`event_type`)** | Diskriminator eines `pgw_write`-Aufrufs (u. a. `slot_assignment`, `stock_movement`, `invoice`/`invoice_item`, `guv_daily`, `warning`); jeder wird in Stufe 6 ein **typisierter Schreibpfad durch die Tür**. | „Payload-Typ" pauschal |
+| **Lauf-Telemetrie (`audit.workflow_runs`)** | Die **bereits existierende** Tabelle (Start/Ende/Status/Fehler je Lauf, `workflow_key`), die der Worker künftig **schreibt** — Ersatz für n8ns internes `execution_entity`, das Monitoring/Konsistenz heute lesen. Ohne `tenant_id` (geteilte Pipeline-Telemetrie). | n8n `execution_entity` weiter als Quelle annehmen |
+| **Disposition (PORT / MERGE / DROP)** | Einstufung jedes der 17 Workflows: **PORT** (neu als Job/Endpunkt), **MERGE** (Leseseite/Trigger existiert schon im Dashboard, nur Schreib-/Plan-Teil ergänzen), **DROP** (obsolet: WF0, WF-Update-Check, WF-Drift-Check). | „alle 17 werden 1:1 portiert" |
+| **Pre-Flight-Dump** | Pflichtschritt vor dem Portieren: reale `pgw_write()`-Definition (`pg_get_functiondef`) + echte n8n-Trigger/Credentials aus der Mini-DB ziehen — gegen Realität bauen, nicht gegen Doku (Lehre aus Stufe 5). | „die SPEC/Doku reicht" |
+| **Drive-Polling-Job** | Backend-Ersatz für n8ns `googleDriveTrigger` (WF1/WF9 ziehen PDFs aus Drive-Ordnern): ein Job pollt den Ordner, erhält das gewohnte „PDF ablegen". Upload-Endpunkt statt Drive = spätere, cloud-agnostischere Zukunft. | „Drive-Trigger" als Code-Begriff |
+
+Beziehungen: n8n-Ablösung **ersetzt** alle Workflows durch Job-Module + Worker-Dienst + Trigger-Endpunkte · alle laufen **durch** die Mandanten-Tür
+(per-Mandant GUC; mandantenübergreifende Pflege wie MatView-`REFRESH` über die Infra-/`BYPASSRLS`-Verbindung) · die **Cutover-Art** richtet sich nach Risiko:
+Schattenbetrieb (datenkritisch) · Trigger-Umlegung (benutzerausgelöst) · direkter Wechsel (idempotent) · WF-PGW/`pgw_write()` **wird abgelöst** durch typisierte
+Schreibpfade je Event-Typ · Worker **schreibt** Lauf-Telemetrie (Ersatz für `execution_entity`) · der Abschluss **entzieht** `n8n_app` `BYPASSRLS` ⇒ **RLS systemweit**
+(+ #108 tenantColumn-Brücke/`__default__`-Abbau, + #111 globale Uniques → `ON CONFLICT (tenant_id, key)`).
+
+---
+
 ## Anbieter-Integration: `provider` & Vending Data Integration Layer *(neu)*
 
 > Nayax ist der **erste**, nicht der einzige Daten-Eingang. Stufe 0 nimmt nur die `provider`-Dimension mit;
@@ -399,6 +430,19 @@ Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
 > **Dev:** „Schreibt n8n dann auch durch RLS?"
 > **Domain Expert:** „Nein, **n8n-Bypass-Korridor**: n8n bleibt bis Stufe 6 außerhalb, damit `FORCE RLS` die Produktion nicht bricht. Genau deshalb: **kein zweiter echter Kunde vor Stufe 6**."
 
+## Beispiel-Dialog (n8n-Ablösung / Stufe 6) *(neu)*
+
+> **Dev:** „Wir machen n8n einfach tenant-aware, dann ist der Bypass weg, oder?"
+> **Domain Expert:** „Nein — Stufe 6 ist **n8n-Ablösung**, nicht -Absicherung. Wir ersetzen die Workflows durch **Job-Module** und einen **Worker-Dienst**; dann fällt n8ns Bypass ganz weg."
+> **Dev:** „Dann porte ich alle 17 Workflows 1:1?"
+> **Domain Expert:** „Nein, schau auf die **Disposition**. WF0, Update-Check und Drift-Check sind obsolet — **DROP**. WF5/WF7/WF4 haben ihre Leseseite/Trigger schon im Dashboard — **MERGE**. Nur der Rest wird echt **PORT**iert."
+> **Dev:** „Den Nayax-Verkaufs-Import stell ich direkt um?"
+> **Domain Expert:** „Auf keinen Fall direkt — datenkritisch. **Schattenbetrieb**: parallel rechnen und gegen n8n vergleichen, **ohne** zu schreiben, erst bei Deckungsgleichheit umschalten. **Direkter Wechsel** nur bei idempotenten Sachen wie dem MatView-Refresh."
+> **Dev:** „Die eigentliche Schreiblogik kopier ich aus dem WF-PGW-JSON?"
+> **Domain Expert:** „Die steht da nicht — WF-PGW ruft nur **`pgw_write()`** auf, eine DB-Funktion außerhalb des Repos. Erst **Pre-Flight-Dump** ziehen, sonst baust du gegen eine Doku-Annahme."
+> **Dev:** „Woran sehe ich am Ende, dass es wirklich dicht ist?"
+> **Domain Expert:** „`n8n_app` verliert **`BYPASSRLS`**, und ein Schreiben ohne gesetzte GUC **kracht**. Das ist der Nachweis **RLS systemweit** — der eigentliche Gewinn."
+
 ## Markierte Unklarheiten *(neu)*
 
 - **Slot-Zahl pro Automat** für die Latten-Ableitung (Umsatz-Norm ÷ Slot-Zahl): Quelle aus den
@@ -431,6 +475,12 @@ Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
 - **`security_invoker`-Verfügbarkeit** (Stufe 5): setzt PG ≥ 15 voraus — Mini-DB-Version vor dem Rollout explizit verifizieren (Deploy-Checkliste).
 - **n8n-DB-Rolle Pre-Flight** (Stufe 5): die **tatsächliche** Rolle, mit der n8n verbindet, vor `FORCE RLS` verifizieren und bewusst auf die `BYPASSRLS`-Infra-Verbindung legen — sonst brechen WF3/WF7-Writes.
 - **`tenant_id`-Index-Nutzung unter dem RLS-Prädikat** (Stufe 5): pro heißer Tabelle (`products`, `stock_batches`, `sales_transactions`, `slot_assignments`, `stock_movements`) gegen `EXPLAIN` gegenprüfen, statt den 0009-Index blind anzunehmen.
+- **Exakte `event_type`-Liste + Zieltabellen/Konfliktschlüssel von `pgw_write()`** (Stufe 6): erst nach dem **Pre-Flight-Dump** verbindlich fixierbar — bis dahin Arbeitsannahme aus den WF-Vorbereitungs-Nodes (z. B. `slot_assignment`, `stock_movement`, `invoice`/`invoice_item`, `guv_daily`, `warning`).
+- **Drive-Trigger-Ersatz** (Stufe 6): **Drive-Polling-Job** (Verhalten erhalten) vs. **Upload-Endpunkt** (cloud-agnostischer) — Empfehlung: Polling in Stufe 6, Upload-UI später (A4/Phase C).
+- **WF4-Cutover-Art** (Stufe 6): benutzerausgelöst, aber datenkritisch (Slot-Autorität) — Empfehlung: **direkter Wechsel** mit starken Tests + Rückweg „Trigger zurück auf n8n" statt Schattenbetrieb; in der Umsetzung bestätigen.
+- **E-Mail-Transport nach n8n** (Stufe 6): Gmail beibehalten vs. **Mailer-Modul** mit späterem Postmark/Brevo — Empfehlung: Versand in ein Mailer-Modul kapseln, Transport zunächst Gmail (Wechsel = ROADMAP A4).
+- **Scheduling-Quelle des Workers** (Stufe 6): `node-cron`-Ausdrücke im Code (versioniert) vs. konfigurierbar — Empfehlung: im Code; pro-Mandant-Zeitpläne erst bei Bedarf (späterer Ausbau).
+- **Verbleib von WF-Monitor/WF-Val** (Stufe 6): die n8n-spezifischen Teile (n8n-`execution_entity`-Checks, WF3-Neustart per n8n-API) **entfallen**; Container-/Heartbeat-/Backup-Checks bleiben und gehören perspektivisch in die Betriebsreife (ROADMAP A3) — Schnitt in der Umsetzung schärfen.
 
 ## Secret-Handling & Audit
 
