@@ -90,6 +90,10 @@ test('#125 settings-thresholds: getThresholds-Isolation je Mandant (nicht-vakuö
     const g = await getThresholds(db, 'globex', null);
     assert.equal(a.ladenhueterDays.source, 'global', 'acme hat globalen Override');
     assert.equal(Number(a.ladenhueterDays.value), 45);
-    assert.equal(g.ladenhueterDays.source, 'default', 'globex sieht acme-Schwellwert NICHT');
+    // Seit #131 trägt jeder Fixture-Mandant einen eigenen ladenhueterDays-Override
+    // (globex=250 via revenueBase). globex sieht damit seinen EIGENEN Wert — also
+    // nachweislich NICHT acmes 45 (stärkere, nicht-vakuöse Isolation als „default").
+    assert.equal(g.ladenhueterDays.source, 'global', 'globex hat eigenen Override');
+    assert.equal(Number(g.ladenhueterDays.value), 250, 'globex sieht seinen Wert (250), NICHT acmes 45');
   });
 });

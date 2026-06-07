@@ -58,6 +58,21 @@ function createTenantDb({ query, pool, log } = {}) {
   }
   const logfn = typeof log === 'function' ? log : () => {};
 
+  // Gemeinsame Vertrags-Prüfung: explizite Zieltabelle(n) + SQL-Text sind Pflicht
+  // (Programmierfehler ⇒ wirft, unabhängig vom Mandanten — gilt für read/write/tx).
+  function assertTablesAndText(tables, text, who) {
+    if (!Array.isArray(tables) || tables.length === 0) {
+      throw new TypeError(`tenant-db: ${who}() verlangt explizite Zieltabelle(n) (tables: [...])`);
+    }
+    if (typeof text !== 'string' || text.trim() === '') {
+      throw new TypeError(`tenant-db: ${who}() verlangt SQL-Text (text)`);
+    }
+  }
+  // Mandant einheitlich als $1 voranstellen; eigene Parameter folgen ab $2.
+  function withTenantParams(tenant, params) {
+    return [tenant, ...(Array.isArray(params) ? params : [params])];
+  }
+
   /**
    * Mandanten-gebundener Read. Siehe VERTRAG oben.
    * @param {object} req
@@ -68,63 +83,108 @@ function createTenantDb({ query, pool, log } = {}) {
    * @returns {Promise<{rows:any[], rowCount:number, tenantless?:boolean}>}
    */
   async function read({ tenant, tables, text, params = [] } = {}) {
-    if (!Array.isArray(tables) || tables.length === 0) {
-      throw new TypeError('tenant-db: read() verlangt explizite Zieltabelle(n) (tables: [...])');
-    }
-    if (typeof text !== 'string' || text.trim() === '') {
-      throw new TypeError('tenant-db: read() verlangt SQL-Text (text)');
-    }
+    assertTablesAndText(tables, text, 'read');
     if (!isValidTenant(tenant)) {
-      // fail-closed: kein Mandant ⇒ leer, KEINE Abfrage, kein Default.
+      // fail-closed-LEER: kein Mandant ⇒ leer, KEINE Abfrage, kein Default. „leer"
+      // ist ein GÜLTIGES Lese-Ergebnis (vgl. write(): dort ist es ein FEHLER).
       logfn('tenant-db: read ohne Mandant ⇒ leeres Resultat (fail-closed)', { tables });
       return { rows: [], rowCount: 0, tenantless: true };
     }
-
-    // Mandant einheitlich als $1 voranstellen; eigene Parameter folgen ab $2.
-    const allParams = [tenant, ...(Array.isArray(params) ? params : [params])];
-
-    // ── Stufe-5-Haken (NICHT aktiv in Stufe 3) ───────────────────────────────
-    // Hier setzt Stufe 5 zusätzlich `SET LOCAL automatenlager.current_tenant = $1`
-    // auf demselben Client innerhalb einer Transaktion (RLS-Backstop). Bewusst
-    // inert: in Stufe 3 leistet das tenant_id-Prädikat der Query die Filterung.
-    // (Der Mandant steht für diesen späteren Schritt bereits in allParams[0].)
-
+    // ── Stufe-5-Haken (NICHT aktiv) ── Stufe 5 setzt hier zusätzlich
+    // `SET LOCAL automatenlager.current_tenant` auf demselben Client/Trx (RLS).
+    // Inert: in Stufe 3/4 leistet das tenant_id-Prädikat die Filterung.
     // Technische Fehler propagieren — NIE als leer maskieren.
-    return runQuery(text, allParams);
+    return runQuery(text, withTenantParams(tenant, params));
   }
 
   /**
    * Mandanten-gebundener WRITE (Upsert/Insert/Update/Delete). Mechanisch wie read
-   * (Mandant als $1, eigene Parameter ab $2), aber als Schreibpfad benannt. Die
-   * volle Schreib-ISOLATION (verhindern, dass fremde Daten verändert werden) ist
-   * Stufe 4; hier nur Mandanten-Bindung + fail-closed, damit Module ohne eigenen
-   * pg.Client auskommen (No-Bypass). Kein/leerer Mandant ⇒ KEIN Schreibzugriff.
-   * @returns {Promise<{rows:any[], rowCount:number, tenantless?:boolean}>}
+   * (Mandant als $1, eigene Parameter ab $2), aber als Schreibpfad.
+   *
+   * STUFE 4 — fail-closed-WERFEND: Kein/leerer Mandant ist beim Schreiben KEIN
+   * stilles `{rowCount:0}` mehr, sondern ein geworfener FEHLER. Damit kann ein
+   * Endpunkt nie „erfolgreich gespeichert" melden, während nichts geschrieben
+   * wurde. (Der Lese-Pfad bleibt fail-closed-LEER — die Asymmetrie ist Absicht.)
+   * @returns {Promise<{rows:any[], rowCount:number}>}
    */
   async function write({ tenant, tables, text, params = [] } = {}) {
-    if (!Array.isArray(tables) || tables.length === 0) {
-      throw new TypeError('tenant-db: write() verlangt explizite Zieltabelle(n) (tables: [...])');
-    }
-    if (typeof text !== 'string' || text.trim() === '') {
-      throw new TypeError('tenant-db: write() verlangt SQL-Text (text)');
-    }
+    assertTablesAndText(tables, text, 'write');
     if (!isValidTenant(tenant)) {
-      logfn('tenant-db: write ohne Mandant ⇒ kein Schreibzugriff (fail-closed)', { tables });
-      return { rows: [], rowCount: 0, tenantless: true };
+      logfn('tenant-db: write ohne Mandant ⇒ FEHLER (fail-closed-werfend)', { tables });
+      throw new Error('tenant-db: kein Mandant beim Schreiben — Schreibzugriff verweigert (fail-closed)');
     }
-    const allParams = [tenant, ...(Array.isArray(params) ? params : [params])];
-    return runQuery(text, allParams);
+    return runQuery(text, withTenantParams(tenant, params));
+  }
+
+  /**
+   * Transaktionaler Schreib-Modus (Stufe 4). Bindet einen Mandanten, nimmt einen
+   * DEDIZIERTEN Client aus dem geteilten Pool, öffnet eine Transaktion und übergibt
+   * `fn` eine tür-gebundene Schnittstelle, die LESEN und SCHREIBEN in DERSELBEN
+   * Transaktion erlaubt (Mandant je Query als $1). So laufen „Parent-Eigentum
+   * prüfen" und „schreiben" ATOMAR (TOCTOU-Schutz). COMMIT bei Erfolg, ROLLBACK
+   * bei geworfenem Fehler (Fehler wird propagiert), Client immer freigegeben.
+   *
+   * Genau diese Transaktion ist der vorbereitete (in Stufe 4 INERTE) Steckplatz
+   * für den Stufe-5-RLS-Haken (`SET LOCAL automatenlager.current_tenant`).
+   * @param {string} tenant  effektiver Mandant (viewer.tenantId) — Pflicht, sonst wirft
+   * @param {(door:{tenant:string, read:Function, write:Function}) => Promise<any>} fn
+   * @returns {Promise<any>}  der Rückgabewert von fn
+   */
+  async function tx(tenant, fn) {
+    if (!isValidTenant(tenant)) {
+      logfn('tenant-db: tx ohne Mandant ⇒ FEHLER (fail-closed-werfend)');
+      throw new Error('tenant-db: kein Mandant bei tx() — Schreibzugriff verweigert (fail-closed)');
+    }
+    if (typeof fn !== 'function') {
+      throw new TypeError('tenant-db: tx(tenant, fn) verlangt eine Transaktions-Funktion fn');
+    }
+    if (!pool || typeof pool.connect !== 'function') {
+      throw new TypeError('tenant-db: tx() verlangt einen Pool mit connect() (dedizierter Client für die Transaktion)');
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // ── Stufe-5-RLS-Haken (GEBAUT, in Stufe 4 INERT) ─────────────────────────
+      // Genau hier setzt Stufe 5 zusätzlich die RLS-Sitzungsvariable auf DEMSELBEN
+      // Client innerhalb DIESER Transaktion:
+      //   await client.query('SET LOCAL automatenlager.current_tenant = $1', [tenant]);
+      // sodass die DB fremde Zeilen selbst dann abweist, wenn ein tenant_id-Prädikat
+      // fehlte. Bewusst auskommentiert: in Stufe 4 leisten die tenant_id-Prädikate
+      // (Mandant als $1) die Trennung; der Haken ist nur vorbereitet (RLS = Stufe 5).
+      const result = await fn(makeBoundDoor(client, tenant));
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (rbErr) {
+        logfn('tenant-db: ROLLBACK fehlgeschlagen', rbErr && rbErr.message);
+      }
+      throw err; // Fehler propagieren — kein stiller No-Op
+    } finally {
+      if (typeof client.release === 'function') client.release();
+    }
+  }
+
+  // Tür-gebundene Schnittstelle INNERHALB einer tx: liest & schreibt auf DEMSELBEN
+  // Client, Mandant einheitlich als $1. Der Mandant ist hier bereits validiert.
+  function makeBoundDoor(client, tenant) {
+    const runOn = (text, params) => client.query(text, withTenantParams(tenant, params));
+    return {
+      tenant,
+      read: ({ tables, text, params = [] } = {}) => { assertTablesAndText(tables, text, 'read'); return runOn(text, params); },
+      write: ({ tables, text, params = [] } = {}) => { assertTablesAndText(tables, text, 'write'); return runOn(text, params); },
+    };
   }
 
   /**
    * Ergonomische, an EINEN Mandanten gebundene Tür (für die Slice-Module).
-   * `forTenant('').read(...)` ist identisch fail-closed.
+   * `forTenant('').read(...)` ist identisch fail-closed; `.write/.tx` werfen ohne Mandant.
    */
   function forTenant(tenant) {
     return {
       tenant: isValidTenant(tenant) ? tenant : null,
       read: ({ tables, text, params } = {}) => read({ tenant, tables, text, params }),
       write: ({ tables, text, params } = {}) => write({ tenant, tables, text, params }),
+      tx: (fn) => tx(tenant, fn),
     };
   }
 
@@ -133,7 +193,7 @@ function createTenantDb({ query, pool, log } = {}) {
     return forTenant(viewer && viewer.tenantId);
   }
 
-  return { read, write, forTenant, forViewer, isValidTenant };
+  return { read, write, tx, forTenant, forViewer, isValidTenant };
 }
 
 // Migrations-Brücke: nimmt entweder eine fertige Tür (hat .read) ODER einen rohen

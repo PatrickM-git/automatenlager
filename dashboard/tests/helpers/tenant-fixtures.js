@@ -22,6 +22,18 @@ const READ_PATH_TABLES = Object.freeze([
   'locations', 'machines', 'products', 'stock_batches', 'sales_transactions', 'guv_daily', 'warnings',
 ]);
 
+// Die Schreib-Zielrelationen der Stufe-4-Schreibpfade (#131): jede trägt nach
+// seedTenant für BEIDE Mandanten Zeilen, damit jeder folgende Isolationstest
+// (#135–#138) NICHT-VAKUÖS ist — der jeweils andere Mandant hat in der Ziel-
+// relation wirklich Zeilen, die der Viewer nicht anfassen darf.
+//   locations          ← location-profiles (#135)
+//   machines/machine_profiles ← machine-create/-profiles (#136)
+//   settings_thresholds ← settings-thresholds (#137)
+//   stock_batches/warnings    ← write-off (#138)
+const WRITE_PATH_TABLES = Object.freeze([
+  'locations', 'machines', 'machine_profiles', 'settings_thresholds', 'stock_batches', 'warnings',
+]);
+
 // Mandanten-Tür über EINEN Sandbox-Client. Die Door-Konsumenten nutzen z. T.
 // Promise.all (mehrere Reads gleichzeitig) — ein einzelner pg-Client kann aber
 // keine parallelen Queries fahren (Produktion nutzt einen Pool). Daher hier
@@ -35,6 +47,35 @@ function doorForClient(client) {
     return result;
   };
   return createTenantDb({ query });
+}
+
+// Pool-Attrappe für db.tx() IM #94-Sandbox-Harness (#131): Der Sandbox-Client
+// läuft bereits in einer äußeren BEGIN…ROLLBACK-Transaktion. Würde db.tx ein
+// echtes BEGIN/COMMIT auf ihm fahren, committete es die ÄUSSERE Transaktion und
+// bräche die Rollback-Garantie (echte DB-Mutation!). Daher bildet dieser Pool
+// die Transaktions-Primitive auf SAVEPOINTs ab: BEGIN→SAVEPOINT, COMMIT→RELEASE,
+// ROLLBACK→ROLLBACK TO SAVEPOINT. So bleibt alles in der äußeren Transaktion,
+// die Rollback-Semantik von db.tx ist trotzdem nicht-vakuös beweisbar, und der
+// abschließende äußere ROLLBACK verwirft garantiert alles. Reines Test-Hilfsmittel.
+function sandboxTxPool(client) {
+  let counter = 0;
+  return {
+    query: (sql, params) => client.query(sql, params),
+    connect: async () => {
+      const sp = `tenant_db_tx_${++counter}`;
+      let opened = false;
+      return {
+        query: async (sql, params) => {
+          const s = String(sql).trim().toUpperCase();
+          if (s === 'BEGIN') { opened = true; return client.query(`SAVEPOINT ${sp}`); }
+          if (s === 'COMMIT') return client.query(`RELEASE SAVEPOINT ${sp}`);
+          if (s === 'ROLLBACK') return opened ? client.query(`ROLLBACK TO SAVEPOINT ${sp}`) : { rows: [], rowCount: 0 };
+          return client.query(sql, params);
+        },
+        release: () => {},
+      };
+    },
+  };
 }
 
 function round2(n) { return Math.round(n * 100) / 100; }
@@ -157,7 +198,17 @@ async function seedTenant(client, tenantId, opts = {}) {
     [`nx_${tid}`, `${tid}-1`, `Gerät ${tid}`, tid],
   );
 
-  return { tenantId: tid, locationId, machineId, productId, productName, revenueGross: gross, slotKey: `slot_${tid}` };
+  // 12) Schwellwert (Schreib-Zielrelation settings_thresholds, #137). Mandanten-
+  // Ebene (machine_id NULL). Wert je Mandant UNTERSCHEIDBAR (= base), damit
+  // Side-Effects-/Isolationstests nicht-vakuös sind und ein Cross-Tenant-Leak
+  // sichtbar würde. Constraint UNIQUE NULLS NOT DISTINCT (tenant_id, machine_id, key).
+  await client.query(
+    `INSERT INTO automatenlager.settings_thresholds (tenant_id, machine_id, key, value, updated_at)
+       VALUES ($1, NULL, 'ladenhueterDays', $2::jsonb, now())`,
+    [tid, JSON.stringify(base)],
+  );
+
+  return { tenantId: tid, locationId, machineId, productId, productName, revenueGross: gross, slotKey: `slot_${tid}`, thresholdValue: base };
 }
 
 /**
@@ -170,4 +221,4 @@ async function seedAcmeGlobex(client) {
   return { acme, globex };
 }
 
-module.exports = { seedTenant, seedAcmeGlobex, READ_PATH_TABLES, doorForClient };
+module.exports = { seedTenant, seedAcmeGlobex, READ_PATH_TABLES, WRITE_PATH_TABLES, doorForClient, sandboxTxPool };

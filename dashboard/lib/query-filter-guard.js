@@ -88,17 +88,34 @@ function listJsFiles(dir) {
 }
 
 /**
- * Scannt ein lib-Verzeichnis und klassifiziert jede Datei mit rohem DB-Zugriff in
- * „Tür" (erlaubt) vs. „bypass" (Worklist).
+ * Scannt ein lib-Verzeichnis (und optional zusätzliche Einzeldateien außerhalb von
+ * lib/) und klassifiziert jede Datei mit rohem DB-Zugriff in „Tür" (erlaubt) vs.
+ * „bypass" (Worklist).
+ *
+ * #131 (Stufe 4): `entryFiles` erweitert den Scan ADDITIV auf Schreib-Einstiegs-
+ * dateien, deren rohe pg-Transaktionen NICHT in lib/ liegen (v. a. server.js mit
+ * den Endpunkt-Transaktionen wie write-off). So entgeht kein Schreibpfad der
+ * Inventur nur, weil er im Server statt in einem lib-Modul steht. Melde-Modus.
+ * @param {object} opts
+ * @param {string} opts.libDir              flaches lib-Verzeichnis
+ * @param {string[]} [opts.doorFiles]       erlaubte DB-Schicht (Basenames)
+ * @param {string[]} [opts.entryFiles]      zusätzliche absolute Dateipfade (additiv)
  * @returns {{door:{file,reasons}[], bypass:{file,reasons}[], all:{file,reasons}[]}}
  */
-function buildReport({ libDir, doorFiles = DOOR_FILES } = {}) {
+function buildReport({ libDir, doorFiles = DOOR_FILES, entryFiles = [] } = {}) {
   if (!libDir) throw new TypeError('query-filter-guard: libDir erforderlich');
   const all = [];
   for (const file of listJsFiles(libDir)) {
     if (SELF_FILES.includes(file)) continue; // der Wächter meldet sich nicht selbst
     const reasons = scanSource(fs.readFileSync(path.join(libDir, file), 'utf8'));
     if (reasons.length) all.push({ file, reasons });
+  }
+  // Additive Einstiegsdateien (absolute Pfade; per Basename klassifiziert).
+  for (const fp of entryFiles) {
+    const base = path.basename(fp);
+    if (SELF_FILES.includes(base) || all.some((r) => r.file === base)) continue;
+    const reasons = scanSource(fs.readFileSync(fp, 'utf8'));
+    if (reasons.length) all.push({ file: base, reasons });
   }
   const door = all.filter((r) => doorFiles.includes(r.file));
   const bypass = all.filter((r) => !doorFiles.includes(r.file));
@@ -110,8 +127,8 @@ function buildReport({ libDir, doorFiles = DOOR_FILES } = {}) {
  * (pro Slice schrumpfenden) Allowlist noch-nicht-migrierter Dateien stehen.
  * Allowlist leer ⇒ jeder bypass ist ein Verstoß (build-blocking-Endzustand).
  */
-function findViolations({ libDir, doorFiles = DOOR_FILES, allowlist = [] } = {}) {
-  const { bypass } = buildReport({ libDir, doorFiles });
+function findViolations({ libDir, doorFiles = DOOR_FILES, allowlist = [], entryFiles = [] } = {}) {
+  const { bypass } = buildReport({ libDir, doorFiles, entryFiles });
   const allow = new Set(allowlist);
   return bypass.filter((r) => !allow.has(r.file));
 }
