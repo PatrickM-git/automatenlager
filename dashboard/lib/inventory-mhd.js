@@ -159,100 +159,85 @@ function buildInventoryMhdData(pgRows = {}, query = {}) {
   };
 }
 
-async function queryInventoryMhdPg(pgUrl, query = {}) {
-  const { Client } = require('pg');
+// #126 (Stufe 3): mandantengetrennt durch die Mandanten-Tür. Mandant = $1 (Tür),
+// Filter ab $2. mhdDays/Config unter __default__ (Stufe 3 nicht per-Mandant). Kein
+// Mandant ⇒ alle Lesepfade leer (fail-closed).
+async function queryInventoryMhdPg(db, tenant, query = {}) {
   const locationFilter = clean(query.location);
   const machineFilter = clean(query.machine);
-  const client = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 8000 });
-  await client.connect();
-  try {
-    const mhdDays = (await loadEffectiveConfig(client, DEFAULT_MANDANT)).mhdRiskDays; // #34: eine Quelle
-    const params = [locationFilter, machineFilter];
-    const [mhdResult, lowStockResult] = await Promise.all([
-      client.query(
-        `SELECT sb.batch_id,
-                sb.batch_key,
-                p.product_id,
-                p.name AS product_name,
-                sb.mhd_date,
-                sb.remaining_qty,
-                w.warning_type,
-                w.warning_severity,
-                w.warning_message,
-                m.machine_key AS machine_id,
-                m.name AS machine_name,
-                l.location_key AS location_id,
-                l.name AS location_name,
-                sa.mdb_code
+  const mhdDays = (await loadEffectiveConfig(db, DEFAULT_MANDANT)).mhdRiskDays; // #34: eine Quelle (durch die Tür)
+  const params = [locationFilter, machineFilter];
+  const [mhdResult, lowStockResult] = await Promise.all([
+    db.read({
+      tenant,
+      tables: ['stock_batches', 'products', 'slot_assignments', 'machines', 'locations', 'warnings'],
+      text:
+        `SELECT sb.batch_id, sb.batch_key, p.product_id, p.name AS product_name,
+                sb.mhd_date, sb.remaining_qty,
+                w.warning_type, w.warning_severity, w.warning_message,
+                m.machine_key AS machine_id, m.name AS machine_name,
+                l.location_key AS location_id, l.name AS location_name, sa.mdb_code
            FROM automatenlager.stock_batches sb
-           JOIN automatenlager.products p ON p.product_id = sb.product_id
+           JOIN automatenlager.products p ON p.product_id = sb.product_id AND p.tenant_id = sb.tenant_id
            LEFT JOIN automatenlager.slot_assignments sa
-             ON sa.product_id = p.product_id AND sa.active = TRUE
-           LEFT JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
-           LEFT JOIN automatenlager.locations l ON l.location_id = m.location_id
+             ON sa.product_id = p.product_id AND sa.tenant_id = sb.tenant_id AND sa.active = TRUE
+           LEFT JOIN automatenlager.machines m ON m.machine_id = sa.machine_id AND m.tenant_id = sa.tenant_id
+           LEFT JOIN automatenlager.locations l ON l.location_id = m.location_id AND l.tenant_id = m.tenant_id
            LEFT JOIN LATERAL (
-             SELECT w2.warning_type,
-                    w2.severity AS warning_severity,
-                    w2.message AS warning_message
+             SELECT w2.warning_type, w2.severity AS warning_severity, w2.message AS warning_message
                FROM automatenlager.warnings w2
               WHERE w2.product_id = p.product_id
+                AND w2.tenant_id = sb.tenant_id
                 AND w2.resolved = FALSE
                 AND w2.warning_type IN ('MHD_NEAR', 'MHD_EXPIRED')
-              ORDER BY CASE WHEN w2.warning_type = 'MHD_EXPIRED' THEN 0 ELSE 1 END,
-                       w2.created_at DESC
+              ORDER BY CASE WHEN w2.warning_type = 'MHD_EXPIRED' THEN 0 ELSE 1 END, w2.created_at DESC
               LIMIT 1
            ) w ON TRUE
-          WHERE sb.status IN (${availableBatchStatusSqlList()})
+          WHERE sb.tenant_id = $1
+            AND sb.status IN (${availableBatchStatusSqlList()})
             AND sb.remaining_qty > 0
             AND sb.mhd_date IS NOT NULL
             AND sb.mhd_date <= CURRENT_DATE + INTERVAL '${mhdDays} days'
-            AND ($1 = '' OR l.location_key = $1 OR l.name ILIKE '%' || $1 || '%')
-            AND ($2 = '' OR m.machine_key = $2 OR m.name ILIKE '%' || $2 || '%')
+            AND ($2 = '' OR l.location_key = $2 OR l.name ILIKE '%' || $2 || '%')
+            AND ($3 = '' OR m.machine_key = $3 OR m.name ILIKE '%' || $3 || '%')
           ORDER BY sb.mhd_date ASC`,
-        params,
-      ),
-      client.query(
+      params,
+    }),
+    db.read({
+      tenant,
+      tables: ['stock_batches', 'slot_assignments', 'products', 'machines', 'locations'],
+      text:
         `WITH batch_totals AS (
            SELECT product_id, SUM(remaining_qty)::int AS total_qty
              FROM automatenlager.stock_batches
-            WHERE status IN (${availableBatchStatusSqlList()})
+            WHERE status IN (${availableBatchStatusSqlList()}) AND tenant_id = $1
             GROUP BY product_id
          )
-         SELECT p.product_id,
-                p.name AS product_name,
-                sa.current_machine_qty,
-                sa.target_stock,
+         SELECT p.product_id, p.name AS product_name,
+                sa.current_machine_qty, sa.target_stock,
                 GREATEST(COALESCE(bt.total_qty, 0) - sa.current_machine_qty, 0)::int AS backstock_qty,
-                m.machine_key AS machine_id,
-                m.name AS machine_name,
-                l.location_key AS location_id,
-                l.name AS location_name,
-                sa.mdb_code
+                m.machine_key AS machine_id, m.name AS machine_name,
+                l.location_key AS location_id, l.name AS location_name, sa.mdb_code
            FROM automatenlager.slot_assignments sa
-           JOIN automatenlager.products p ON p.product_id = sa.product_id
-           JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
-           JOIN automatenlager.locations l ON l.location_id = m.location_id
+           JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
+           JOIN automatenlager.machines m ON m.machine_id = sa.machine_id AND m.tenant_id = sa.tenant_id
+           JOIN automatenlager.locations l ON l.location_id = m.location_id AND l.tenant_id = m.tenant_id
            LEFT JOIN batch_totals bt ON bt.product_id = p.product_id
           WHERE sa.active = TRUE
+            AND sa.tenant_id = $1
             AND sa.current_machine_qty = 0
-            AND ($1 = '' OR l.location_key = $1 OR l.name ILIKE '%' || $1 || '%')
-            AND ($2 = '' OR m.machine_key = $2 OR m.name ILIKE '%' || $2 || '%')`,
-        params,
-      ),
-    ]);
+            AND ($2 = '' OR l.location_key = $2 OR l.name ILIKE '%' || $2 || '%')
+            AND ($3 = '' OR m.machine_key = $3 OR m.name ILIKE '%' || $3 || '%')`,
+      params,
+    }),
+  ]);
 
-    // Chargen nach Produkt + MHD-Datum gruppieren: gleiche Ware mit gleichem
-    // Ablaufdatum erscheint als eine Zeile mit summierter Menge. Damit werden
-    // Doppeleinträge aus mehreren Rechnungen (unterschiedliche batch_key,
-    // gleicher product_id + mhd_date) zu einer übersichtlichen Zeile zusammen-
-    // gefasst. MIN(batch_key) dient als Anker für den Aussortieren-Button.
-    // machine_qty: verlässlicher Nayax-Abgleich-Wert (current_machine_qty aus
-    // slot_assignments, via #17 aktuell gehalten). Zeigt den echten Automatenbestand
-    // unabhängig von der driftenden stock_batches.remaining_qty (#87).
-    const allBatchesResult = await client.query(
-      `SELECT p.product_id,
-              p.name                               AS product_name,
-              sb.mhd_date,
+  // Chargen nach Produkt + MHD-Datum gruppieren (mandanten-gefiltert).
+  const allBatchesResult = await db.read({
+    tenant,
+    tables: ['stock_batches', 'products', 'slot_assignments'],
+    text:
+      `SELECT p.product_id, p.name AS product_name, sb.mhd_date,
               SUM(sb.remaining_qty)::int           AS remaining_qty,
               COUNT(*)::int                        AS batch_count,
               MIN(sb.batch_key)                    AS batch_key,
@@ -260,28 +245,27 @@ async function queryInventoryMhdPg(pgUrl, query = {}) {
               (sb.mhd_date::date - CURRENT_DATE)::int AS days_until_mhd,
               MAX(COALESCE(sa_agg.machine_qty, 0))::int AS machine_qty
          FROM automatenlager.stock_batches sb
-         JOIN automatenlager.products p ON p.product_id = sb.product_id
+         JOIN automatenlager.products p ON p.product_id = sb.product_id AND p.tenant_id = sb.tenant_id
          LEFT JOIN (
            SELECT product_id, SUM(current_machine_qty)::int AS machine_qty
              FROM automatenlager.slot_assignments
-            WHERE active = TRUE
+            WHERE active = TRUE AND tenant_id = $1
             GROUP BY product_id
          ) sa_agg ON sa_agg.product_id = sb.product_id
-        WHERE sb.status IN (${availableBatchStatusSqlList()})
+        WHERE sb.tenant_id = $1
+          AND sb.status IN (${availableBatchStatusSqlList()})
           AND sb.remaining_qty > 0
         GROUP BY p.product_id, p.name, sb.mhd_date,
                  (sb.mhd_date::date - CURRENT_DATE)::int
         ORDER BY sb.mhd_date ASC NULLS LAST, p.name`,
-    );
+    params: [],
+  });
 
-    return {
-      mhdRisks: mhdResult.rows,
-      lowStock: lowStockResult.rows,
-      allBatches: allBatchesResult.rows,
-    };
-  } finally {
-    await client.end();
-  }
+  return {
+    mhdRisks: mhdResult.rows,
+    lowStock: lowStockResult.rows,
+    allBatches: allBatchesResult.rows,
+  };
 }
 
 module.exports = { buildInventoryMhdData, queryInventoryMhdPg, toIsoDate };

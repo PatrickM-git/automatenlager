@@ -911,8 +911,14 @@ async function buildDashboardV2Area(area, query = {}, viewer = null) {
   }
 
   if (area === 'inventory-mhd') {
+    // #126: technischer Ausfall (Verzeichnis nicht bereit) ⇒ 503, nicht leer.
+    if (tenantDirectory && !tenantDirectory.isReady()) {
+      return buildDashboardV2Error(area, 'PG_ERROR', 'Mandanten-Verzeichnis nicht bereit (DB nicht erreichbar).');
+    }
     try {
-      const pgRows = await queryInventoryMhdPg(pgUrl, query);
+      // #126: mandantengetrennt durch die Tür; effektiver Mandant aus dem Viewer.
+      const tenant = viewer && viewer.tenantId;
+      const pgRows = await queryInventoryMhdPg(tenantDb, tenant, query);
       const data = buildInventoryMhdData(pgRows, query);
       const now = new Date();
       return {
@@ -2101,17 +2107,20 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (parsed.pathname === '/api/v2/refill/search' && req.method === 'GET') {
+      const viewer = getViewer(req); // #126: Mandant für die Refill-Bestands-Vorschau
       const pgUrl = dashboardV2PgUrl();
       const q = clean(parsed.query.q || '');
       if (!pgUrl) {
         sendJson(res, 503, { ok: false, results: [], error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const { Client } = require('pg');
-        const client = new Client({ connectionString: pgUrl });
-        await client.connect();
-        const { rows } = await client.query(`
+        // #126: durch die Mandanten-Tür mit tenant_id-Filter (kein Inline-Client).
+        const { rows } = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['slot_assignments', 'machines', 'locations', 'products'],
+          text: `
           SELECT
             sa.machine_id::text AS machine_id,
             m.name AS machine_label,
@@ -2123,13 +2132,14 @@ const server = http.createServer(async (req, res) => {
             sa.machine_capacity AS capacity,
             l.name AS location_name
           FROM automatenlager.slot_assignments sa
-          JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
-          JOIN automatenlager.locations l ON l.location_id = m.location_id
-          JOIN automatenlager.products p ON p.product_id = sa.product_id
-          WHERE sa.active = true
+          JOIN automatenlager.machines m ON m.machine_id = sa.machine_id AND m.tenant_id = sa.tenant_id
+          JOIN automatenlager.locations l ON l.location_id = m.location_id AND l.tenant_id = m.tenant_id
+          JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
+          WHERE sa.active = true AND sa.tenant_id = $1
           ORDER BY p.name, sa.machine_id, sa.mdb_code
-        `);
-        await client.end();
+        `,
+          params: [],
+        });
         const results = searchRefillTargets(q, rows.map((r) => ({ ...r, product_name: formatProductName(r.product_name || '') })));
         sendJson(res, 200, { ok: true, results });
       } catch (err) {
@@ -2139,6 +2149,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (parsed.pathname === '/api/v2/refill/details' && req.method === 'GET') {
+      const viewer = getViewer(req); // #126: Mandant für die Refill-Detail-Vorschau
       const pgUrl = dashboardV2PgUrl();
       const machineId = clean(parsed.query.machine_id || '');
       const mdbCode = parseInt(clean(parsed.query.mdb_code || ''), 10);
@@ -2150,11 +2161,13 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_PARAMS', message: 'machine_id und mdb_code erforderlich.' } });
         return;
       }
+      if (!tenantReadReady(res)) return;
       try {
-        const { Client } = require('pg');
-        const client = new Client({ connectionString: pgUrl });
-        await client.connect();
-        const slotResult = await client.query(`
+        // #126: durch die Mandanten-Tür mit tenant_id-Filter (kein Inline-Client).
+        const slotResult = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['slot_assignments', 'machines', 'locations', 'products'],
+          text: `
           SELECT
             sa.machine_id::text AS machine_id,
             m.name AS machine_label,
@@ -2166,25 +2179,30 @@ const server = http.createServer(async (req, res) => {
             sa.machine_capacity AS capacity,
             l.name AS location_name
           FROM automatenlager.slot_assignments sa
-          JOIN automatenlager.machines m ON m.machine_id = sa.machine_id
-          JOIN automatenlager.locations l ON l.location_id = m.location_id
-          JOIN automatenlager.products p ON p.product_id = sa.product_id
-          WHERE sa.machine_id = $1 AND sa.mdb_code = $2 AND sa.active = true
+          JOIN automatenlager.machines m ON m.machine_id = sa.machine_id AND m.tenant_id = sa.tenant_id
+          JOIN automatenlager.locations l ON l.location_id = m.location_id AND l.tenant_id = m.tenant_id
+          JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
+          WHERE sa.tenant_id = $1 AND sa.machine_id = $2 AND sa.mdb_code = $3 AND sa.active = true
           LIMIT 1
-        `, [machineId, mdbCode]);
+        `,
+          params: [machineId, mdbCode],
+        });
         if (!slotResult.rows.length) {
-          await client.end();
           sendJson(res, 404, { ok: false, error: { code: 'SLOT_NOT_FOUND', message: 'Slot nicht gefunden.' } });
           return;
         }
         const slotRow = slotResult.rows[0];
-        const batchResult = await client.query(`
+        const batchResult = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['stock_batches'],
+          text: `
           SELECT batch_key, product_id, remaining_qty, mhd_date::text AS mhd_date, status, unit_cost_net::text AS unit_cost_net
           FROM automatenlager.stock_batches
-          WHERE product_id = $1 AND remaining_qty > 0 AND status IN (${availableBatchStatusSqlList()})
+          WHERE tenant_id = $1 AND product_id = $2 AND remaining_qty > 0 AND status IN (${availableBatchStatusSqlList()})
           ORDER BY mhd_date ASC NULLS LAST
-        `, [slotRow.product_id]);
-        await client.end();
+        `,
+          params: [slotRow.product_id],
+        });
         const data = buildRefillDetails(slotRow, batchResult.rows, new Date());
         sendJson(res, 200, { ok: true, data });
       } catch (err) {

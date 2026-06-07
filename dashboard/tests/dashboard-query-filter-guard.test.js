@@ -31,7 +31,7 @@ test('#122 Guard Melde-Modus: Worklist aller noch ungefilterten Lesepfade, brich
   assert.ok(report.bypass.length > 0, 'Melde-Modus listet noch-ungefilterte Lesepfade');
   const files = report.bypass.map((b) => b.file);
   // Stabile Vertreter, die heute noch direkt pg nutzen (noch nicht migriert):
-  for (const known of ['inventory-mhd.js', 'location-profiles.js', 'correction-cases.js']) {
+  for (const known of ['machine-profiles.js', 'location-profiles.js', 'correction-cases.js']) {
     assert.ok(files.includes(known), `Worklist enthält ${known}`);
   }
   // Jeder Eintrag trägt eine Begründung (welches Muster).
@@ -81,9 +81,9 @@ test('#122 Guard findViolations: schrumpfende Allowlist (bereichsweise scharf)',
   assert.equal(none.length, 0, 'mit voller Allowlist keine Verstöße');
 
   // Einen Bereich „scharf schalten" (aus der Allowlist nehmen) ⇒ er wird zum Verstoß.
-  const sharpened = allBypass.filter((f) => f !== 'inventory-mhd.js');
+  const sharpened = allBypass.filter((f) => f !== 'location-profiles.js');
   const violations = guard.findViolations({ libDir: LIB_DIR, allowlist: sharpened });
-  assert.ok(violations.some((v) => v.file === 'inventory-mhd.js'),
+  assert.ok(violations.some((v) => v.file === 'location-profiles.js'),
     'ein aus der Allowlist genommener (noch nicht migrierter) Lesepfad ist ein Verstoß');
 });
 
@@ -92,7 +92,7 @@ test('#122 Guard findViolations: schrumpfende Allowlist (bereichsweise scharf)',
 // KLEINER; im Endzustand (#129) bleibt nur die Infrastruktur-Ausnahme. Migrierte
 // Module dürfen hier NICHT stehen — sonst könnten sie unbemerkt zurückfallen.
 const STILL_BYPASSING = [
-  'correction-cases.js', 'db-schema.js', 'inventory-mhd.js', 'location-profiles.js',
+  'correction-cases.js', 'db-schema.js', 'location-profiles.js',
   'machine-create.js', 'machine-profiles.js', 'nayax-devices.js', 'product-onboarding.js',
   'settings-thresholds.js', 'stock-cost-invariant.js',
 ];
@@ -101,6 +101,7 @@ const MIGRATED = [
   'economics.js', 'economics-live.js',                                  // #123 Finanzen/GuV
   'overview-monitoring.js', 'automaten-view.js', 'alert-digest.js',     // #124 Übersicht/Cockpit/Monitoring
   'assortment-slots.js', 'category-config.js',                          // #125 Sortiment (settings-thresholds: READ migriert, Schreibpfad #127)
+  'inventory-mhd.js',                                                   // #126 Bestand/MHD/Lager
 ];
 
 test('#123 Guard scharf: kein Bypass außerhalb der schrumpfenden Allowlist (Default-Deny)', () => {
