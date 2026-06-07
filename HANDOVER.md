@@ -2,83 +2,75 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
-## Stand: 2026-06-07 — Mandantenfähigkeit STUFE 4 „Schreib-Isolation" — Issues #131–#139 KOMPLETT (Code), Mini-Deploy + Live-Smoke AUSSTEHEND
+## Stand: 2026-06-07 — Mandantenfähigkeit STUFE 5 „RLS-Backstop" — KOMPLETT, LIVE & VERIFIZIERT
 
-Branch `feat/write-isolation-stufe-4` (9 Commits), Suite **1056/1056 grün** (live gegen die
-Mini-DB im #94-Sandbox-Harness, ROLLBACK). SPEC:
-`docs/specs/multi-tenant-write-isolation-stufe-4-v1.md`. Schließt die in Stufe 3 bewusst
-offen gelassene Lücke: nachdem **Lesen** mandantengetrennt ist (Stufe 3), ist jetzt
-**Schreiben** (INSERT/UPDATE/DELETE/UPSERT) und jede **schreib-auslösende Autorisierung**
-mandantengetrennt — fail-closed und gegen zwei echte Test-Mandanten (`acme`/`globex`)
-nicht-vakuös bewiesen.
+Row-Level-Security als unumgehbarer Backstop für **Lesen UND Schreiben** ist umgesetzt,
+auf den Mini deployt und scharf geschaltet. Issues **#144–#150 geschlossen** (PR
+[#151](https://github.com/PatrickM-git/automatenlager/pull/151) gemergt, Mini auf
+`145ee7b`). Vorbedingungen: Stufe 4 deployt + #132–#139 geschlossen; Pre-Flight #143
+geschlossen. SPEC: `docs/specs/multi-tenant-rls-stufe-5-v1.md`. Suite **1081/1081 grün**.
 
-### Was umgesetzt wurde (Code)
+### Pre-Flight-Befund (#143) — wichtig
+Die Mini-DB hat eine **out-of-band** Rollen-Hierarchie (NICHT im Repo): `homelab`
+(Owner, super+BYPASSRLS), `app_reader`/`app_writer` (Funktions-Rollen), **`n8n_app`**
+(n8ns Login-Rolle, Mitglied von `app_writer`), `validator`, `migrator`. Die SPEC nahm
+„keine Rollen vorhanden" an — angepasst. tenant_id-Indizes auf allen 5 heißen Tabellen
+vorhanden (kein neuer Index nötig). Siehe Memory `db-rollen-landschaft`.
 
-- **#131 Fundament** (`lib/tenant-db.js`): `write()` ist **fail-closed-werfend** (kein
-  Mandant ⇒ Fehler statt stillem `{rowCount:0}`); `read()` bleibt fail-closed-**leer**.
-  Neuer transaktionaler Modus **`db.tx(tenant, fn)`** (BEGIN → tür-gebundenes read+write,
-  Mandant als `$1` → COMMIT/ROLLBACK; dedizierter Client aus dem Pool). Inerter
-  **Stufe-5-RLS-Haken** (`SET LOCAL automatenlager.current_tenant`) als kommentierter
-  Steckplatz in `db.tx`. Body-Tenant-Reject-Helper `lib/write-guards.js`
-  (`tenant_id`/`mandant_id` im Body ⇒ 400 + Audit). #107-Guard um `entryFiles` erweitert
-  (erfasst Schreibpfade auch außerhalb `lib/`). Schreib-Fixtures `WRITE_PATH_TABLES` +
-  `sandboxTxPool` (SAVEPOINT-Mapping für `db.tx` im Sandbox-Harness).
-- **#132 DDL 0020:** `locations`/`machines`/`machine_profiles` — globale `(key)`-Uniques
-  gedroppt, ersetzt durch `UNIQUE NULLS NOT DISTINCT (tenant_id, key)`. Idempotent,
-  Vorab-Checks. (Eigentümer-freigegebene „Variante 2".) `#111` Scope um diese 3 Tabellen
-  reduziert (Kommentar gesetzt, **nicht** geschlossen).
-- **#136 DDL 0021:** `machine_profiles`-tenant-treue-Trigger (aus `0017`) mandanten-
-  skopiert (`AND tenant_id = NEW.tenant_id`) — `0020` machte die globale
-  `machine_key`-Auflösung mehrdeutig. **Folge-Korrektur zu 0020.**
-- **#133/#134 Webhook-Tore:** `refill/trigger` + `slot-assign-inline/confirm` mit
-  `requireMachineAccess`; `correction-action/confirm` + `onboarding/start` mit
-  Case-Mitgliedschaftsprüfung (`requireCaseAccess`, NICHT Maschine). Alle vier + Body-
-  Tenant-Reject. **Bugfix:** `readJsonBody` war am slot-assign-Endpunkt nie definiert
-  (Body kam immer als `{}` an) — jetzt definiert.
-- **#135/#136/#137/#138 direkte Schreiber durch die Tür:** `location-profiles`
-  (UPSERT/DELETE, `db.tx`-DELETE), `machine-create` (`db.tx`, Parent-`location_id` IN der
-  Transaktion ⇒ fremd = 404), `machine-profiles`, `settings-thresholds` (UPSERT/DELETE,
-  fail-closed-werfend, kein `__default__`-Default mehr in den Schreibfunktionen),
-  `write-off` (inline-Transaktion aus `server.js` in `lib/write-off.js::writeOffBatchPg`
-  ausgelagert, `SELECT … FOR UPDATE` + UPDATE atomar, tenant-skopiert).
-- **#139 Abschluss:** Guard-Schreibpfad-Allowlist **leer** (`STUFE4_WRITE_ALLOWLIST = []`)
-  ⇒ `lib/`-Guard build-blocking; Stufe-5-Haken dokumentiert + inert; Konsolidierungstest
-  `dashboard-mt-stufe4-abschluss.test.js` (Break-Glass an allen 12 neuen Endpunkten,
-  fail-closed, Guard-Endzustand); Doku `docs/security/query-filter-guard-allowlist.md`.
+### Was umgesetzt wurde (Code, 5 Commits)
+- **Slice 1 (#144):** `lib/tenant-db.js` `read()`/`write()` transaktional (read: `BEGIN
+  READ ONLY`) + GUC via `set_config('automatenlager.current_tenant',$1,true)` (kein
+  String-`SET`); `tx()`-Haken gezündet; AMBIENT-Modus für `asDoor(client)`/Sandbox;
+  Pool-Pflicht (sonst wirft). `server.js`: Infra-Pool (homelab) für Registry/Bootstrap
+  + App-Pool (`DASHBOARD_V2_APP_PG_URL`, Fallback Infra) für die Tür.
+- **Slice 2 (#145, Migration 0022):** Rolle `automatenlager_app` (LOGIN, **kein**
+  BYPASSRLS, kein Eigentum), Mitglied von `app_writer` + DELETE auf
+  locations/settings_thresholds; Registry per REVOKE gesperrt; `n8n_app` → BYPASSRLS;
+  search_path-Härtung. (Mat)View-Sicherung inert in 0022 (vor Code-Deploy nötig).
+- **Slices 3a–3d (#146–#149, Migrationen 0023–0026):** `ENABLE`+`FORCE`+`tenant_isolation`
+  (USING+WITH CHECK, einarmiges `current_setting` ⇒ fail-closed; `text=text`) auf 20
+  operativen Tabellen in 4 Gruppen; **Vereinigungs-Policy** `classification_settings`
+  (Spalte `mandant_id`: eigener Mandant ODER `__default__`; Schreiben strikt eigener);
+  `security_invoker` auf `v_warnings_open`/`v_slot_turnover`; **security_barrier-View**
+  `v_inventory_value_daily` statt roher MatView (economics.js/assortment-slots.js
+  umgestellt); rohe MatViews für App-Tier entzogen.
+- **Abschluss (#150):** Break-Glass read-only an der Tür (`forViewer` + supportSession);
+  Rollback-Runbook `docs/security/rls-stufe-5-rollback.md`; Negativ-Matrix-Test
+  `dashboard/tests/dashboard-mt-rls-isolation.test.js` (real als `automatenlager_app`).
 
-### Nicht-vakuöse Isolationstests (acme/globex)
+### Live-Rollout (gestaffelt, verifiziert)
+1. Migration **0022** angewendet (Rolle+View+Infra, inert). 2. **Code-Deploy** (Mini
+`git reset --hard origin/main` + restart; App noch homelab). 3. **Rollenwechsel:**
+Passwort für `automatenlager_app` gesetzt + `DASHBOARD_V2_APP_PG_URL` in
+`dashboard/.env.local` (Passwort generiert/verwendet **auf dem Mini**, verließ ihn nie)
++ restart. Verifiziert: Container `current_user=automatenlager_app superuser=off`.
+4. **0023→0024→0025→0026** gestaffelt angewendet, Gruppen-Smoke je Gruppe (als
+`automatenlager_app`, GUC=t_faltrix, transaktional) = **exakt** Faltrix' Zeilen.
+5. Final: `/health` ok, Logs fehlerfrei, **n8n_app=BYPASSRLS** (WF3/WF7 ungebrochen),
+**fail-closed** (fehlender GUC ⇒ Fehler 42704, kein Leck).
 
-Pro Domäne ein eigener `dashboard-mt-*-isolation.test.js`: gleicher Key ⇒ getrennte
-Zeilen (kein Cross-Tenant-Überschreiben), fremder Parent ⇒ 404/NOT_FOUND ohne Änderung,
-fail-closed ohne Mandant, Side-Effects-Isolation (settings-thresholds), Owner-Regression.
-Sandbox-Tests wenden `0020`(+`0021`) vorab an (DDL vor Code).
+### Betrieb / Wissen für die nächste Session
+- Dashboard verbindet jetzt als **`automatenlager_app`** (App-URL in der Mini-
+  `dashboard/.env.local`, Schlüssel `DASHBOARD_V2_APP_PG_URL`). Die Test-Suite/Dev
+  nutzt weiter `DASHBOARD_V2_PG_URL` (homelab, BYPASSRLS) über den Tunnel.
+- **Lockout-Recovery:** `DASHBOARD_V2_APP_PG_URL` in der Mini-`.env.local` leeren ⇒
+  Fallback auf die Infra-URL (homelab, BYPASSRLS) + restart. Siehe Rollback-Runbook.
+- Neue Migrationen **0022–0026** sind auf der Live-DB angewendet (idempotent).
 
-### ⚠️ AUSSTEHEND — vor „erledigt": Mini-Deploy + Live-Smoke (#139, AC6)
+### Restrisiko / Grenzen (unverändert SPEC)
+- n8n schreibt bewusst über die **BYPASS**-Rolle (außerhalb des Backstops bis Stufe 6);
+  MatView-`REFRESH` mandantenübergreifend (Infra). Mit **einem** Mandanten (Faltrix)
+  akzeptiert. **Kein zweiter echter Kunde vor Stufe 6.**
+- WF3/WF7 wurden NICHT real getriggert (keine Prod-Mutation); n8n auf Rollenebene
+  verifiziert (BYPASSRLS) — der nächste reguläre WF-Lauf bestätigt End-to-End.
 
-Stufe 4 enthält **DDL** — diese muss VOR dem Code auf den Mini:
+### Offene Issues (bewusst NICHT in diesem Loop)
+- **#108** Übergangs-Cleanup (tenantColumn-Brücke + `__default__`-Abbau) → **Stufe 6**.
+- **#109** IR-Runbook → **separat**, braucht org-spezifischen Input (Kontakte/Eskalation).
+- **#111** globale (key)-Uniques droppen + `ON CONFLICT (tenant_id,key)` → **Stufe 6**.
 
-1. **PR mergen** (`feat/write-isolation-stufe-4`) → schließt #131–#139.
-2. **Mini-Deploy (HP-Mini, nie localhost):** `git pull --ff-only`, dann **Migration `0020`
-   UND `0021`** anwenden (`psql $PGURL -f dashboard/db-migrations/0020-*.sql` und
-   `0021-*.sql`; beide idempotent), dann Container-Restart.
-3. **Live-Smoke:** Eigentümer-Schreibungen am echten Dashboard prüfen — Standort
-   anlegen/löschen, Maschine anlegen + aussondern, Schwelle setzen/zurücksetzen, Charge
-   ausbuchen. Keine falschen „gespeichert", keine Fehler.
-
-### Abgrenzung / nächste Stufen
-
-- **Stufe 5 (RLS):** den inerten `SET LOCAL`-Haken in `db.tx` zünden — der unumgehbare
-  DB-Backstop. **Kein zweiter realer Kunde vor Stufe 3+4+5.**
-- **Stufe 6:** n8n-eigene Schreibpfade; per-Mandant-Config (`classification_settings`
-  bleibt `mandant_id`/`__default__`; `settings_thresholds`-Endpunkt schreibt weiter unter
-  `DEFAULT_MANDANT`); restliche globale `(key)`-Uniques (#111, Scope ohne
-  locations/machines).
-- **Stufe 8:** UI (Mandanten-Selektor, Support-Bedien-UI).
-
-### Bekannte Test-Eigenheit
-
-Die volle Suite (`node --test`, ~45 Dateien) zeigt sporadisch 1–3 **transiente**
-Fehlschläge unter Last (viele Spawned-Server + Sandbox-Verbindungen gleichzeitig gegen EINE
-Mini-DB). Gezielte Läufe einzelner Dateien sind deterministisch grün. Bei einem roten
-Volllauf: die betroffenen Dateien einzeln nachfahren (kein Code-Fehler, Verbindungs-
-Kontention).
+### Nächste Schritte
+1. **Stufe 6 planen** (`grill-me`): n8n-Eigenabsicherung/-Ablösung (raus aus dem
+   BYPASS), per-Mandant-Config, #108 + #111 — erst danach 2. realer Kunde möglich.
+2. **#109 IR-Runbook** mit dem Betreiber gemeinsam erstellen.
+3. Beim nächsten WF3/WF7-Lauf das n8n-Run-Log auf DB-Fehler prüfen (End-to-End-Bestätigung).
