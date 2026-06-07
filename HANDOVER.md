@@ -2,6 +2,16 @@
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 
+## Nachtrag (2026-06-07, später) — PG-Backup auf externe Platte D: eingerichtet
+
+Tägliches `pg_dump`-Backup der Prod-DB (`homelab`/`automatenlager`) auf die externe
+Platte **D:** des Mini (Sheets ist seit SQL-Cutover kein Backup mehr). Skript
+`C:\homelab\scripts\pg-backup-automatenlager.ps1` (pg_dump -Fc → docker cp → C: →
+Move D:\backups\automatenlager + Aufbewahrung 30 Tage + Log). Windows-Aufgabe
+**`PG-Backup-Automatenlager`** täglich 03:00 (Benutzer patri/console-Sitzung; läuft
+verifiziert, Result 0). Restore-Befehle + Details: Memory `pg-backup-mechanismus`.
+**Offen/optional:** Backup-Skript ins Repo/Homelab-Docs versionieren; Restore-Probe.
+
 ## Nachtrag (2026-06-07, später) — Feature „Inline-Inventur" (#152) LIVE
 
 `/lager`: **Chargenrest pro Charge inline editierbar** (gezählter Lager-Ist; Klick auf
