@@ -270,6 +270,37 @@ Wächter **bewacht** No-Bypass auch für Writes (build-blocking) · RLS (Stufe 5
 
 ---
 
+## Mandantenfähigkeit: RLS-Backstop (Stufe 5) *(neu)*
+
+> Quelle: SPEC `docs/specs/multi-tenant-rls-stufe-5-v1.md`. Stufe 5 schaltet **PostgreSQL Row-Level-Security**
+> als unumgehbaren Laufzeit-Backstop scharf — für **Lesen UND Schreiben**. App-Filter (Stufe 3) und
+> [#107-Wächter](#) sind App-Logik und fehlbar; RLS greift, **selbst wenn beide versagen**. Baut auf
+> Mandanten-Tür (Stufe 3/4) + effektivem Mandanten (Stufe 2) auf. **Vorbedingung:** Hotfix [#141](https://github.com/PatrickM-git/automatenlager/issues/141).
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **RLS-Backstop** | Die **datenbank-erzwungene** Mandanten-Trennung, die fremde Zeilen abweist, bevor sie die App erreichen — der unumgehbare Schutz **unterhalb** von App-Filter und Wächter. | „RLS = der Filter"; „Backstop" für App-Logik |
+| **App-Rolle (`automatenlager_app`)** | Die eingeengte DB-Rolle für allen Dashboard-Verkehr: **kein** `BYPASSRLS`, **kein** Tabellen-Eigentum, voll RLS-unterworfen. | „die DB-Verbindung" pauschal; Owner-Rolle als App nutzen |
+| **Infra-/`BYPASSRLS`-Verbindung** | Die separate, RLS-umgehende Verbindung **nur** für Bootstrap (Verzeichnis-Lookup), Migrationen und MatView-`REFRESH` — nie für normalen Mandantenverkehr. | „Admin-Connection" für App-Reads |
+| **RLS-Sitzungsvariable / GUC (`automatenlager.current_tenant`)** | Der **transaktionslokal** gesetzte aktive Mandant, gegen den jede Policy prüft; gesetzt **nur** in der Mandanten-Tür. | `app.current_tenant`; session-weites `SET` |
+| **`set_config(..., $1, true)`** | Die **einzige** erlaubte Form, den GUC zu setzen: parametrisiert (kein Injection-Korridor) + transaktionslokal (`true`). | string-interpoliertes `SET automatenlager.current_tenant = …` |
+| **Einarmiges `current_setting`** | `current_setting('automatenlager.current_tenant')` (ohne 2. Argument) → fehlender GUC **wirft** (laut), statt still leer zu liefern. | zweiarmiges `current_setting(…, true)` im Normalpfad (NULL = stilles Leck) |
+| **`USING` / `WITH CHECK`-Policy** | `USING` regelt **Sichtbarkeit** (Lesen/sehen welche Zeilen), `WITH CHECK` verbietet **Schreiben** einer Zeile in einen fremden Mandanten — beides nötig. | nur `USING` (lässt Cross-Tenant-Insert zu) |
+| **`FORCE ROW LEVEL SECURITY`** | Zwingt RLS auch dem Tabelleneigentümer auf (Zusatzschutz); die **primäre** Absicherung ist aber, dass die App-Rolle **nicht** Eigentümer ist. | `FORCE` als alleinige Absicherung |
+| **Vereinigungs-Policy** | Config-Sonderfall: Lesen erlaubt `<spalte> = current_tenant` **ODER** `= '__default__'`, Schreiben strikt nur `current_tenant` — hält die geteilte Vorlage sichtbar, ohne fremde Config zu zeigen. | naive `= current_tenant`-Policy (versteckt `__default__`) |
+| **`security_barrier`-View** | Vorgelagerte View über eine MatView mit fest eingebautem GUC-Filter; die App-Rolle liest **nur** die View, nie die rohe MatView (die selbst keine RLS tragen kann). | rohe MatView der App-Rolle freigeben |
+| **`security_invoker`-View** | Normale View (PG ≥ 15), die die Basistabellen-RLS unter der **abfragenden** Rolle auswertet statt unter dem View-Eigentümer. | View ohne `security_invoker` (läuft als Eigentümer ⇒ umgeht RLS) |
+| **Henne-Ei-Bootstrap-Split** | Trennung: Login→Mandant-Auflösung läuft auf der Infra-Verbindung (kein GUC setzbar, **bevor** der Mandant feststeht), Mandantendaten auf dem App-Rollen-Pool. | Verzeichnis + Tür über **eine** Verbindung |
+| **Gestaffelte Scharfschaltung** | Rollout je **Tabellengruppe** (`ENABLE`+`FORCE`+Gruppen-Smoke), nicht Big Bang — eine falsche Policy legt nicht alles gleichzeitig lahm. | „alle Tabellen in einer Migration scharf" |
+| **`DISABLE-RLS`-Rollback (diszipliniert)** | Notausstieg: **nur** Infra-Rolle, auditiert, **temporär**, erzeugt Remediation-Aufgabe, **kein** zweiter Mandant währenddessen. | `DISABLE RLS` als stiller Dauer-Bypass |
+| **n8n-Bypass-Korridor** | Bewusste Stufe-5-Grenze: n8n schreibt vorerst auf der Infra-/Bypass-Verbindung **außerhalb** des Backstops (Absicherung/Ablösung = Stufe 6) → **kein zweiter echter Kunde vor Stufe 6**. | Backstop als „systemweit dicht" verkaufen, solange n8n bypasst |
+
+Beziehungen: App-Rolle **verbindet** mandanten-bewusst, ist RLS-unterworfen · Mandanten-Tür **setzt** je Transaktion den GUC (`set_config`) · Policy **prüft** `tenant_id = current_setting(...)` (`USING`+`WITH CHECK`) ·
+fehlender GUC ⇒ **harter Fehler** (einarmig) · Infra-Verbindung **umgeht** RLS (`BYPASSRLS`) nur für Bootstrap/Migrationen/Refresh · `security_barrier`/`security_invoker`-View **dehnt** den Backstop auf (Mat)Views aus ·
+RLS (Stufe 5) **ist** der Laufzeit-Backstop unter App-Filter (Stufe 3) + Wächter · n8n **bleibt** bis Stufe 6 außerhalb.
+
+---
+
 ## Anbieter-Integration: `provider` & Vending Data Integration Layer *(neu)*
 
 > Nayax ist der **erste**, nicht der einzige Daten-Eingang. Stufe 0 nimmt nur die `provider`-Dimension mit;
@@ -355,6 +386,19 @@ Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
 > **Dev:** „Der Refill-Endpunkt schreibt doch eh nur über n8n — den kann ich offen lassen?"
 > **Domain Expert:** „Nein. Er ist ein **Webhook-Weiterleiter**: der Write ist Stufe 6, aber die **Autorisierung** ist Stufe 4 — sonst löst ein Mandant einen Refill auf einer fremden Maschine aus."
 
+## Beispiel-Dialog (RLS-Backstop / Stufe 5) *(neu)*
+
+> **Dev:** „Wir filtern doch schon überall nach `tenant_id` und haben den Wächter — wozu noch RLS?"
+> **Domain Expert:** „Weil beides App-Logik ist und Lücken hat — wir haben gerade zwei ungefilterte Reads gefunden (#141). Der **RLS-Backstop** greift in der DB, **selbst wenn** Filter und Wächter versagen."
+> **Dev:** „Dann setze ich den Mandanten einmal beim Verbinden per `SET`, das spart Arbeit."
+> **Domain Expert:** „Auf keinen Fall — bei einem Pool **klebt** das an der Verbindung und der nächste Request liest mit deinem Mandanten weiter. Nur **`set_config(..., $1, true)`**, transaktionslokal, in der Tür."
+> **Dev:** „Und wenn der Mandant mal nicht gesetzt ist — gibt's dann halt keine Zeilen?"
+> **Domain Expert:** „Nein, **einarmiges `current_setting`** ⇒ es **kracht laut**. Ein stilles Leer sieht aus wie ein legitim leeres Ergebnis — den Bypass würdest du nie bemerken."
+> **Dev:** „Schalte ich RLS dann einfach für alle Tabellen in einer Migration an?"
+> **Domain Expert:** „Nein — **gestaffelt pro Gruppe** mit Smoke-Test, sonst legt eine falsche Policy das ganze Dashboard lahm. Und `automatenlager_app` darf die Tabellen **nicht besitzen**, sonst umgeht sie RLS sowieso."
+> **Dev:** „Schreibt n8n dann auch durch RLS?"
+> **Domain Expert:** „Nein, **n8n-Bypass-Korridor**: n8n bleibt bis Stufe 6 außerhalb, damit `FORCE RLS` die Produktion nicht bricht. Genau deshalb: **kein zweiter echter Kunde vor Stufe 6**."
+
 ## Markierte Unklarheiten *(neu)*
 
 - **Slot-Zahl pro Automat** für die Latten-Ableitung (Umsatz-Norm ÷ Slot-Zahl): Quelle aus den
@@ -382,6 +426,11 @@ Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
   die `tenant_id` trägt und betroffene `warnings` mandanten-gebunden aufgelöst werden — in der Umsetzung bestätigen.
 - **Fehlercode „Schreiben ohne Mandant"** (Stufe 4): 403 vs. 500 für den fail-closed-werfenden Fall — in der Umsetzung
   festlegen; Empfehlung: konsistent zur bestehenden Taxonomie (403 bei fehlender Berechtigung, 503 bei technischem Fehler).
+- **Name der App-Rolle** (Stufe 5): `automatenlager_app` als Arbeitsname — finalen Rollennamen + Namenskonvention (z. B. zusätzliche `_readonly`-Rolle) in der Umsetzung festziehen.
+- **Read als eigene Transaktion pro Aufruf vs. gebündelt** (Stufe 5): jeder Read öffnet eine eigene `BEGIN READ ONLY`-Transaktion — Pool-Auslastung (`max: 5`) gegen `EXPLAIN`/Lasttest prüfen; Empfehlung: pro-Aufruf-Transaktion, Poolgröße bei Bedarf nachziehen.
+- **`security_invoker`-Verfügbarkeit** (Stufe 5): setzt PG ≥ 15 voraus — Mini-DB-Version vor dem Rollout explizit verifizieren (Deploy-Checkliste).
+- **n8n-DB-Rolle Pre-Flight** (Stufe 5): die **tatsächliche** Rolle, mit der n8n verbindet, vor `FORCE RLS` verifizieren und bewusst auf die `BYPASSRLS`-Infra-Verbindung legen — sonst brechen WF3/WF7-Writes.
+- **`tenant_id`-Index-Nutzung unter dem RLS-Prädikat** (Stufe 5): pro heißer Tabelle (`products`, `stock_batches`, `sales_transactions`, `slot_assignments`, `stock_movements`) gegen `EXPLAIN` gegenprüfen, statt den 0009-Index blind anzunehmen.
 
 ## Secret-Handling & Audit
 
