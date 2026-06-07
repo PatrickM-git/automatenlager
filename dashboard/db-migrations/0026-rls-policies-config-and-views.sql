@@ -55,19 +55,8 @@ CREATE POLICY tenant_isolation ON automatenlager.classification_settings
   USING (mandant_id = current_setting('automatenlager.current_tenant'))
   WITH CHECK (mandant_id = current_setting('automatenlager.current_tenant'));
 
--- ── 3) security_invoker auf gelesenen Views (Basistabellen-RLS greift) ────────
-ALTER VIEW automatenlager.v_warnings_open SET (security_invoker = true);
-ALTER VIEW automatenlager.v_slot_turnover SET (security_invoker = true);
-
--- ── 4) MatView mv_inventory_value_daily: security_barrier-View + Zugriff einengen
-CREATE OR REPLACE VIEW automatenlager.v_inventory_value_daily
-  WITH (security_barrier = true) AS
-  SELECT * FROM automatenlager.mv_inventory_value_daily
-   WHERE tenant_id = current_setting('automatenlager.current_tenant');
-GRANT SELECT ON automatenlager.v_inventory_value_daily TO automatenlager_app;
--- App-Tier verliert Direktzugriff auf die rohe MatView (liest nur die GUC-View).
-REVOKE ALL ON automatenlager.mv_inventory_value_daily FROM app_writer, app_reader;
-
--- ── 5) mv_db_per_* (keine App-Leser): App-Direktzugriff entziehen ─────────────
-REVOKE ALL ON automatenlager.mv_db_per_product_monthly FROM app_writer, app_reader;
-REVOKE ALL ON automatenlager.mv_db_per_slot_monthly    FROM app_writer, app_reader;
+-- HINWEIS: Die (Mat)View-Sicherung (security_invoker auf v_warnings_open/
+-- v_slot_turnover, die security_barrier-View v_inventory_value_daily + MatView-
+-- Zugriffsentzug) ist nach 0022 verschoben — sie ist INERT (aktiviert keine
+-- Tabellen-RLS) und MUSS vor dem Code-Deploy existieren (economics/assortment
+-- lesen v_inventory_value_daily), also vor der gestaffelten Scharfschaltung.

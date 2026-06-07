@@ -74,3 +74,26 @@ BEGIN
   END IF;
 END
 $$;
+
+-- ── 6) (Mat)View-Sicherung — INERT, aktiviert KEINE Tabellen-RLS ──────────────
+-- Bewusst hier (Rollen-Migration, vor der gestaffelten Scharfschaltung 0023-0026):
+-- diese Schritte sind harmlos, solange keine Tabellen-Policy greift, MUESSEN aber
+-- vor dem Code-Deploy existieren (economics.js/assortment-slots.js lesen die
+-- Security-View v_inventory_value_daily statt der rohen MatView).
+--
+-- security_invoker=true auf den gelesenen Views: erst wirksam, wenn die
+-- Basistabellen-RLS scharf ist (0023/0024) UND als App-Rolle gelesen wird.
+ALTER VIEW automatenlager.v_warnings_open SET (security_invoker = true);
+ALTER VIEW automatenlager.v_slot_turnover SET (security_invoker = true);
+
+-- MatView mv_inventory_value_daily kann selbst keine RLS tragen: vorgelagerte
+-- security_barrier-View mit GUC-Filter; App liest NUR diese View.
+CREATE OR REPLACE VIEW automatenlager.v_inventory_value_daily
+  WITH (security_barrier = true) AS
+  SELECT * FROM automatenlager.mv_inventory_value_daily
+   WHERE tenant_id = current_setting('automatenlager.current_tenant');
+GRANT SELECT ON automatenlager.v_inventory_value_daily TO automatenlager_app;
+-- App-Tier verliert Direktzugriff auf die rohen MatViews (liest nur die GUC-View).
+REVOKE ALL ON automatenlager.mv_inventory_value_daily   FROM app_writer, app_reader;
+REVOKE ALL ON automatenlager.mv_db_per_product_monthly  FROM app_writer, app_reader;
+REVOKE ALL ON automatenlager.mv_db_per_slot_monthly     FROM app_writer, app_reader;
