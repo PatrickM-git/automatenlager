@@ -11,7 +11,7 @@ const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = re
 const { buildAlertDigest, queryAlertDigestPg } = require('./lib/alert-digest.js');
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
 const { availableBatchStatusSqlList } = require('./lib/stock-status.js');
-const { validateWriteOff, canWriteOff, buildWriteOffAuditEntry, WRITE_OFF_STATUS } = require('./lib/write-off.js');
+const { validateWriteOff, buildWriteOffAuditEntry, writeOffBatchPg } = require('./lib/write-off.js'); // #138: writeOffBatchPg geht durch die Tür
 const { buildSlotChangePreview, validateSlotChange, buildSlotChangePayload, buildSlotChangeAuditEntry } = require('./lib/slot-change.js');
 const { buildProductOnboardingData, queryProductOnboardingPg } = require('./lib/product-onboarding.js');
 const { buildReportCsv, buildReportFilename } = require('./lib/reports.js');
@@ -30,6 +30,7 @@ const { queryEconomicsLivePg } = require('./lib/economics-live.js');
 const { resolveViewer, objectAccessAllowed, breakGlassDecision } = require('./lib/auth.js');
 const { createTenantDirectory } = require('./lib/tenant-directory.js');
 const { createTenantDb } = require('./lib/tenant-db.js');
+const { rejectBodyTenant } = require('./lib/write-guards.js');
 const { resolvePgUrl } = require('./lib/pg-url.js');
 const { runSchemaCheck } = require('./lib/db-schema.js');
 const { runStockCostCheck } = require('./lib/stock-cost-invariant.js');
@@ -321,6 +322,20 @@ function clean(value) {
   return String(value ?? '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+// Liest den Request-Body und parst ihn als JSON (leerer Body ⇒ {}). Wirft bei
+// ungültigem JSON, sodass der Aufrufer mit 400 antworten kann. (Der Name wurde am
+// slot-assign-inline/confirm-Endpunkt bereits verwendet, war aber nie definiert —
+// der Body kam dort immer als {} an [latenter Bug]; #133 zieht ihn nach, weil das
+// Autorisierungs-Tor die machine_id aus dem Body braucht.)
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk) => { data += chunk; });
+    req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(e); } });
+    req.on('error', reject);
+  });
+}
+
 function formatBerlinDateTime(date) {
   return new Intl.DateTimeFormat('de-DE', {
     timeZone: 'Europe/Berlin',
@@ -378,8 +393,10 @@ const tenantDirectory = buildTenantDirectory();
 // (Fundament) absichtlich von KEINEM Endpunkt konsumiert — es wird in diesem Slice
 // kein Lesepfad migriert. Steht für die Slices #123ff. bereit (fail-closed, siehe
 // lib/tenant-db.js). `null` ohne konfiguriertes PG (Dev/Test).
+// #135 (Stufe 4): Der Pool wird zusätzlich übergeben, damit der transaktionale
+// Schreib-Modus `db.tx` einen DEDIZIERTEN Client (BEGIN/COMMIT/ROLLBACK) holen kann.
 const tenantDb = sharedPgQuery
-  ? createTenantDb({ query: sharedPgQuery, log: (...a) => console.error('[tenant-db]', ...a) })
+  ? createTenantDb({ query: sharedPgQuery, pool: sharedPgPool, log: (...a) => console.error('[tenant-db]', ...a) })
   : null;
 
 // Initialer Snapshot (non-blocking, wie die übrigen Startup-Checks). Erfolg ⇒
@@ -388,10 +405,18 @@ async function initTenantDirectory() {
   if (!tenantDirectory) return;
   try {
     await tenantDirectory.init();
-    tenantDirectory.startAutoRefresh();
     console.log('[tenant-directory] bereit.');
   } catch (err) {
-    console.error('[tenant-directory] initialer Load fehlgeschlagen — fail-closed:', err && err.message);
+    // Fail-closed bleibt: isReady()===false ⇒ Lese-Endpunkte liefern 503 (kein leeres
+    // Dashboard, kein Default). Aber NICHT dauerhaft: der Auto-Refresh (finally) heilt
+    // selbst, sobald die DB wieder erreichbar ist — sonst bliebe das Verzeichnis nach
+    // einem Deploy-Fenster-Fehler (DB kurz unter Last) bis zum manuellen Container-
+    // Neustart unready (Owner-Aussperrung). refreshQuietly() setzt ready=true beim
+    // ersten erfolgreichen Tick.
+    console.error('[tenant-directory] initialer Load fehlgeschlagen — fail-closed; Auto-Refresh heilt selbst:', err && err.message);
+  } finally {
+    // #Härtung: Auto-Refresh IMMER starten (idempotent), auch nach Init-Fehler.
+    tenantDirectory.startAutoRefresh();
   }
 }
 
@@ -423,6 +448,38 @@ async function requireMachineAccess(viewer, machineKey, res, event) {
     return false;
   }
   return requireObjectAccess(viewer, objectTenantId, res, event);
+}
+
+// #134 (Stufe 4, IDOR — NICHT-Maschinen-Parent): Korrektur-Cases sind KEINE Tabelle,
+// sondern konstruiert (proposal_/unknown_/warning_) und werden tenant-gefiltert über
+// queryCorrectionCasesPg gelesen. Das Tor prüft, dass die übergebene case_id in der
+// tenant-gefilterten Case-Liste des Viewers liegt (exakt die Komposition des
+// Lesepfads). Taxonomie:
+//   * kein PG konfiguriert ⇒ Tor INAKTIV (Dev/Test: es existieren gar keine Cases;
+//     Produktion hat IMMER PG, dort läuft das Tor stets). Asymmetrie zu
+//     requireMachineAccess bewusst: eine machine_id ist immer client-geliefert und
+//     muss fail-closed aufgelöst werden; eine Case-Mitgliedschaft ohne Datenbasis
+//     ist gegenstandslos.
+//   * PG da, Verzeichnis/DB nicht bereit / Lookup-Fehler ⇒ 503 (fail-closed, kein Default)
+//   * case_id nicht in der Mandanten-Case-Liste ⇒ 404 (kein Existenz-Leak) + Audit
+// Liefert true (Zugriff erlaubt / inaktiv) oder false (Antwort bereits gesendet).
+async function requireCaseAccess(viewer, caseId, res, event) {
+  if (!tenantDb) return true; // kein PG ⇒ Dev/Test, Tor inaktiv (Produktion hat immer PG)
+  if (!tenantReadReady(res)) return false; // PG da, aber nicht bereit ⇒ 503
+  let cases;
+  try {
+    ({ cases } = buildCorrectionCases(await queryCorrectionCasesPg(tenantDb, viewer.tenantId)));
+  } catch (err) {
+    auditDenied(viewer, event, { caseId, reason: 'case_lookup_failed' });
+    sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: 'Fall-Auflösung fehlgeschlagen. Bitte später erneut.' } });
+    return false;
+  }
+  if (!cases.some((c) => c.case_id === caseId)) {
+    auditDenied(viewer, event, { caseId });
+    sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: 'Fall nicht gefunden.' } });
+    return false;
+  }
+  return true;
 }
 
 // #123 (Stufe 3): technische Bereitschaft der mandanten-getrennten Lesepfade.
@@ -2226,11 +2283,17 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON im Request-Body.' } });
         return;
       }
+      // #133 (Stufe 4): Mandant kommt NUR aus dem Viewer — tenant_id/mandant_id im Body ⇒ 400 + Audit.
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
       const { machine_id, mdb_code, product_id, qty, product_name, notes } = body || {};
       if (!machine_id || !mdb_code || !product_id || !qty) {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: 'machine_id, mdb_code, product_id, qty erforderlich.' } });
         return;
       }
+      // #133 (Stufe 4, IDOR): Automat muss real zum Mandanten des Viewers gehören.
+      // Nach der Pflichtfeld-Validierung (malformte Requests ⇒ 400, kein Lookup);
+      // fremd/unbekannt ⇒ 404 + Audit, BEVOR der n8n-Webhook ausgelöst wird.
+      if (!(await requireMachineAccess(viewer, machine_id, res, 'idor:refill'))) return;
       const cfg = dashboardConfig();
       const n8nBase = cfg.n8nBaseUrl;
       const qs = new URLSearchParams({
@@ -2295,70 +2358,40 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON im Request-Body.' } });
         return;
       }
+      // #138: Mandant kommt NUR aus dem Viewer — tenant_id/mandant_id im Body ⇒ 400 + Audit.
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
       const check = validateWriteOff(body);
       if (!check.valid) {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: check.errors.map((e) => e.message).join(' ') } });
         return;
       }
-      const pgUrl = dashboardV2PgUrl();
-      if (!pgUrl) {
+      if (!tenantDb) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
       const expectedRemaining = body && body.expected_remaining_qty;
-      const { Client } = require('pg');
-      const client = new Client({ connectionString: pgUrl });
-      let outcome = null;
+      let outcome;
       try {
-        await client.connect();
-        await client.query('BEGIN');
-        const sel = await client.query(
-          `SELECT sb.batch_id, sb.product_id, sb.remaining_qty, sb.status
-             FROM automatenlager.stock_batches sb
-            WHERE sb.batch_key = $1
-            FOR UPDATE`,
-          [check.batch_key],
-        );
-        const batch = sel.rows[0] || null;
-        const verdict = canWriteOff(batch, expectedRemaining);
-        if (!verdict.ok) {
-          await client.query('ROLLBACK');
-          const statusCode = verdict.code === 'NOT_FOUND' ? 404 : 409;
+        // #138: SELECT … FOR UPDATE + UPDATE (stock_batches/warnings) atomar DURCH die
+        // Tür (tenant_id = $1). Eine fremde Charge ist im tenant-gefilterten SELECT
+        // unsichtbar ⇒ NOT_FOUND, keine Änderung an fremden Daten.
+        outcome = await writeOffBatchPg(tenantDb, viewer.tenantId, check.batch_key, expectedRemaining);
+      } catch (err) {
+        if (['NOT_FOUND', 'ALREADY_WRITTEN_OFF', 'EMPTY', 'DRIFT'].includes(err.code)) {
+          const statusCode = err.code === 'NOT_FOUND' ? 404 : 409;
           const messages = {
             NOT_FOUND: 'Charge nicht gefunden.',
             ALREADY_WRITTEN_OFF: 'Charge ist bereits ausgebucht.',
             EMPTY: 'Charge hat keinen Bestand mehr.',
-            DRIFT: `Bestand hat sich geändert (jetzt ${verdict.remaining_qty}). Bitte neu laden.`,
+            DRIFT: `Bestand hat sich geändert (jetzt ${err.verdict && err.verdict.remaining_qty}). Bitte neu laden.`,
           };
-          sendJson(res, statusCode, { ok: false, error: { code: verdict.code, message: messages[verdict.code] || 'Ausbuchen nicht möglich.' } });
+          sendJson(res, statusCode, { ok: false, error: { code: err.code, message: messages[err.code] || 'Ausbuchen nicht möglich.' } });
           return;
         }
-        const writtenOff = verdict.remaining_qty;
-        await client.query(
-          `UPDATE automatenlager.stock_batches sb
-              SET status = $2, remaining_qty = 0, updated_at = now()
-            WHERE sb.batch_id = $1`,
-          [batch.batch_id, WRITE_OFF_STATUS],
-        );
-        // Offene Warnungen für dieses Produkt auflösen (MHD_NEAR, LOW_STOCK, LOW_BATCH).
-        // Verhindert, dass nach dem Ausbuchen veraltete Warnungen im Cockpit hängen bleiben.
-        await client.query(
-          `UPDATE automatenlager.warnings
-              SET resolved = TRUE, resolved_at = now(), resolved_by = 'write-off'
-            WHERE product_id = $1
-              AND resolved = FALSE
-              AND warning_type IN ('MHD_NEAR', 'LOW_STOCK', 'LOW_BATCH')`,
-          [batch.product_id],
-        );
-        await client.query('COMMIT');
-        outcome = { ok: true, product_id: Number(batch.product_id) || null, written_off_qty: writtenOff, message: `${writtenOff} Stk. ausgebucht (${check.reason}).` };
-      } catch (err) {
-        try { await client.query('ROLLBACK'); } catch { /* ignore */ }
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
         return;
-      } finally {
-        await client.end();
       }
+      outcome.message = `${outcome.written_off_qty} Stk. ausgebucht (${check.reason}).`;
       const auditEntry = buildWriteOffAuditEntry(viewer, check, outcome);
       const auditPath = path.join(__dirname, 'logs', 'writeoff-actions.jsonl');
       try {
@@ -3185,19 +3218,15 @@ const server = http.createServer(async (req, res) => {
       }
       const machineId = body && body.machineId != null && body.machineId !== '' ? Number(body.machineId) : null;
       const value = body && body.value !== undefined ? body.value : null;
-      const { Client } = require('pg');
-      const client = new Client({ connectionString: dashboardV2PgUrl(), connectionTimeoutMillis: 6000 });
-      await client.connect();
+      if (!tenantDb) { sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } }); return; }
       try {
-        await setThreshold(client, DEFAULT_MANDANT, machineId, key, value);
+        await setThreshold(tenantDb, DEFAULT_MANDANT, machineId, key, value); // #137: durch die Tür
         auditAction(viewer, 'threshold_write', { key, machineId: machineId ?? null }, 'ok');
-        const thresholds = await getThresholds(client, DEFAULT_MANDANT, machineId);
+        const thresholds = await getThresholds(tenantDb, DEFAULT_MANDANT, machineId);
         sendJson(res, 200, { ok: true, thresholds });
       } catch (err) {
         const isValidation = err.message.startsWith('Unbekannter') || err.message.includes('muss eine Zahl');
         sendJson(res, isValidation ? 400 : 503, { ok: false, error: { code: isValidation ? 'INVALID_VALUE' : 'PG_ERROR', message: err.message } });
-      } finally {
-        await client.end();
       }
       return;
     }
@@ -3214,23 +3243,19 @@ const server = http.createServer(async (req, res) => {
         : null;
       const machineId = parsed.query.machineId;
       const mid = machineId != null && machineId !== '' ? Number(machineId) : null;
-      const { Client } = require('pg');
-      const client = new Client({ connectionString: dashboardV2PgUrl(), connectionTimeoutMillis: 6000 });
-      await client.connect();
+      if (!tenantDb) { sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } }); return; }
       try {
         if (key) {
-          await resetThreshold(client, DEFAULT_MANDANT, mid, key);
+          await resetThreshold(tenantDb, DEFAULT_MANDANT, mid, key); // #137: durch die Tür
           auditAction(viewer, 'threshold_reset', { key, machineId: mid ?? null }, 'ok');
         } else {
-          await resetAllThresholds(client, DEFAULT_MANDANT, mid);
+          await resetAllThresholds(tenantDb, DEFAULT_MANDANT, mid); // #137: durch die Tür
           auditAction(viewer, 'threshold_reset_all', { machineId: mid ?? null }, 'ok');
         }
-        const thresholds = await getThresholds(client, DEFAULT_MANDANT, mid);
+        const thresholds = await getThresholds(tenantDb, DEFAULT_MANDANT, mid);
         sendJson(res, 200, { ok: true, thresholds });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
-      } finally {
-        await client.end();
       }
       return;
     }
@@ -3430,7 +3455,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const raw = JSON.parse(body);
         const profile = buildLocationProfile(raw);
-        const saved = await upsertLocationPg(pgUrl, profile);
+        const saved = await upsertLocationPg(tenantDb, viewer.tenantId, profile); // #135: durch die Tür
         sendJson(res, 200, { ok: true, data: saved });
       } catch (err) {
         if (err.message.match(/name|status/i)) {
@@ -3479,7 +3504,7 @@ const server = http.createServer(async (req, res) => {
           sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
           return;
         }
-        const saved = await upsertMachineProfilePg(pgUrl, profile);
+        const saved = await upsertMachineProfilePg(tenantDb, viewer.tenantId, profile); // #136: durch die Tür
         sendJson(res, 200, { ok: true, data: saved });
       } catch (err) {
         if (err.message.includes('machine_id')) {
@@ -3507,9 +3532,13 @@ const server = http.createServer(async (req, res) => {
       }
       try {
         const payload = buildMachineCreatePayload(JSON.parse(body || '{}'));
-        const saved = await createMachinePg(pgUrl, payload);
+        const saved = await createMachinePg(tenantDb, viewer.tenantId, payload); // #136: durch die Tür (Parent-Standort transaktional geprüft)
         sendJson(res, 200, { ok: true, data: saved });
       } catch (err) {
+        if (err.code === 'NOT_FOUND') { // #136: fremder/unbekannter Standort ⇒ 404, kein Existenz-Leak
+          sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: err.message } });
+          return;
+        }
         const isValidation = /erforderlich|existiert nicht|Standort/i.test(err.message);
         sendJson(res, isValidation ? 400 : 503, {
           ok: false,
@@ -3533,7 +3562,7 @@ const server = http.createServer(async (req, res) => {
       if (!pgUrl) { sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } }); return; }
       try {
         const raw = JSON.parse(body || '{}');
-        const saved = await setMachineActivePg(pgUrl, raw.machine_key, raw.active === true || raw.active === 'true');
+        const saved = await setMachineActivePg(tenantDb, viewer.tenantId, raw.machine_key, raw.active === true || raw.active === 'true'); // #136: durch die Tür
         sendJson(res, 200, { ok: true, data: saved });
       } catch (err) {
         const code = err.code === 'NOT_FOUND' ? 404 : (/machine_key/i.test(err.message) ? 400 : 503);
@@ -3556,7 +3585,7 @@ const server = http.createServer(async (req, res) => {
       if (!pgUrl) { sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } }); return; }
       try {
         const raw = JSON.parse(body || '{}');
-        const result = await deleteLocationPg(pgUrl, raw.location_key);
+        const result = await deleteLocationPg(tenantDb, viewer.tenantId, raw.location_key); // #135: durch die Tür
         sendJson(res, 200, { ok: true, data: result });
       } catch (err) {
         const code = err.code === 'LOCATION_NOT_EMPTY' ? 409
@@ -3654,12 +3683,17 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON.' } });
         return;
       }
+      // #134 (Stufe 4): Mandant kommt NUR aus dem Viewer — tenant_id/mandant_id im Body ⇒ 400 + Audit.
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
       const { case_id, case_type, machine_id, mdb_code, old_product_id, slot_assignment_id, confirmed_product_id } = body || {};
       const validation = validateCorrectionAction({ confirmed_product_id });
       if (!validation.valid) {
         sendJson(res, 400, { ok: false, error: { code: 'VALIDATION_ERROR', message: validation.errors.map((e) => e.message).join(' '), errors: validation.errors } });
         return;
       }
+      // #134 (Stufe 4, IDOR — Case-Parent): case_id muss in der tenant-gefilterten
+      // Case-Liste des Viewers liegen; fremd/unbekannt ⇒ 404 + Audit, BEVOR n8n läuft.
+      if (!(await requireCaseAccess(viewer, case_id, res, 'idor:correction-action'))) return;
       const correctionCase = { case_id, case_type, machine_id, mdb_code, product_id: old_product_id, slot_assignment_id };
       const payload = buildCorrectionActionPayload(correctionCase, { confirmed_product_id });
       const webhookUrl = process.env.CORRECTION_ACTION_WEBHOOK_URL;
@@ -3863,10 +3897,24 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON.' } });
         return;
       }
+      // #134 (Stufe 4): Mandant kommt NUR aus dem Viewer — tenant_id/mandant_id im Body ⇒ 400 + Audit.
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
       const { product_key, case_id, affected_tx_count } = body || {};
       const validation = validateOnboardingStart({ product_key });
       if (!validation.valid) {
         sendJson(res, 400, { ok: false, error: { code: 'VALIDATION_ERROR', message: validation.errors.map((e) => e.message).join(' '), errors: validation.errors } });
+        return;
+      }
+      // #134 (Stufe 4, IDOR): Mit case_id (= unknown_<product_key>) ⇒ Mitgliedschaftsprüfung
+      // in der tenant-gefilterten Case-Liste (fremd ⇒ 404). Ohne case_id gibt es KEIN
+      // adressierbares fremdes Objekt (product_key ist ein noch unbekanntes Nayax-Label,
+      // nicht in products) ⇒ Minimum: ein gesetzter Viewer-Mandant; der Mandant wird
+      // ausschließlich aus dem Viewer bestimmt.
+      if (case_id) {
+        if (!(await requireCaseAccess(viewer, case_id, res, 'idor:onboarding'))) return;
+      } else if (!viewer.tenantId) {
+        auditDenied(viewer, 'idor:onboarding', { reason: 'no_tenant_context' });
+        sendJson(res, 403, { ok: false, error: { code: 'NO_TENANT_CONTEXT', message: 'Kein Mandanten-Kontext für das Onboarding.' } });
         return;
       }
       const unknownCase = { case_id: case_id || `unknown_${product_key}`, product_key };
@@ -3976,6 +4024,8 @@ const server = http.createServer(async (req, res) => {
       }
       let body;
       try { body = await readJsonBody(req); } catch { body = {}; }
+      // #133 (Stufe 4): Mandant kommt NUR aus dem Viewer — tenant_id/mandant_id im Body ⇒ 400 + Audit.
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
       const { product_id, product_key, machine_id, mdb_code, qty, start_date } = body || {};
 
       const productRow = { product_id: product_id ?? null, product_key: product_key ?? null, name: '' };
@@ -3987,6 +4037,9 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: missingFields.map((e) => e.message).join(' '), fields: missingFields } });
         return;
       }
+      // #133 (Stufe 4, IDOR): Automat muss real zum Mandanten des Viewers gehören.
+      // Nach der Validierung; fremd/unbekannt ⇒ 404 + Audit, BEVOR der n8n-Webhook läuft.
+      if (!(await requireMachineAccess(viewer, machine_id, res, 'idor:slot-assign-inline'))) return;
 
       const payload  = buildSlotAssignPayload(productRow, { machine_id, mdb_code, qty, start_date });
       const webhookUrl = process.env.SLOT_ASSIGN_INLINE_WEBHOOK_URL || '';

@@ -82,14 +82,48 @@ oder ungefilterte Read außerhalb der Datei-Allowlist bricht die Suite/CI
 (`dashboard-query-filter-guard.test.js`).
 
 Die verbleibende **Datei-Allowlist** (nicht Tabellen — diese ist die Liste der `lib/*.js`
-mit noch rohem pg) hat zwei begründete Klassen:
+mit noch rohem pg) hatte nach Stufe 3 zwei Klassen; **nach Stufe 4 bleibt nur noch eine:**
 
 | Klasse | Dateien | Begründung |
 | --- | --- | --- |
 | **Infrastruktur** | `db-schema.js`, `stock-cost-invariant.js` | Kein Mandanten-Datenpfad: lesen `information_schema` bzw. prüfen Invarianten (System-Metadaten). Dauerhafte Ausnahme. |
-| **Stufe-4-Schreibpfade** | `location-profiles.js`, `machine-create.js`, `machine-profiles.js`, `settings-thresholds.js` | Ihre **Lesepfade** sind durch die Tür migriert; nur ihre **Schreibfunktionen** (upsert/create/delete/setThreshold) tragen noch rohes pg. Werden in **Stufe 4** (Schreib-Isolation) durch die Tür geführt und in **Stufe 5** (RLS) abgesichert. |
 
-**Ehrliche Garantie-Ebene:** Die Stufe-3-Laufzeitsicherung ist der **Wächter im CI**
-(kein neuer ungesicherter Read kommt rein), **nicht** die Tür zur Laufzeit. Ein Leck,
-das am Wächter vorbeikäme, fängt erst **RLS (Stufe 5)** zur Laufzeit ab — bewusst
-akzeptierter Restrisiko-Korridor; ein zweiter realer Kunde erst nach Stufe 3+4+5.
+## Endzustand nach Stufe 4 (#131–#139) — Schreibpfade durch die Tür
+
+Stufe 4 hat die in Stufe 3 bewusst belassenen **Schreibpfade** durch die Mandanten-Tür
+geführt. Die frühere Klasse „Stufe-4-Schreibpfade" der Datei-Allowlist
+(`location-profiles.js`, `machine-create.js`, `machine-profiles.js`,
+`settings-thresholds.js`) ist damit **leer** — alle vier schreiben jetzt über
+`db.write()`/`db.tx` (Mandant als `$1`). Die finale `lib/`-Allowlist ist **nur noch
+Infrastruktur** (`db-schema.js`, `stock-cost-invariant.js`); `STUFE4_WRITE_ALLOWLIST = []`
+im Guard-Test. Der Wächter bleibt damit für `lib/`-Schreibpfade **build-blocking**.
+
+- **Tür-Schreibmodus:** `db.write()` ist **fail-closed-werfend** (kein Mandant ⇒ Fehler,
+  nicht stilles `{rowCount:0}`); `db.read()` bleibt fail-closed-**leer**. Der
+  transaktionale Modus `db.tx(tenant, fn)` führt Parent-Prüfung **und** Schreibung atomar
+  auf einem Client aus (TOCTOU-Schutz) — der vorbereitete, in Stufe 4 **inerte** Ort für
+  den Stufe-5-RLS-Haken (`SET LOCAL automatenlager.current_tenant`).
+- **Autorisierungs-Tor** an allen schreib-auslösenden Webhook-Endpunkten
+  (`requireMachineAccess` für refill/slot-assign-inline; Case-Mitgliedschaft für
+  correction-action/onboarding). **`tenant_id`/`mandant_id` im Body ⇒ 400 + Audit.**
+- **Break-Glass:** der zentrale Methodenriegel blockt jeden Schreib-/Trigger-Endpunkt
+  unter aktiver Support-Sitzung (403 `SUPPORT_SESSION_READ_ONLY`).
+- **DDL:** `locations`/`machines`/`machine_profiles` mandantengetrennte Uniques
+  (`0020`), tenant-skopierter `machine_profiles`-Trigger (`0021`).
+
+### Residual: roher pg in `server.js` (bewusst, dokumentiert)
+
+`server.js` erzeugt den geteilten `pg.Pool` (das **Backing der Tür**) und enthält noch
+einzelne rohe `new Client` in **Lese**-Endpunkten (Stufe-3-Restposten, z. B. Nayax-/
+Report-Reads). Der `lib/`-Guard scannt `server.js` **nicht** build-blocking (der Guard ist
+**strukturell** und kann eine rohe Schreibung nicht von einem rohen Read im selben File
+unterscheiden — die SPEC verzichtet bewusst auf einen SQL-Parser). Der frühere **inline-
+Schreibpfad** (write-off) ist in Stufe 4 (#138) in eine durch die Tür gehende Lib
+ausgelagert; in `server.js` verbleibt **kein** roher Schreibpfad. Eine künftig versehentlich
+**inline** in `server.js` eingefügte Rohschreibung wäre der bewusst akzeptierte Rest­risiko-
+Korridor — abgefangen zur Laufzeit erst durch **RLS (Stufe 5)**.
+
+**Ehrliche Garantie-Ebene:** Die Stufe-3/4-Laufzeitsicherung ist die **Tür + das
+Autorisierungs-Tor + der Wächter im CI**, **nicht** ein SQL-prüfender Parser. Ein Leck,
+das am Wächter vorbeikäme, fängt erst **RLS (Stufe 5)** ab — bewusst akzeptierter
+Restrisiko-Korridor; **ein zweiter realer Kunde erst nach Stufe 3+4+5.**

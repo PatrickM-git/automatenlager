@@ -50,28 +50,27 @@ async function queryMachineProfilesPg(db, tenant) {
   return res.rows.map((row) => ({ ...row, label: buildMachineLabel(row) }));
 }
 
-async function upsertMachineProfilePg(pgUrl, profileData) {
-  const { Client } = require('pg');
-  const client = new Client({ connectionString: pgUrl });
-  await client.connect();
-  try {
-    const { machine_id, area, type, position, nickname } = profileData;
-    const res = await client.query(
-      `INSERT INTO automatenlager.machine_profiles (machine_id, area, type, position, nickname)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (machine_id) DO UPDATE SET
+// #136 (Stufe 4): durch die Mandanten-Tür (Mandant als $1; eigene Parameter ab $2).
+// ON CONFLICT-Ziel mandantengetrennt (tenant_id, machine_id) — das Profil eines
+// machine_id ist je Mandant getrennt, kein Cross-Tenant-Überschreiben.
+async function upsertMachineProfilePg(db, tenant, profileData) {
+  const { machine_id, area, type, position, nickname } = profileData;
+  const res = await db.write({
+    tenant,
+    tables: ['machine_profiles'],
+    text:
+      `INSERT INTO automatenlager.machine_profiles (tenant_id, machine_id, area, type, position, nickname)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (tenant_id, machine_id) DO UPDATE SET
          area       = EXCLUDED.area,
          type       = EXCLUDED.type,
          position   = EXCLUDED.position,
          nickname   = EXCLUDED.nickname,
          updated_at = NOW()
        RETURNING *`,
-      [machine_id, area ?? null, type ?? null, position ?? null, nickname ?? null]
-    );
-    return { ...res.rows[0], label: buildMachineLabel(res.rows[0]) };
-  } finally {
-    await client.end();
-  }
+    params: [machine_id, area ?? null, type ?? null, position ?? null, nickname ?? null],
+  });
+  return { ...res.rows[0], label: buildMachineLabel(res.rows[0]) };
 }
 
 module.exports = {

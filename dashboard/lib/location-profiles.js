@@ -97,11 +97,6 @@ const LOCATIONS_SELECT_SQL = `
   ORDER BY l.name
 `;
 
-function defaultClientFactory(pgUrl) {
-  const { Client } = require('pg');
-  return new Client({ connectionString: pgUrl });
-}
-
 // Wandelt eine DB-Zeile (aus SELECT oder INSERT ... RETURNING *) in das
 // Domänen-Profil, das buildLocationComparison und das Frontend erwarten.
 function mapLocationRow(row) {
@@ -141,38 +136,43 @@ function buildLocationDeleteGuard(machineCount) {
   return { allowed: true, reason: '' };
 }
 
-async function deleteLocationPg(pgUrl, locationKey, clientFactory) {
+// #135 (Stufe 4): durch die Mandanten-Tür, in EINER Transaktion (db.tx). Die
+// Belegungs-Prüfung (Automaten am Standort) und das DELETE laufen atomar auf einem
+// Client — kein TOCTOU-Fenster, in dem zwischen Prüfung und Löschung ein Automat
+// hinzukäme. Beides mandantengebunden (tenant_id = $1): es werden nur eigene
+// Maschinen gezählt und nur eigene Standorte gelöscht.
+async function deleteLocationPg(db, tenant, locationKey) {
   const key = String(locationKey || '').trim();
   if (!key) throw new Error('location_key ist erforderlich.');
-  const client = (clientFactory || defaultClientFactory)(pgUrl);
-  await client.connect();
-  try {
-    const cnt = await client.query(
-      `SELECT count(*)::int AS n
-         FROM automatenlager.machines m
-         JOIN automatenlager.locations l ON l.location_id = m.location_id
-        WHERE l.location_key = $1`,
-      [key],
-    );
+  return db.tx(tenant, async (door) => {
+    const cnt = await door.read({
+      tables: ['machines', 'locations'],
+      text:
+        `SELECT count(*)::int AS n
+           FROM automatenlager.machines m
+           JOIN automatenlager.locations l
+             ON l.location_id = m.location_id AND l.tenant_id = m.tenant_id
+          WHERE l.tenant_id = $1 AND l.location_key = $2`,
+      params: [key],
+    });
     const guard = buildLocationDeleteGuard(cnt.rows[0] ? cnt.rows[0].n : 0);
     if (!guard.allowed) {
       const err = new Error(guard.reason);
       err.code = 'LOCATION_NOT_EMPTY';
       throw err;
     }
-    const res = await client.query(
-      `DELETE FROM automatenlager.locations WHERE location_key = $1 RETURNING location_id`,
-      [key],
-    );
+    const res = await door.write({
+      tables: ['locations'],
+      text: `DELETE FROM automatenlager.locations WHERE tenant_id = $1 AND location_key = $2 RETURNING location_id`,
+      params: [key],
+    });
     if (res.rowCount === 0) {
       const err = new Error(`Standort "${key}" nicht gefunden.`);
       err.code = 'NOT_FOUND';
       throw err;
     }
     return { deleted: key };
-  } finally {
-    await client.end();
-  }
+  });
 }
 
 function slugifyLocationKey(name) {
@@ -199,34 +199,35 @@ async function queryLocationsPg(db, tenant) {
   return res.rows.map(mapLocationRow);
 }
 
-async function upsertLocationPg(pgUrl, profileData, clientFactory) {
-  const client = (clientFactory || defaultClientFactory)(pgUrl);
-  await client.connect();
-  try {
-    const { name, notes } = profileData;
-    const targetGroup = profileData.target_group ?? null;
-    const locationKey = profileData.location_key && String(profileData.location_key).trim()
-      ? String(profileData.location_key).trim()
-      : slugifyLocationKey(name);
-    const locationType = profileData.location_type && String(profileData.location_type).trim()
-      ? String(profileData.location_type).trim()
-      : 'sonstige';
-    const res = await client.query(
-      `INSERT INTO automatenlager.locations (location_key, name, location_type, customer_group, notes)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (location_key) DO UPDATE SET
+// #135 (Stufe 4): durch die Mandanten-Tür (Mandant als $1, fail-closed-werfend).
+// ON CONFLICT-Ziel ist jetzt (tenant_id, location_key) — Constraint aus #132 —, sodass
+// gleicher location_key bei zwei Mandanten zwei getrennte Zeilen ergibt und ein Upsert
+// nie die Zeile eines fremden Mandanten überschreibt.
+async function upsertLocationPg(db, tenant, profileData) {
+  const { name, notes } = profileData;
+  const targetGroup = profileData.target_group ?? null;
+  const locationKey = profileData.location_key && String(profileData.location_key).trim()
+    ? String(profileData.location_key).trim()
+    : slugifyLocationKey(name);
+  const locationType = profileData.location_type && String(profileData.location_type).trim()
+    ? String(profileData.location_type).trim()
+    : 'sonstige';
+  const res = await db.write({
+    tenant,
+    tables: ['locations'],
+    text:
+      `INSERT INTO automatenlager.locations (tenant_id, location_key, name, location_type, customer_group, notes)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (tenant_id, location_key) DO UPDATE SET
          name           = EXCLUDED.name,
          location_type  = EXCLUDED.location_type,
          customer_group = EXCLUDED.customer_group,
          notes          = EXCLUDED.notes,
          updated_at     = NOW()
        RETURNING *`,
-      [locationKey, name, locationType, targetGroup, notes ?? null]
-    );
-    return mapLocationRow(res.rows[0]);
-  } finally {
-    await client.end();
-  }
+    params: [locationKey, name, locationType, targetGroup, notes ?? null],
+  });
+  return mapLocationRow(res.rows[0]);
 }
 
 function round2(n) { return Math.round(n * 100) / 100; }

@@ -129,6 +129,16 @@ Read-Only guest access (Default-Deny seit #27, `dashboard/lib/auth.js` → `reso
 
 ## Current Next Step
 
+**Umgesetzt (2026-06-07) — Mandantenfähigkeit STUFE 4 „Schreib-Isolation", Issues #131–#139 KOMPLETT (Code):**
+- Branch `feat/write-isolation-stufe-4` (9 Commits), Suite **1056/1056 grün** (live gegen die Mini-DB im #94-Sandbox-Harness, ROLLBACK). Details: `HANDOVER.md`. **⚠️ AUSSTEHEND:** PR mergen + Mini-Deploy mit DDL **0020 UND 0021** (vor Code, idempotent) + Container-Restart + **Live-Smoke** — erst danach „erledigt".
+- SPEC: `docs/specs/multi-tenant-write-isolation-stufe-4-v1.md`. Basiert auf echter Code-Analyse (nicht Doku-Annahmen).
+- **Leitprinzip:** Autorisierung (→ künftige Render-Schicht) und Datenzugriff (→ Supabase + RLS Stufe 5) als ZWEI getrennte, cloud-agnostische Schichten. Stufe 4 baut nur Arbeit, die in jeder Zukunft (Cloudflare/Render/Supabase) gebraucht wird.
+- **Scope (11 Punkte, gegen Code verifiziert):** 5 direkte DB-Schreiber durch die Tür (write-off [war übersehen], location-profiles, machine-create, machine-profiles, settings-thresholds) + 6 schreib-auslösende Webhook-Endpunkte mit Autorisierungs-Tor (slot-change/nayax = schon da; refill/slot-assign-inline/correction-action/onboarding = neu). **Parent-Matrix:** correction→`case_id`, onboarding→`product_key` (NICHT Maschine!).
+- **Kern-Entscheidungen:** `tenant-db.js` `write()` wird fail-closed-**werfend** (read bleibt leer); **transaktionaler Schreib-Modus** `db.tx` (Parent-Prüfung + Write atomar = TOCTOU-Schutz + RLS-Steckplatz Stufe 5); `tenant_id` im Body → **400 + Audit**; kleine **DDL-Migration VOR Code** (Unique-Constraints locations+machines um `tenant_id`, `NULLS NOT DISTINCT`); #107-Wächter **strukturell** auf Schreibpfade erweitert (kein SQL-Parser), build-blocking im Endzustand.
+- **Rollout:** Slice 0 Fundament → Slice 1 DDL → Slice 2 Webhook-Tore (schneller Gewinn) → Slice 3 direkte Schreiber (einfach→komplex) → Slice 4 Scharfschaltung + Live-Smoke.
+- **Abgrenzung:** RLS-Zünden = Stufe 5; n8n-Schreibpfade = Stufe 6; per-Mandant-Config = Stufe 6; UI = Stufe 8. **Kein zweiter realer Kunde vor Stufe 3+4+5.**
+- **Nächste Schritte:** (1) PR mergen (#131–#139) + Mini-Deploy (DDL 0020+0021 vor Code) + Live-Smoke; (2) **Stufe 5 (RLS)** — den inerten `SET LOCAL`-Haken in `db.tx` zünden (unumgehbarer Backstop).
+
 **Umgesetzt (2026-06-07) — Mandantenfähigkeit STUFE 3 „Query-Filter" (Lese-Isolation), Issues #122–#129 KOMPLETT (Code):**
 - Branch `feat/query-filter-stufe-3` (8 Commits), Suite **1003/1003 grün** (live gegen die Mini-DB im #94-Sandbox-Harness, ROLLBACK). SPEC: `docs/specs/multi-tenant-query-filter-stufe-3-v1.md`. Details: `HANDOVER.md`.
 - **Mandanten-Tür** `lib/tenant-db.js` (fail-closed, Mandant als `$1`, explizite Zieltabellen, `read`/`write`/`forViewer`/`asDoor`, Stufe-5-Haken inert) als EINZIGE Lese-Zugriffsschicht über geteiltem Pool. **#107-Wächter** `lib/query-filter-guard.js` strukturell + **build-blocking-Endzustand**; enge Global-Allowlist (nur Verzeichnis). Doku: `docs/security/query-filter-guard-allowlist.md`. **acme/globex-Fixtures** + `doorForClient` + Advisory-Lock (DDL-vs-DML-Deadlock-Schutz).

@@ -13,20 +13,11 @@
  */
 
 const { DEFAULT_CONFIG } = require('./category-config.js');
-const { asDoor } = require('./tenant-db.js'); // #125: getThresholds tür-fähig (No-Bypass)
+const { asDoor } = require('./tenant-db.js'); // #125/#137: tür-fähig (No-Bypass)
 
-const CREATE_TABLE_SQL = `
-  CREATE TABLE IF NOT EXISTS automatenlager.settings_thresholds (
-    tenant_id   TEXT        NOT NULL DEFAULT '__default__',
-    machine_id  INTEGER     NULL
-      REFERENCES automatenlager.machines(machine_id) ON DELETE CASCADE,
-    key         TEXT        NOT NULL,
-    value       JSONB       NOT NULL,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT settings_thresholds_unique
-      UNIQUE NULLS NOT DISTINCT (tenant_id, machine_id, key)
-  )
-`;
+// Die Tabelle settings_thresholds existiert via Migration 0002 mit
+// CONSTRAINT settings_thresholds_unique UNIQUE NULLS NOT DISTINCT (tenant_id, machine_id, key)
+// — bereits mandantensauber (Vorbild der Stufe-4-DDL). Kein Runtime-CREATE TABLE mehr (#137).
 
 /** Metadaten je Schwellwert-Schlüssel. */
 const THRESHOLD_DEFS = {
@@ -40,10 +31,6 @@ const THRESHOLD_DEFS = {
     type: 'integer',
   },
 };
-
-async function ensureTable(client) {
-  await client.query(CREATE_TABLE_SQL);
-}
 
 /**
  * Liest alle definierten Schwellwerte mit Provenienz-Info.
@@ -93,7 +80,10 @@ async function getThresholds(dbOrClient, tenantId, machineId) {
  * Schreibt einen Schwellwert (global oder pro Automat).
  * Wirft Error bei unbekanntem key oder invalider value.
  */
-async function setThreshold(client, tenantId, machineId, key, value) {
+// #137 (Stufe 4): durch die Mandanten-Tür (Mandant als $1; eigene Parameter ab $2).
+// asDoor akzeptiert eine Tür ODER einen rohen Client (gewrappt) — No-Bypass. Der
+// Constraint settings_thresholds_unique ist bereits mandantensauber (Migration 0002).
+async function setThreshold(dbOrClient, tenantId, machineId, key, value) {
   if (!Object.prototype.hasOwnProperty.call(THRESHOLD_DEFS, key)) {
     throw new Error(`Unbekannter Schwellwert-Schlüssel: "${key}"`);
   }
@@ -104,17 +94,20 @@ async function setThreshold(client, tenantId, machineId, key, value) {
   }
   const coerced = def.type === 'integer' ? Math.round(num) : num;
 
-  await ensureTable(client);
-  const tid = String(tenantId || '__default__');
+  const db = asDoor(dbOrClient);
+  const tid = String(tenantId ?? ''); // #137: KEIN __default__-Default — leerer Mandant ⇒ Tür wirft (fail-closed)
   const mid = machineId != null ? Number(machineId) : null;
 
-  await client.query(
-    `INSERT INTO automatenlager.settings_thresholds (tenant_id, machine_id, key, value, updated_at)
-     VALUES ($1, $2, $3, $4::jsonb, now())
-     ON CONFLICT ON CONSTRAINT settings_thresholds_unique
-     DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-    [tid, mid, key, JSON.stringify(coerced)],
-  );
+  await db.write({
+    tenant: tid,
+    tables: ['settings_thresholds'],
+    text:
+      `INSERT INTO automatenlager.settings_thresholds (tenant_id, machine_id, key, value, updated_at)
+       VALUES ($1, $2, $3, $4::jsonb, now())
+       ON CONFLICT ON CONSTRAINT settings_thresholds_unique
+       DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    params: [mid, key, JSON.stringify(coerced)],
+  });
 }
 
 /**
@@ -122,20 +115,22 @@ async function setThreshold(client, tenantId, machineId, key, value) {
  * machineId null → globalen Override entfernen.
  * machineId integer → Automat-Override entfernen.
  */
-async function resetThreshold(client, tenantId, machineId, key) {
-  await ensureTable(client);
-  const tid = String(tenantId || '__default__');
+async function resetThreshold(dbOrClient, tenantId, machineId, key) {
+  const db = asDoor(dbOrClient);
+  const tid = String(tenantId ?? ''); // #137: leerer Mandant ⇒ Tür wirft (fail-closed)
   const mid = machineId != null ? Number(machineId) : null;
   if (mid != null) {
-    await client.query(
-      `DELETE FROM automatenlager.settings_thresholds WHERE tenant_id = $1 AND machine_id = $2 AND key = $3`,
-      [tid, mid, key],
-    );
+    await db.write({
+      tenant: tid, tables: ['settings_thresholds'],
+      text: `DELETE FROM automatenlager.settings_thresholds WHERE tenant_id = $1 AND machine_id = $2 AND key = $3`,
+      params: [mid, key],
+    });
   } else {
-    await client.query(
-      `DELETE FROM automatenlager.settings_thresholds WHERE tenant_id = $1 AND machine_id IS NULL AND key = $2`,
-      [tid, key],
-    );
+    await db.write({
+      tenant: tid, tables: ['settings_thresholds'],
+      text: `DELETE FROM automatenlager.settings_thresholds WHERE tenant_id = $1 AND machine_id IS NULL AND key = $2`,
+      params: [key],
+    });
   }
 }
 
@@ -144,20 +139,22 @@ async function resetThreshold(client, tenantId, machineId, key) {
  * machineId null → alle globalen Overrides entfernen.
  * machineId integer → alle Automat-Overrides für diese machine_id entfernen.
  */
-async function resetAllThresholds(client, tenantId, machineId) {
-  await ensureTable(client);
-  const tid = String(tenantId || '__default__');
+async function resetAllThresholds(dbOrClient, tenantId, machineId) {
+  const db = asDoor(dbOrClient);
+  const tid = String(tenantId ?? ''); // #137: leerer Mandant ⇒ Tür wirft (fail-closed)
   const mid = machineId != null ? Number(machineId) : null;
   if (mid != null) {
-    await client.query(
-      `DELETE FROM automatenlager.settings_thresholds WHERE tenant_id = $1 AND machine_id = $2`,
-      [tid, mid],
-    );
+    await db.write({
+      tenant: tid, tables: ['settings_thresholds'],
+      text: `DELETE FROM automatenlager.settings_thresholds WHERE tenant_id = $1 AND machine_id = $2`,
+      params: [mid],
+    });
   } else {
-    await client.query(
-      `DELETE FROM automatenlager.settings_thresholds WHERE tenant_id = $1 AND machine_id IS NULL`,
-      [tid],
-    );
+    await db.write({
+      tenant: tid, tables: ['settings_thresholds'],
+      text: `DELETE FROM automatenlager.settings_thresholds WHERE tenant_id = $1 AND machine_id IS NULL`,
+      params: [],
+    });
   }
 }
 

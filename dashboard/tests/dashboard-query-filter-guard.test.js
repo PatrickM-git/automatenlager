@@ -30,8 +30,11 @@ test('#122 Guard Melde-Modus: Worklist aller noch ungefilterten Lesepfade, brich
   // Heute laufen noch viele Module an der Tür vorbei — die Worklist ist nicht leer.
   assert.ok(report.bypass.length > 0, 'Melde-Modus listet noch-ungefilterte Lesepfade');
   const files = report.bypass.map((b) => b.file);
-  // Stabile Vertreter, die heute noch direkt pg nutzen (noch nicht migriert):
-  for (const known of ['machine-profiles.js', 'location-profiles.js', 'machine-create.js']) {
+  // Stabile Vertreter, die strukturell rohes pg tragen (Infrastruktur-Guards, KEIN
+  // Mandanten-Datenpfad): db-schema (information_schema), stock-cost-invariant
+  // (Invarianten-Check). Alle Stufe-4-SCHREIBPFADE (location-profiles #135,
+  // machine-create/-profiles #136, settings-thresholds #137) sind durch die Tür.
+  for (const known of ['db-schema.js', 'stock-cost-invariant.js']) {
     assert.ok(files.includes(known), `Worklist enthält ${known}`);
   }
   // Jeder Eintrag trägt eine Begründung (welches Muster).
@@ -81,10 +84,10 @@ test('#122 Guard findViolations: schrumpfende Allowlist (bereichsweise scharf)',
   assert.equal(none.length, 0, 'mit voller Allowlist keine Verstöße');
 
   // Einen Bereich „scharf schalten" (aus der Allowlist nehmen) ⇒ er wird zum Verstoß.
-  const sharpened = allBypass.filter((f) => f !== 'location-profiles.js');
+  const sharpened = allBypass.filter((f) => f !== 'db-schema.js');
   const violations = guard.findViolations({ libDir: LIB_DIR, allowlist: sharpened });
-  assert.ok(violations.some((v) => v.file === 'location-profiles.js'),
-    'ein aus der Allowlist genommener (noch nicht migrierter) Lesepfad ist ein Verstoß');
+  assert.ok(violations.some((v) => v.file === 'db-schema.js'),
+    'ein aus der Allowlist genommenes rohes pg-Modul ist ein Verstoß');
 });
 
 // ── Bereichsweise scharf (Default-Deny, schrumpfende Allowlist) ──────────────────
@@ -102,8 +105,7 @@ test('#122 Guard findViolations: schrumpfende Allowlist (bereichsweise scharf)',
 //      setThreshold bleiben roh = Stufe 4): location-profiles, machine-create,
 //      machine-profiles, settings-thresholds.
 const STILL_BYPASSING = [
-  'db-schema.js', 'location-profiles.js', 'machine-create.js',
-  'machine-profiles.js', 'settings-thresholds.js', 'stock-cost-invariant.js',
+  'db-schema.js', 'stock-cost-invariant.js',
 ];
 // Pro Slice durch die Tür geführte (migrierte) Lese-Module bzw. -pfade.
 const MIGRATED = [
@@ -162,9 +164,10 @@ test('#122 Guard: Global-Allowlist ist bewusst eng (keine schleichende Aufblähu
 // den Build (build-blocking, nicht nur Warnung).
 // ─────────────────────────────────────────────────────────────────────────────
 const INFRASTRUCTURE_ALLOWLIST = ['db-schema.js', 'stock-cost-invariant.js'];
-const STUFE4_WRITE_ALLOWLIST = [
-  'location-profiles.js', 'machine-create.js', 'machine-profiles.js', 'settings-thresholds.js',
-];
+// Nach #135–#137 sind ALLE lib-Schreibpfade durch die Tür ⇒ leer. (Der verbleibende
+// rohe Schreib-Einstieg ist die write-off-Transaktion in server.js — #138/#139, via
+// entryFiles erfasst, nicht über libDir.)
+const STUFE4_WRITE_ALLOWLIST = [];
 const FINAL_ALLOWLIST = [...INFRASTRUCTURE_ALLOWLIST, ...STUFE4_WRITE_ALLOWLIST];
 
 test('#129 Guard build-blocking: kein roher DB-Zugriff außerhalb der finalen Allowlist', () => {

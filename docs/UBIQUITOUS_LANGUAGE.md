@@ -241,6 +241,35 @@ Tür **setzt** in Stufe 5 zusätzlich die RLS-Sitzungsvariable · Lese-Isolation
 
 ---
 
+## Mandantenfähigkeit: Schreib-Isolation (Stufe 4) *(neu)*
+
+> Quelle: SPEC `docs/specs/multi-tenant-write-isolation-stufe-4-v1.md`. Stufe 4 trennt die
+> **Schreib-Pfade** (INSERT/UPDATE/DELETE/UPSERT) und jede schreib-auslösende **Autorisierung**
+> nach Mandant. Leitprinzip: **Autorisierung** (wem gehört das Objekt? → künftige Render-Schicht)
+> und **Datenzugriff** (Schreiben → Supabase + RLS Stufe 5) sind **zwei getrennte, cloud-agnostische
+> Schichten**. Anders als Stufe 3 enthält Stufe 4 **DDL**. Baut auf Tür (Stufe 3) + effektivem Mandanten (Stufe 2) auf.
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **Schreib-Isolation** | Mandanten-Trennung der Schreib-Pfade: jede Schreibung wirkt nur auf Daten des effektiven Mandanten; ein mandantenübergreifender `UPDATE`/`DELETE` ist unmöglich. | „Filter" pauschal; mit Lese-Isolation gleichsetzen |
+| **Mandanten-Tür (Schreib-Modus)** | Die `write()`-Seite der Tür: einzige legitime Stelle für mandanten-bezogene Schreibungen; Mandant als `$1`, INSERT setzt `tenant_id`, UPDATE/DELETE tragen `WHERE tenant_id = $1`, UPSERT trägt `tenant_id` im Konflikt-Ziel. | roher `client.query` für Writes |
+| **fail-closed-werfend** | Verhalten der Tür beim **Schreiben** ohne Mandant: sie **wirft** einen harten Fehler (≠ Lesen, das fail-closed-**leer** zurückgibt) — nie ein falsches „gespeichert". | stilles `{rowCount:0}` beim Schreiben; „leer = ok" |
+| **Transaktionaler Schreib-Modus (`db.tx`)** | Tür-Modus, der **Parent-Prüfung + Schreibung atomar** auf einem Client in einer Transaktion ausführt; schließt die Prüf-dann-Schreib-Lücke und ist der Steckplatz für den RLS-Haken (Stufe 5). | Prüfung und Write lose nacheinander |
+| **Prüf-dann-Schreib-Lücke (TOCTOU)** | Zeitfenster zwischen „Parent gehört dem Mandanten?" und der Schreibung, in dem sich der Zustand ändern kann; durch den transaktionalen Modus geschlossen. | „passiert schon nichts" |
+| **Autorisierungs-Tor** | Die Eigentums-Prüfung **vor** jeder schreib-auslösenden Aktion: generisch `requireObjectAccess(viewer, objectTenantId)`, Maschinen-Spezialfall `requireMachineAccess`; fremd/unbekannt ⇒ 404 + Audit. Eigene Schicht, getrennt vom Datenzugriff. | „IDOR-Check" pauschal; alles über Maschinenlogik ziehen |
+| **Parent-Matrix** | Die explizite Zuordnung Endpunkt → korrekter Parent-Typ → Mandanten-Auflösung: `machine_id`→Registry, `case_id`→`correction_cases.tenant_id`, `product_key`→`products.tenant_id`. Verhindert, dass Korrektur/Onboarding fälschlich als „Maschine" geprüft werden. | „überall machine_id" |
+| **Webhook-Weiterleiter** | Schreib-auslösender Endpunkt, der eine Objekt-ID an n8n weiterreicht (eigentlicher Write = **Stufe 6**); seine **Autorisierung** ist die einzige Stufe-4-Verteidigung und überlebt den n8n→Render-Wechsel unverändert. | „der schreibt ja nicht" (Autorisierung trotzdem nötig) |
+| **`tenant_id`-im-Body-Verbot** | Ein client-geliefertes `tenant_id`/`mandant_id` im Request-Body wird **hart abgelehnt** (400) + auditiert; der Mandant kommt **immer** aus dem Viewer. | Feld still ignorieren; Mandant aus Payload lesen |
+| **Break-Glass-Schreib-Sperre** | Bestätigung der Stufe-2-Garantie: unter aktiver Support-Sitzung bleibt Schreiben mit **403** (`SUPPORT_SESSION_READ_ONLY`) geblockt + Audit `break_glass_write_blocked` — auch an den neuen Schreib-Endpunkten. | Support-Sitzung darf schreiben |
+| **DDL-Vorab-Check (Beißer)** | Idempotenter Migrations-Guard, der tatsächlich kippen kann: `tenant_id` **befüllt + NOT NULL** (Backfill `__default__`) und `ON CONFLICT`-Ziel **im selben Schritt** auf den neuen Constraint umstellen (`UNIQUE NULLS NOT DISTINCT (tenant_id, <key>)`). | Duplikat-Prüfung als „der" Check (Erweitern ist nur Lockerung) |
+
+Beziehungen: Jeder Schreib-Pfad **schreibt durch** die Tür (Schreib-Modus) · Tür **wirft** ohne Mandant (fail-closed-werfend) ·
+transaktionaler Modus **bündelt** Parent-Prüfung + Schreibung (TOCTOU-Schutz) **und** **trägt** den RLS-Haken (Stufe 5) ·
+Autorisierungs-Tor **prüft** Objekt-Eigentum vor dem Auslösen (Parent-Matrix bestimmt den Parent-Typ) · Webhook-Weiterleiter **autorisiert** in Stufe 4, **schreibt** in Stufe 6 ·
+Wächter **bewacht** No-Bypass auch für Writes (build-blocking) · RLS (Stufe 5) **ist** der unumgehbare Laufzeit-Backstop.
+
+---
+
 ## Anbieter-Integration: `provider` & Vending Data Integration Layer *(neu)*
 
 > Nayax ist der **erste**, nicht der einzige Daten-Eingang. Stufe 0 nimmt nur die `provider`-Dimension mit;
@@ -313,6 +342,19 @@ Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
 > **Dev:** „Und der Wächter — bleibt der eine Warnung?"
 > **Domain Expert:** „Am Ende **build-blocking**: ein neuer ungefilterter Read bricht den Build."
 
+## Beispiel-Dialog (Schreib-Isolation / Stufe 4) *(neu)*
+
+> **Dev:** „Beim Speichern ohne Mandant gebe ich einfach `rowCount: 0` zurück, oder?"
+> **Domain Expert:** „Nein — beim **Schreiben** ist das **fail-closed-werfend**. Sonst meldet der Endpunkt ‚gespeichert', obwohl nichts geschrieben wurde. Nur das **Lesen** darf leer zurückgeben."
+> **Dev:** „Ich prüfe erst, ob der Standort dem Mandanten gehört, dann lege ich die Maschine an — zwei Queries."
+> **Domain Expert:** „Pack beides in den **transaktionalen Schreib-Modus**. Sonst hast du die **Prüf-dann-Schreib-Lücke** — und genau diese Transaktion ist später der Platz für den RLS-Haken."
+> **Dev:** „Onboarding bekommt eine `machine_id`? Dann nehme ich `requireMachineAccess`."
+> **Domain Expert:** „Nein. Schau in die **Parent-Matrix**: Onboarding hängt am **`product_key`** → `products.tenant_id` über `requireObjectAccess`. Nur Refill und Slot-Assign sind Maschinen."
+> **Dev:** „Der Client schickt `tenant_id` mit — praktisch, dann muss ich's nicht auflösen."
+> **Domain Expert:** „Auf keinen Fall. **`tenant_id` im Body** ⇒ **400 + Audit**. Der Mandant kommt **immer** aus dem Viewer, nie aus dem Payload."
+> **Dev:** „Der Refill-Endpunkt schreibt doch eh nur über n8n — den kann ich offen lassen?"
+> **Domain Expert:** „Nein. Er ist ein **Webhook-Weiterleiter**: der Write ist Stufe 6, aber die **Autorisierung** ist Stufe 4 — sonst löst ein Mandant einen Refill auf einer fremden Maschine aus."
+
 ## Markierte Unklarheiten *(neu)*
 
 - **Slot-Zahl pro Automat** für die Latten-Ableitung (Umsatz-Norm ÷ Slot-Zahl): Quelle aus den
@@ -332,6 +374,14 @@ Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
   separater Schritt ist — Empfehlung: gemeinsam im Fundament-Slice (Tür bringt den Pool gleich mit).
 - **Finale Liste der echt-globalen Tabellen** (Stufe 3): Default ist mandantenpflichtig; die Allowlist (Verzeichnis +
   reine Lookups) in der Umsetzung **explizit reviewen** und je Eintrag begründen.
+- **Signatur des transaktionalen Schreib-Modus** (Stufe 4): z. B. `db.tx(viewer, async txDoor => {…})` —
+  Schnittstelle in der Umsetzung (TDD) festziehen; Empfehlung: tür-gebundenes Objekt mit `read`+`write` in derselben Transaktion.
+- **Onboarding-Parent: Produkt vs. Katalog-Kontext** (Stufe 4): ob `product_key` strikt über `products.tenant_id`
+  oder über einen weiteren „erlaubten Katalog"-Kontext autorisiert wird — in der Umsetzung klären; Empfehlung: `products.tenant_id`, Katalog-Sonderfälle separat.
+- **write-off-Parent-Auflösung** (Stufe 4): `batch_key` → Mandant der Charge; sicherstellen, dass `stock_batches`
+  die `tenant_id` trägt und betroffene `warnings` mandanten-gebunden aufgelöst werden — in der Umsetzung bestätigen.
+- **Fehlercode „Schreiben ohne Mandant"** (Stufe 4): 403 vs. 500 für den fail-closed-werfenden Fall — in der Umsetzung
+  festlegen; Empfehlung: konsistent zur bestehenden Taxonomie (403 bei fehlender Berechtigung, 503 bei technischem Fehler).
 
 ## Secret-Handling & Audit
 
