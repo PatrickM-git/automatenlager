@@ -34,6 +34,11 @@ const SERVER_JS = path.join(__dirname, '..', 'server.js');
 function makeQuerySpy(impl) {
   const calls = [];
   const fn = async (sql, params) => {
+    // #144: der RLS-GUC-Setzer ist Vertragsbestandteil (ambient-Modus), aber nicht
+    // Teil der Daten-Assertions — nicht aufzeichnen.
+    if (typeof sql === 'string' && sql.includes("set_config('automatenlager.current_tenant'")) {
+      return { rows: [], rowCount: 0 };
+    }
     calls.push({ sql, params });
     if (typeof impl === 'function') return impl(sql, params);
     return { rows: [{ ok: true }], rowCount: 1 };
@@ -81,14 +86,14 @@ test('#131 write(): ohne Mandant WIRFT (kein stilles {rowCount:0,tenantless})', 
 
 test('#131 write(): fail-closed setzt KEINE Abfrage ab (keine Teil-Schreibung)', async () => {
   const query = makeQuerySpy();
-  const db = createTenantDb({ query });
+  const db = createTenantDb({ query, ambient: true });
   await assert.rejects(() => db.write({ tenant: '', tables: ['locations'], text: 'UPDATE x' }));
   assert.equal(query.calls.length, 0, 'kein Mandant ⇒ keine Schreib-Query');
 });
 
 test('#131 write(): gültiger Mandant ⇒ Mandant als $1 vorangestellt, eigene Parameter ab $2', async () => {
   const query = makeQuerySpy();
-  const db = createTenantDb({ query });
+  const db = createTenantDb({ query, ambient: true });
   await db.write({
     tenant: 'acme',
     tables: ['locations'],
@@ -101,7 +106,7 @@ test('#131 write(): gültiger Mandant ⇒ Mandant als $1 vorangestellt, eigene P
 
 test('#131 read(): bleibt UNVERÄNDERT fail-closed-LEER (werfen nur beim Schreiben)', async () => {
   const query = makeQuerySpy();
-  const db = createTenantDb({ query });
+  const db = createTenantDb({ query, ambient: true });
   const res = await db.read({ tenant: '', tables: ['locations'], text: 'SELECT 1' });
   assert.deepEqual(res.rows, [], 'leer ist ein gültiges Lese-Ergebnis');
   assert.equal(res.rowCount, 0);

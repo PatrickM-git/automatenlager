@@ -40,6 +40,11 @@ function makeFakeClient(rowsForQuery) {
     calls,
     async connect() { this.connected = true; },
     async query(sql, params) {
+      // #144: RLS-GUC-Setzer (ambient-Modus) ist Vertragsbestandteil, aber kein
+      // Daten-Read — nicht validieren/aufzeichnen.
+      if (typeof sql === 'string' && sql.includes("set_config('automatenlager.current_tenant'")) {
+        return { rows: [], rowCount: 0 };
+      }
       // Wie die echte DB: zuerst Spalten validieren, dann Zeilen liefern.
       assertOnlyRealLocationColumns(sql);
       calls.push({ sql, params });
@@ -66,7 +71,7 @@ test('REGRESSION: queryLocationsPg referenziert nur real existierende locations-
 
   // Vor dem Fix warf dies "column \"status\" does not exist"; jetzt läuft es durch.
   // #127: durch die Mandanten-Tür (fake-Client als query-Quelle gewrappt).
-  const db = createTenantDb({ query: (s, p) => fake.query(s, p) });
+  const db = createTenantDb({ query: (s, p) => fake.query(s, p), ambient: true });
   const profiles = await queryLocationsPg(db, 'acme');
 
   assert.equal(profiles.length, 1);
@@ -98,7 +103,7 @@ test('queryLocationsPg-Ergebnis ist direkt mit buildLocationComparison kompatibe
   const fake = makeFakeClient([
     { location_id: '1', name: 'Standort A', notes: null, target_group: 'Schule', start_date: null, machine_ids: ['VM01'], status: 'aktiv' },
   ]);
-  const profiles = await queryLocationsPg(createTenantDb({ query: (s, p) => fake.query(s, p) }), 'acme');
+  const profiles = await queryLocationsPg(createTenantDb({ query: (s, p) => fake.query(s, p), ambient: true }), 'acme');
   const cmp = buildLocationComparison(profiles, [
     { machine_id: 'VM01', revenue_net: 100, db_net: 30, qty: 10, slot_turnover: 1, inventory_value: 50 },
   ]);
@@ -115,7 +120,12 @@ test('queryLocationsPg-Ergebnis ist direkt mit buildLocationComparison kompatibe
 function makeDoorCapture(rowFor) {
   const calls = [];
   const db = createTenantDb({
+    ambient: true, // #144: Einzel-Client-Tür (set_config + Query in der Aufrufer-Transaktion)
     query: async (sql, params) => {
+      // #144: GUC-Setzer ist Vertragsbestandteil, kein Daten-Write — nicht validieren/aufzeichnen.
+      if (typeof sql === 'string' && sql.includes("set_config('automatenlager.current_tenant'")) {
+        return { rows: [], rowCount: 0 };
+      }
       assertOnlyRealLocationColumns(sql);
       calls.push({ sql, params });
       return { rows: [rowFor(params)], rowCount: 1 };
