@@ -221,7 +221,19 @@ async function seedTenant(client, tenantId, opts = {}) {
 async function seedAcmeGlobex(client) {
   const acme = await seedTenant(client, 'acme', { revenueBase: 100 });
   const globex = await seedTenant(client, 'globex', { revenueBase: 250 });
+  await ensureInventoryValueView(client);
   return { acme, globex };
 }
 
-module.exports = { seedTenant, seedAcmeGlobex, READ_PATH_TABLES, WRITE_PATH_TABLES, doorForClient, sandboxTxPool };
+// #149 (Stufe 5): Die App liest mv_inventory_value_daily NUR noch über die
+// GUC-gefilterte Security-View v_inventory_value_daily (Migration 0026, da MatViews
+// keine RLS tragen). Tests, die economics/assortment über die Tür lesen, brauchen
+// die View. Minimal-DDL ohne Grants (Sandbox-Owner). HALTE IDENTISCH zu 0026 §4.
+async function ensureInventoryValueView(client) {
+  await client.query(
+    `CREATE OR REPLACE VIEW automatenlager.v_inventory_value_daily WITH (security_barrier = true) AS
+       SELECT * FROM automatenlager.mv_inventory_value_daily
+        WHERE tenant_id = current_setting('automatenlager.current_tenant')`);
+}
+
+module.exports = { seedTenant, seedAcmeGlobex, ensureInventoryValueView, READ_PATH_TABLES, WRITE_PATH_TABLES, doorForClient, sandboxTxPool };

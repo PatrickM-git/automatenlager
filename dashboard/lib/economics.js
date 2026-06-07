@@ -704,11 +704,13 @@ async function queryEconomicsPg(db, tenant, query = {}) {
     }),
   ]);
 
-  // MatView durch die Tür mit tenant_id-Filter (kein roher Bypass, SPEC §"(Mat)Views").
+  // #149 (Stufe 5): über die GUC-gefilterte Security-View v_inventory_value_daily
+  // (security_barrier) statt der rohen MatView — RLS-Backstop, da MatViews selbst
+  // keine Policy tragen. tenant_id=$1 bleibt als zusätzlicher App-Filter.
   const inventoryResult = await db.read({
     tenant,
-    tables: ['mv_inventory_value_daily'],
-    text: `SELECT * FROM automatenlager.mv_inventory_value_daily WHERE tenant_id = $1`,
+    tables: ['v_inventory_value_daily'],
+    text: `SELECT * FROM automatenlager.v_inventory_value_daily WHERE tenant_id = $1`,
     params: [],
   });
 

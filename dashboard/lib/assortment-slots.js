@@ -190,7 +190,7 @@ async function queryAssortmentSlotsPg(db, tenant, query = {}) {
   const result = await db.read({
     tenant,
     tables: ['slot_assignments', 'products', 'machines', 'locations', 'guv_daily',
-      'v_slot_turnover', 'sales_transactions', 'stock_batches', 'mv_inventory_value_daily', 'v_warnings_open'],
+      'v_slot_turnover', 'sales_transactions', 'stock_batches', 'v_inventory_value_daily', 'v_warnings_open'],
     text:
       `WITH sales AS (
          SELECT machine_id, mdb_code, product_id,
@@ -292,7 +292,7 @@ async function queryAssortmentSlotsPg(db, tenant, query = {}) {
            ON ls.machine_id = sa.machine_id AND ls.mdb_code = sa.mdb_code
          LEFT JOIN first_sale fs
            ON fs.product_id = sa.product_id
-         LEFT JOIN automatenlager.mv_inventory_value_daily iv ON iv.product_id = sa.product_id AND iv.tenant_id = sa.tenant_id
+         LEFT JOIN automatenlager.v_inventory_value_daily iv ON iv.product_id = sa.product_id AND iv.tenant_id = sa.tenant_id
          LEFT JOIN batch_status bs ON bs.product_id = sa.product_id
          LEFT JOIN warning_status ws
            ON ws.product_id = sa.product_id
