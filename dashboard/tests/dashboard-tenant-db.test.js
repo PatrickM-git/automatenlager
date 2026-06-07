@@ -194,6 +194,18 @@ test('#144 forTenant/forViewer: bindet Mandant; leerer/Gast-Mandant ⇒ read lee
   assert.deepEqual(guest.rows, [], 'Gast ohne Mandant ⇒ leer');
 });
 
+test('#150 Break-Glass (Support-Sitzung) ist read-only an der Tür: write/tx werfen, read liest Ziel', async () => {
+  const { pool, calls } = makeManagedPool();
+  const db = createTenantDb({ pool });
+  const support = db.forViewer({ tenantId: 'acme', supportSession: { active: true } });
+  // read funktioniert (liest den Ziel-Mandanten der Break-Glass-Sitzung)
+  await support.read({ tables: ['guv_daily'], text: 'SELECT 1' });
+  assert.ok(calls.some((c) => c.sql === SET_TENANT_SQL && c.params[0] === 'acme'), 'GUC auf Ziel-Mandant');
+  // write/tx sind verboten (read-only, auch an der Tür erzwungen)
+  await assert.rejects(() => support.write({ tables: ['guv_daily'], text: 'UPDATE x' }), /read-only|Break-Glass/i);
+  await assert.rejects(() => support.tx(async () => {}), /read-only|Break-Glass/i);
+});
+
 test('#144 weder query noch pool ⇒ Konstruktionsfehler', () => {
   assert.throws(() => createTenantDb({}), /query|pool/i);
 });

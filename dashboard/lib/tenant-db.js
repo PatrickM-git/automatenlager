@@ -202,7 +202,18 @@ function createTenantDb({ query, pool, ambient = false, log } = {}) {
   }
 
   function forViewer(viewer) {
-    return forTenant(viewer && viewer.tenantId);
+    const bound = forTenant(viewer && viewer.tenantId);
+    // #150 (Stufe 5): Break-Glass (Support-Sitzung) ist READ ONLY — an der Tür
+    // erzwungen, nicht nur per Capability. read() bleibt (intern BEGIN READ ONLY),
+    // write()/tx() werfen. Doppelter Schutz zur DB-seitigen Read-Only-Transaktion.
+    if (viewer && viewer.supportSession && viewer.supportSession.active) {
+      const denyWrite = async () => {
+        logfn('tenant-db: Break-Glass-Schreibversuch verweigert (read-only)');
+        throw new Error('tenant-db: Break-Glass-Sitzung ist read-only — Schreibzugriff verweigert');
+      };
+      return { tenant: bound.tenant, read: bound.read, write: denyWrite, tx: denyWrite };
+    }
+    return bound;
   }
 
   return { read, write, tx, forTenant, forViewer, isValidTenant };
