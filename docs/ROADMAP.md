@@ -32,9 +32,12 @@
 
 Ziel: cloud-portabel **+** mehrkundenfähig **+** Kunden handlungsfähig.
 
-- **A1 — Performance-Pass** (Ziel **<3 s** je Seite; gemessen, hinter der Test-Suite, nichts
-  bricht): Fetches parallelisieren, EXPLAIN-geführte Indizes, Aggregate via MatView/Vorab-
-  Berechnung, mehrere Reads je Seite in EINER Tür-Transaktion bündeln.
+- **A1 — Performance-Pass — ✅ ERLEDIGT (2026-06-07, PR #154):** Diagnose: DB war nie der
+  Flaschenhals (assortment-slots EXPLAIN: **3,4 ms**); Bremse war **unkomprimiertes,
+  nicht-gecachtes Ausliefern** (v3.js 242 KB, `no-store`). Fix: **gzip** (242 KB → **62 KB**,
+  −74 %) + **ETag/Conditional-GET** (Repeat-Navigation = 304, kein Neudownload). Transparent,
+  Suite 1089/1089. Offen (optional, kleiner Mini-lokaler Gewinn): config/thresholds-Reads je
+  Endpunkt bündeln/cachen.
 - **A2 — Stufe 6: n8n-Ablösung** (= dein „n8n weg"-Ziel + Cloud-Voraussetzung + Backstop
   systemweit dicht): WF3 (FIFO/Bestand), WF7 (Nachfüllung), WF1/WF2 (Rechnungseingang/
   Produktauswahl), WF5 (MHD-Überwachung), WF8 (GuV-Aggregat), WF9 → schrittweise durch
