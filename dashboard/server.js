@@ -3240,19 +3240,15 @@ const server = http.createServer(async (req, res) => {
       }
       const machineId = body && body.machineId != null && body.machineId !== '' ? Number(body.machineId) : null;
       const value = body && body.value !== undefined ? body.value : null;
-      const { Client } = require('pg');
-      const client = new Client({ connectionString: dashboardV2PgUrl(), connectionTimeoutMillis: 6000 });
-      await client.connect();
+      if (!tenantDb) { sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } }); return; }
       try {
-        await setThreshold(client, DEFAULT_MANDANT, machineId, key, value);
+        await setThreshold(tenantDb, DEFAULT_MANDANT, machineId, key, value); // #137: durch die Tür
         auditAction(viewer, 'threshold_write', { key, machineId: machineId ?? null }, 'ok');
-        const thresholds = await getThresholds(client, DEFAULT_MANDANT, machineId);
+        const thresholds = await getThresholds(tenantDb, DEFAULT_MANDANT, machineId);
         sendJson(res, 200, { ok: true, thresholds });
       } catch (err) {
         const isValidation = err.message.startsWith('Unbekannter') || err.message.includes('muss eine Zahl');
         sendJson(res, isValidation ? 400 : 503, { ok: false, error: { code: isValidation ? 'INVALID_VALUE' : 'PG_ERROR', message: err.message } });
-      } finally {
-        await client.end();
       }
       return;
     }
@@ -3269,23 +3265,19 @@ const server = http.createServer(async (req, res) => {
         : null;
       const machineId = parsed.query.machineId;
       const mid = machineId != null && machineId !== '' ? Number(machineId) : null;
-      const { Client } = require('pg');
-      const client = new Client({ connectionString: dashboardV2PgUrl(), connectionTimeoutMillis: 6000 });
-      await client.connect();
+      if (!tenantDb) { sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } }); return; }
       try {
         if (key) {
-          await resetThreshold(client, DEFAULT_MANDANT, mid, key);
+          await resetThreshold(tenantDb, DEFAULT_MANDANT, mid, key); // #137: durch die Tür
           auditAction(viewer, 'threshold_reset', { key, machineId: mid ?? null }, 'ok');
         } else {
-          await resetAllThresholds(client, DEFAULT_MANDANT, mid);
+          await resetAllThresholds(tenantDb, DEFAULT_MANDANT, mid); // #137: durch die Tür
           auditAction(viewer, 'threshold_reset_all', { machineId: mid ?? null }, 'ok');
         }
-        const thresholds = await getThresholds(client, DEFAULT_MANDANT, mid);
+        const thresholds = await getThresholds(tenantDb, DEFAULT_MANDANT, mid);
         sendJson(res, 200, { ok: true, thresholds });
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
-      } finally {
-        await client.end();
       }
       return;
     }
