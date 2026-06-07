@@ -2060,12 +2060,26 @@ async function buildGuv(query) {
   };
 }
 
+// A1-Performance: gzip nur, wenn der Client es anbietet (res._acceptsGzip) und der
+// Inhalt komprimierbar + groß genug ist. Transparent — ohne Accept-Encoding identisch
+// zu vorher. In-Memory-Cache der gzippten statischen Dateien (mtime-invalidiert).
+function isCompressible(type) {
+  return /text\/|application\/json|javascript|image\/svg/i.test(type);
+}
+const STATIC_GZIP_CACHE = new Map(); // filePath -> { mtimeMs, size, gz }
+
 function sendJson(res, status, data) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store',
-  });
-  res.end(JSON.stringify(data, null, 2));
+  const body = Buffer.from(JSON.stringify(data, null, 2), 'utf8');
+  const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' };
+  if (res._acceptsGzip && body.length > 1024) {
+    headers['Content-Encoding'] = 'gzip';
+    headers['Vary'] = 'Accept-Encoding';
+    res.writeHead(status, headers);
+    res.end(zlib.gzipSync(body));
+    return;
+  }
+  res.writeHead(status, headers);
+  res.end(body);
 }
 
 function sendFile(res, filePath) {
@@ -2081,16 +2095,42 @@ function sendFile(res, filePath) {
     '.css': 'text/css; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',
     '.json': 'application/json; charset=utf-8',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
   };
-  res.writeHead(200, {
-    'Content-Type': types[ext] || 'application/octet-stream',
-    'Cache-Control': 'no-store',
-  });
+  const type = types[ext] || 'application/octet-stream';
+  const stat = fs.statSync(filePath);
+  const etag = `"${stat.size}-${Math.round(stat.mtimeMs)}"`;
+  // Conditional GET: unveränderte Datei ⇒ 304 (kein Body-Neudownload). no-cache =
+  // immer revalidieren ⇒ nie veraltet (kein Stale nach Deploy), aber 304 spart Transfer.
+  if (res._ifNoneMatch && res._ifNoneMatch === etag) {
+    res.writeHead(304, { 'ETag': etag, 'Cache-Control': 'no-cache' });
+    res.end();
+    return;
+  }
+  const headers = { 'Content-Type': type, 'Cache-Control': 'no-cache', 'ETag': etag };
+  if (res._acceptsGzip && isCompressible(type)) {
+    let c = STATIC_GZIP_CACHE.get(filePath);
+    if (!c || c.mtimeMs !== stat.mtimeMs || c.size !== stat.size) {
+      c = { mtimeMs: stat.mtimeMs, size: stat.size, gz: zlib.gzipSync(fs.readFileSync(filePath)) };
+      STATIC_GZIP_CACHE.set(filePath, c);
+    }
+    headers['Content-Encoding'] = 'gzip';
+    headers['Vary'] = 'Accept-Encoding';
+    res.writeHead(200, headers);
+    res.end(c.gz);
+    return;
+  }
+  res.writeHead(200, headers);
   fs.createReadStream(filePath).pipe(res);
 }
 
 const server = http.createServer(async (req, res) => {
   req._requestId = crypto.randomUUID(); // #117: per-Request-id für Audit-Korrelation (#118)
+  // A1-Performance: gzip-/Conditional-GET-Kontext pro Request (transparent; ändert
+  // kein Verhalten — greift nur, wenn der Client Accept-Encoding/If-None-Match sendet).
+  res._acceptsGzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''));
+  res._ifNoneMatch = req.headers['if-none-match'] || null;
   const parsed = url.parse(req.url, true);
   try {
     // #117: Health-Check — spiegelt die Bereitschaft der Mandanten-Registry.
