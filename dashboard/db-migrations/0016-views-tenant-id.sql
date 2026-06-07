@@ -44,7 +44,10 @@ CREATE OR REPLACE VIEW automatenlager.v_slot_turnover AS
 -- ── mv_inventory_value_daily: tenant_id-fuehrend, Gesamtwert PRO Mandant ───────
 -- MatView kann nicht REPLACEt werden -> DROP + CREATE; Unique-Index mandanten-
 -- bewusst (date, tenant_id, product_id) ermoeglicht REFRESH ... CONCURRENTLY.
-DROP MATERIALIZED VIEW IF EXISTS automatenlager.mv_inventory_value_daily;
+-- CASCADE (#152): seit Stufe 5 haengt die Security-View v_inventory_value_daily
+-- (Migration 0022) an dieser MatView. Ein Rebuild muss die abhaengige View
+-- mit-droppen — 0022 baut v_inventory_value_daily danach wieder auf (Kette).
+DROP MATERIALIZED VIEW IF EXISTS automatenlager.mv_inventory_value_daily CASCADE;
 CREATE MATERIALIZED VIEW automatenlager.mv_inventory_value_daily AS
   SELECT CURRENT_DATE AS date,
          tenant_id,
