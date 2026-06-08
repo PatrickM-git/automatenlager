@@ -8,41 +8,44 @@
 // der Worker plant WF3 selbst (kein Neustart-Hack), und n8n-Execution-Telemetrie
 // ist durch `audit.workflow_runs` ersetzt (siehe monitor.js).
 //
-// FAITHFUL gegen den echten „DB - Konsistenzcheck"-SQL + „Code - Ergebnisse
-// aggregieren": die 4 Checks (keine_preise, negative_qty, alte_warnungen,
-// pending_proposals), Gruppierung, Betreff/HTML-Format. Gelesen PER MANDANT DURCH
-// DIE TÜR (tenant_id=$1, RLS); Alert über den provider-agnostischen Mailer an die
-// MANDANTEN-Adresse. KEIN rohes pg (#107-rein).
+// Basierte auf dem echten „DB - Konsistenzcheck"-SQL, aber BEWUSST auf HANDLUNGS-
+// RELEVANTE Befunde eingedampft (Nutzer-Feedback 2026-06-08): der Alert soll nur
+// Dinge enthalten, die der Empfänger JETZT ändern kann.
+//   * `keine_preise` (Aktive Slots ohne Preis) ENTFERNT — der Preis wird automatisch
+//     aus dem ersten Nayax-Verkauf gesetzt; ein preisloser Slot ist nichts, woran der
+//     Nutzer direkt etwas tut (Rauschen). [Hängt eher an #163: fehlende Verkäufe.]
+//   * `alte_warnungen` schließt jetzt BESTANDS-/MHD-Typen (LOW_BATCH/LOW_STOCK/MHD_*/…)
+//     AUS — das sind operative Zustände (z. B. ein bewusster Ladenhüter mit niedrigem
+//     Bestand), keine Daten-/Workflow-Fehler. Nur echte Probleme bleiben.
+//   * Behalten: negative Mengen, offene Rechnungsvorschläge, echte Workflow-/Datenfehler.
+//
+// Gelesen PER MANDANT DURCH DIE TÜR (tenant_id=$1, RLS); Alert über den provider-
+// agnostischen Mailer an die MANDANTEN-Adresse. KEIN rohes pg (#107-rein).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { resolveTenantAlertEmail } = require('./mailer.js');
 
 const WORKFLOW_KEY = 'wf-db-validation';
 
-// Reihenfolge + Labels faithful zum n8n (ORDER BY check_type ⇒ alphabetisch).
-const CHECK_ORDER = ['alte_warnungen', 'keine_preise', 'negative_qty', 'pending_proposals'];
+const CHECK_ORDER = ['alte_warnungen', 'negative_qty', 'pending_proposals'];
 const CHECK_LABELS = {
-  keine_preise: 'Aktive Slots ohne Preis',
   negative_qty: 'Negative Lagermengen',
   alte_warnungen: 'Alte ungeloeste Warnungen (>7 Tage)',
   pending_proposals: 'Offene Rechnungsvorschlaege (>14 Tage)',
 };
 
+// Warnungstypen, die KEINE Daten-/Workflow-Fehler sind (operative Bestands-/MHD-
+// Zustände + Auto-Korrekturen). Sie haben ihre eigene Behandlung und sollen NICHT
+// als „alte ungelöste Warnung" alarmieren (sonst Dauer-Fehlalarm bei Ladenhütern).
+// Konsistent zu alert-digest.js NON_ISSUE_TYPES.
+const NON_ISSUE_WARNING_TYPES = [
+  'LOW_STOCK', 'LOW_BATCH', 'EMPTY_BATCH', 'INSUFFICIENT_BATCH_STOCK',
+  'MHD_NEAR', 'MHD_EXPIRED', 'MHD_WARNING', 'AUTO_REFILL_SLOT', 'BACKUP_OK',
+];
+
 // ── Reads (per Mandant durch die Tür; tenant-scoped, sequenziell) ─────────────
 async function readConsistencyChecks(db, tenant) {
-  const out = { keine_preise: [], negative_qty: [], alte_warnungen: [], pending_proposals: [] };
-
-  const r1 = await db.read({
-    tenant, tables: ['slot_assignments', 'products', 'machines', 'prices'], params: [],
-    text:
-      `SELECT 'Aktiver Slot ohne Preis: ' || p.name AS message
-         FROM automatenlager.slot_assignments sa
-         JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
-         JOIN automatenlager.machines m ON m.machine_id = sa.machine_id AND m.tenant_id = sa.tenant_id
-         LEFT JOIN automatenlager.prices pr ON pr.slot_assignment_id = sa.slot_assignment_id AND pr.tenant_id = sa.tenant_id AND pr.valid_to IS NULL
-        WHERE sa.tenant_id = $1 AND sa.active = TRUE AND pr.price_id IS NULL
-        ORDER BY p.name` });
-  out.keine_preise = r1.rows || [];
+  const out = { negative_qty: [], alte_warnungen: [], pending_proposals: [] };
 
   const r2 = await db.read({
     tenant, tables: ['stock_batches', 'products'], params: [],
@@ -54,12 +57,17 @@ async function readConsistencyChecks(db, tenant) {
         ORDER BY p.name` });
   out.negative_qty = r2.rows || [];
 
+  // Nur ECHTE Daten-/Workflow-Fehler: operative Bestands-/MHD-Typen ausgenommen
+  // (sonst Dauer-Fehlalarm bei bewusst niedrigem Bestand / Ladenhütern). Mandant=$1,
+  // Ausschluss-Liste ab $2 (die Tür stellt $1 voran).
   const r3 = await db.read({
-    tenant, tables: ['warnings'], params: [],
+    tenant, tables: ['warnings'], params: [NON_ISSUE_WARNING_TYPES],
     text:
       `SELECT COUNT(*) || ' ungeloeste Warnungen (Typ: ' || warning_type || ') aelter 7 Tage' AS message
          FROM automatenlager.warnings
-        WHERE tenant_id = $1 AND resolved = FALSE AND severity != 'info' AND created_at < NOW() - INTERVAL '7 days'
+        WHERE tenant_id = $1 AND resolved = FALSE AND severity != 'info'
+          AND created_at < NOW() - INTERVAL '7 days'
+          AND warning_type <> ALL($2::text[])
         GROUP BY warning_type HAVING COUNT(*) > 0
         ORDER BY warning_type` });
   out.alte_warnungen = r3.rows || [];
@@ -143,5 +151,6 @@ module.exports = {
   buildValidationReport,
   CHECK_LABELS,
   CHECK_ORDER,
+  NON_ISSUE_WARNING_TYPES,
   WORKFLOW_KEY,
 };
