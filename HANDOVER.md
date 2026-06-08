@@ -3,6 +3,25 @@
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 > Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-07_inventur-backup.md`.
 
+## Nachtrag (2026-06-08, Slice-1-Fortschritt) — Jobs 2–5: Blocker + GuV-Recon/Build-Plan
+
+**Status Slice 1 (#161):** Job 1/5 (matview-refresh) LIVE (s. u.). Jobs 2–5 analysiert (echte WF-JSONs gelesen):
+
+**🔒 Credential-Blocker (nur DU kannst lösen — Secrets liegen in n8ns verschlüsseltem Store, NICHT in `.env.local`):**
+- **WF-Val** (`pdIjiyIfVIIPuJIt`) + **WF-Monitor** (`EdgUfv1lMcE25Z3K`) mailen Gmail-Alerts → brauchen **Gmail-Cred** (z. B. `GMAIL_USER`/`GMAIL_APP_PASSWORD` in der Mini-`.env.local`) + ein **Mailer-Modul** (SPEC hatte den Mailer erst in Slice 2 — Falte: Val/Monitor können erst voll cutover, wenn der Mailer steht, sonst Alarm-Loch). Bei WF-Val zusätzlich: die **WF3-Neustart-Mechanik entfällt** (SPEC) — nur die DB-Konsistenz-Checks portieren, NICHT den `execution_entity`-Check.
+- **WF-Nayax-Devices-Sync** (`EaVcB3REMttuKZPa`) → **Nayax-Lynx-API-Token** in `.env.local` (z. B. `NAYAX_API_TOKEN`).
+
+**WF8 GuV (`gyM9rnvUMfnv4x3G`) — RECON KOMPLETT, self-contained (keine externe Cred), Build-Plan:**
+- **Kadenz:** Node heißt „Täglich 02:00", echte Regel ist aber **alle 15 min** (`minutesInterval:15`) → Worker `intervalMs: 900000` (NICHT dailyAt).
+- **Quelle (modern, die WF8-Read-Nodes lesen schon PG, gemappt auf Sheets-Feldnamen):** `sales_transactions` (st.settlement_at→sale_date Europe/Berlin, machine_key, product_key, mdb_code, quantity, gross_amount→umsatz_brutto, prices.sale_price_gross→vk), `stock_batches` (batch_key, unit_cost_net→unit_cost, products.vat_rate_pct→mwst_satz, status IN aktiv/active/reserve), `products`+`prices`, `classification_settings` (cfg `__default__`: kleinunternehmer_aktiv/mwst_snack=7/mwst_getraenk=19), `guv_daily` letzte 90 Tage (existing-Keys).
+- **Algorithmus (faithful aus „Code - GuV aggregieren" + „Prepare PGW - guv_daily"):** je tx: status≠OK skip; date aus settlement (Sentinel `2001-…` skip); EK_netto+mwst_einkauf aus **erster** `batch_id_abgebucht`-Charge (sonst MwSt aus produktart: snack→7, getraenk→19); `ek_brutto=ek_netto*(1+mwst/100)`; `warenein = qty * (kleinunternehmer ? ek_brutto : ek_netto)`; aggregiere je **`guv_key=date|machine_id|product_key`** (vorhandene Keys skip = idempotent): `quantity_sold=Σqty`, `revenue_gross=Σumsatz_brutto`, `cost_of_goods=Σwarenein` (=`wareneinsatz_brutto`), `gross_profit=guv=revenue_gross-cost_of_goods`, `revenue_net = kleinunternehmer?gross : gross/(1+vat/100)` (vat: snack 7 / sonst 19); `source='wf8_guv_aggregator'`.
+- **Write:** `guv_daily` upsert `ON CONFLICT (guv_key) DO NOTHING` (idempotent), **per Mandant durch die Tür** (`db.tx`, tenant_id), machine_key→machine_id / product_key→product_id auflösen.
+- **⚠️ Finanz-Sicherheitsnetz = PFLICHT:** den **Schatten-Harness** (`lib/jobs/shadow-harness.js`, #160) nutzen — portierte `guv_daily`-Zeilen gegen WF8s echte `guv_daily` (letzte Tage) diffen; **WF8 NUR deaktivieren, wenn exakt gleich** (sonst falsche Kunden-P&L). Empfehlung: diesen einen Build mit **frischem Fokus** (nicht am Ende einer Marathon-Session).
+
+**Muster (bewiesen an matview):** `lib/jobs/<name>.js` (rein + I/O durch Tür/Infra) → Tests (unit + Live acme/globex) → Worker-Schedule → 1 PR + `git reset`-Deploy + `docker compose restart worker` → `node worker.js --run <job>`-Smoke → WF via n8n-API deaktivieren (`POST /workflows/{id}/deactivate`, Rollback `/activate`). **Stopp vor #163/#164.**
+
+---
+
 ## Nachtrag (2026-06-08, noch später) — Stufe 6 **Slice 1 (#161) BEGONNEN: Job 1/5 LIVE**
 
 **Job 1/5 (WF-MatView-Refresh) komplett end-to-end live cutover** — der ganze Slice-1-Muster-Weg inkl. der heiklen **n8n-Deaktivierung** ist damit bewiesen:
