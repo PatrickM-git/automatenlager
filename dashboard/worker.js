@@ -156,6 +156,7 @@ function buildWorker(env = process.env) {
   const { createTenantJobRunner } = require('./lib/jobs/tenant-runner.js');
   const { createWorkflowRunRecorder } = require('./lib/workflow-runs.js');
   const { createMatViewRefreshJob } = require('./lib/jobs/matview-refresh.js');
+  const { createGuvAggregateJob } = require('./lib/jobs/guv-aggregate.js');
 
   function loadLocalEnv() {
     // Minimaler .env.local-Leser (Projekt- + dashboard-Ebene), wie server.js.
@@ -203,6 +204,8 @@ function buildWorker(env = process.env) {
 
   // Infra-Jobs (mandantenübergreifend, über die BYPASSRLS-Verbindung).
   const matViewRefreshJob = infraRunner ? createMatViewRefreshJob({ infraRunner }) : null;
+  // Per-Mandant-Jobs (durch die Tür, GUC je Mandant). WF8 GuV (Slice 1).
+  const guvAggregateJob = tenantRunner ? createGuvAggregateJob({ tenantRunner }) : null;
 
   // Heartbeat (Slice 0) + portierte idempotente Jobs (Slice 1). Nächtliche Jobs nutzen
   // dailyAt (drift-tolerant), nicht node-cron (auf dem WSL-Mini unzuverlässig).
@@ -215,6 +218,13 @@ function buildWorker(env = process.env) {
   if (matViewRefreshJob) {
     schedules.push({ name: matViewRefreshJob.key, dailyAt: env.WORKER_MATVIEW_AT || '04:45', kind: 'infra',
       run: () => matViewRefreshJob.run() });
+  }
+  // WF8 GuV-Aggregator (n8n: Knoten heißt "Täglich 02:00", echte Regel = alle 15 min,
+  // minutesInterval:15) → per-Mandant-Job durch die Tür, intervalMs (drift-immun).
+  // Idempotent (ON CONFLICT guv_key) ⇒ häufige Läufe sind unschädlich.
+  if (guvAggregateJob) {
+    schedules.push({ name: guvAggregateJob.key, intervalMs: Number(env.WORKER_GUV_MS) || 15 * 60 * 1000, kind: 'tenant',
+      run: () => guvAggregateJob.run() });
   }
 
   const worker = createWorker({ schedules, recorder, logger: (...a) => console.log('[worker]', ...a) });
