@@ -20,7 +20,9 @@
 
 **Muster (bewiesen an matview):** `lib/jobs/<name>.js` (rein + I/O durch Tür/Infra) → Tests (unit + Live acme/globex) → Worker-Schedule → 1 PR + `git reset`-Deploy + `docker compose restart worker` → `node worker.js --run <job>`-Smoke → WF via n8n-API deaktivieren (`POST /workflows/{id}/deactivate`, Rollback `/activate`). **Stopp vor #163/#164.**
 
-**Beobachtung (2026-06-08):** **WF-Update-Check** (`HvaJ7W28xX3F5qJa`) wirft im Node „Code - Build Update Report" (`latest= current= [line 70]` — n8n-Versionsermittlung leer; **brüchig, vorbestehend** — auch 2026-06-01 `latest=2.23.1 current=`). **NICHT durch die Stufe-6-Arbeit verursacht** (prüft nur n8n-Docker-Image-Updates). Obsolet → **DROP in Slice 2** (SPEC). Harmlos (nur Update-Benachrichtigung). Option: jetzt deaktivieren (stoppt die Fehler-Mails; Rollback `/activate`) oder regulär in Slice 2 droppen.
+**Beobachtung (2026-06-08):** **WF-Update-Check** (`HvaJ7W28xX3F5qJa`) wirft im Node „Code - Build Update Report" (`latest= current= [line 70]` — n8n-Versionsermittlung leer; **brüchig, vorbestehend** — auch 2026-06-01 `latest=2.23.1 current=`). **NICHT durch die Stufe-6-Arbeit verursacht** (prüft nur n8n-Docker-Image-Updates). Obsolet → war DROP-Kandidat Slice 2 → **am 2026-06-08 in n8n DEAKTIVIERT** (active=False; Rollback `/activate`; regulärer DROP in Slice 2).
+
+**Root-Cause WF3-Umsatzverlust (2026-06-08, live verifiziert) → Dauer-Fix-Anforderung auf #163 dokumentiert:** Dashboard-Umsatz < Moma, weil `WF3 Code - FIFO berechnen` Z.559 `if (sDate <= lastSuccessfulSaleDate) continue;` einen **monoton-steigenden High-Watermark** (`workflow_state.last_inventory_review_at`) nutzt → **out-of-order/spät abgerechnete Nayax-Verkäufe werden dauerhaft übersprungen** (erreichen den Insert nie; ON-CONFLICT-Dedup irrelevant). `lastSales` ohne Zeitfenster. **Slice-3-WF3-Port (#163) MUSS:** Zeitfenster-Pull mit Overlap + Insert-immer + ON-CONFLICT-Dedup (Watermark nur Performance-Hint, kein Korrektheits-Gate), automatische Voll-Reconciliation, keine stillen Skips, Schatten-Match vor Cutover. Sofort-Mitigation: Nayax-Abgleich (Voll-Vergleich).
 
 ---
 
