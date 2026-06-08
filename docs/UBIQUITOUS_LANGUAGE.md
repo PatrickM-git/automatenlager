@@ -332,6 +332,33 @@ Schreibpfade je Event-Typ · Worker **schreibt** Lauf-Telemetrie (Ersatz für `e
 
 ---
 
+## GuV-Kostenbasis & Besteuerungsmodell (Kleinunternehmer) *(neu)*
+
+> Quelle: SPEC `docs/specs/guv-kostenbasis-kleinunternehmer-restatement-v1.md`. Das Besteuerungsmodell
+> entscheidet, ob der Wareneinsatz **brutto** oder **netto** gebucht wird; eine Schlüssel-Schreibweise-Divergenz
+> (camelCase vs. snake_case) hatte Live-Anzeige (brutto) und gebuchte Nacht-GuV (netto) auseinanderlaufen lassen.
+> Reconciliation mit Cluster „Wirtschaftlichkeit": die dortige Aussage „`cost_of_goods` ist brutto" ist die
+> **Soll-Semantik** für einen Kleinunternehmer — vom Bug auf netto gebrochen, von dieser SPEC (Restatement) wiederhergestellt.
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **Kleinunternehmer (§19 UStG)** | Betreiber, der **keine** USt auf den Umsatz erhebt → `revenue_net = revenue_gross`; zahlt aber USt auf Einkäufe **ohne** Vorsteuerabzug → Wareneinsatz **brutto**. | „umsatzsteuerbefreit" pauschal |
+| **Regelbesteuert** | Betreiber **mit** Vorsteuerabzug → Wareneinsatz **netto** (gezahlte Vorsteuer wird erstattet, netto ist der echte Aufwand). | „normal besteuert" als Code-Begriff |
+| **Kostenbasis (`cost_basis`)** | Spalte auf `guv_daily` (`netto`/`brutto`, nullable): **Faktum**, auf welcher Basis `cost_of_goods` der Zeile berechnet **ist** — getrennt von der Frage, welche Basis sie haben **soll**. | mit der Restatement-Entscheidung gleichsetzen |
+| **Restatement** | In-place-Korrektur bereits gebuchter Netto-Zeilen auf brutto (`cost_of_goods × (1+Kategorie-MwSt/100)`, `gross_profit` neu, `revenue_net = revenue_gross`), **beleg-treu ohne** FIFO-Neulauf, auditiert + reversibel. | „neu berechnen", „FIFO-Recompute" |
+| **Klassifizierung über NULL-Marker** | Altzeilen (`cost_basis IS NULL`) werden vor dem Restatement als `netto` eingestuft; restated wird **nur** `cost_basis = 'netto'`. Grundsatz: **Quelle hilft klassifizieren, `cost_basis` entscheidet das Restatement.** | nach `source` pauschal restaten |
+| **Kategorie-Satz (kanonische MwSt-Quelle)** | Der Brutto-Aufschlag nutzt **überall** (Live, Nacht-GuV, Restatement) den Kategorie-MwSt aus `classification_settings` (Snack 7 / Getränk 19 / Fallback 19); `products.vat_rate_pct` (Legacy-Freitext) soll ihn nur **spiegeln** (Preflight-Reconciliation). | `vat_rate_pct` als zweite Wahrheit |
+| **Nacht-GuV (`wf8_guv_aggregator`)** | Der per-Mandant-Job `lib/jobs/guv-aggregate.js` (vormals WF8, deaktiviert) — **einziger** Schreiber von `guv_daily`. | „WF8" als laufender Workflow |
+| **`historic_backfill`** | Einmalig nachgetragene Vor-WF8-Zeit (Okt 2025 – 10.05.2026 = Steuerjahr 2025), netto gebucht, im GuV-Panel ausgeblendet (Sichtbarkeit = [#172](https://github.com/PatrickM-git/automatenlager/issues/172)). | „Altdaten" pauschal |
+| **Live-/provisorische Posten** | Flüchtige „heute"-Berechnung in `economics.js`; schreibt **nie** nach `guv_daily` (rein Anzeige). Deshalb existieren **keine** persistierten Brutto-/Live-Zeilen. | „Live-Zeilen in guv_daily" |
+| **Restatement-Logbuch (`audit.guv_restatement_log`)** | Audit-Tabelle je restateter Zeile mit `restatement_run_id` + Alt/Neu-Werten (`cost_of_goods`/`gross_profit`/`revenue_net`) + `vat_rate`/`factor` — Nachweis + exakter (Teil-)Rollback. | „Log" pauschal |
+
+Beziehungen: Besteuerungsmodell (Kleinunternehmer/Regelbesteuert) **bestimmt** die Soll-Kostenbasis · `cost_basis` **markiert** die Ist-Basis je Zeile ·
+Restatement **hebt** `cost_basis='netto'`-Zeilen eines Kleinunternehmer-Mandanten auf brutto **und** setzt `revenue_net = revenue_gross` · Kategorie-Satz **ist** die **eine** MwSt-Quelle für Live, Nacht-GuV und Restatement ·
+Restatement-Logbuch **protokolliert** jede Änderung (rückwegsfähig) · Live-Posten **fließen nie** in `guv_daily` (kein Doppel-Brutto-Risiko).
+
+---
+
 ## Anbieter-Integration: `provider` & Vending Data Integration Layer *(neu)*
 
 > Nayax ist der **erste**, nicht der einzige Daten-Eingang. Stufe 0 nimmt nur die `provider`-Dimension mit;
@@ -442,6 +469,17 @@ Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
 > **Domain Expert:** „Die steht da nicht — WF-PGW ruft nur **`pgw_write()`** auf, eine DB-Funktion außerhalb des Repos. Erst **Pre-Flight-Dump** ziehen, sonst baust du gegen eine Doku-Annahme."
 > **Dev:** „Woran sehe ich am Ende, dass es wirklich dicht ist?"
 > **Domain Expert:** „`n8n_app` verliert **`BYPASSRLS`**, und ein Schreiben ohne gesetzte GUC **kracht**. Das ist der Nachweis **RLS systemweit** — der eigentliche Gewinn."
+
+## Beispiel-Dialog (GuV-Kostenbasis / Kleinunternehmer) *(neu)*
+
+> **Dev:** „Der Nayax-Umsatz ist 1,20 € — rechne ich die 7 % MwSt für den Netto-Umsatz raus?"
+> **Domain Expert:** „Nein. Als **Kleinunternehmer** erheben wir keine USt — im Preis steckt keine. `revenue_net = revenue_gross`. Rausrechnen würde den Umsatz fälschlich kleinrechnen."
+> **Dev:** „Und der Einkauf? In den Stammdaten steht netto."
+> **Domain Expert:** „Auf die **Kosten** kommt die MwSt **drauf** (brutto), weil wir sie zahlen und nicht zurückbekommen: `cost_of_goods × (1 + Kategorie-MwSt/100)`. Nur die Kosten, nie der Umsatz."
+> **Dev:** „Dann rechne ich alle gebuchten Zeilen × 1,07 — fertig?"
+> **Domain Expert:** „Nicht nach Quelle pauschal. **Quelle hilft klassifizieren, `cost_basis` entscheidet.** Wir markieren erst jede Zeile, und das **Restatement** fasst nur `cost_basis='netto'` an — sonst wird's beim zweiten Lauf doppelt brutto."
+> **Dev:** „Welchen MwSt-Satz nehme ich — den pro Produkt eingetragenen?"
+> **Domain Expert:** „Den **Kategorie-Satz** (Snack 7, Getränk 19). Der pro-Produkt-`vat_rate_pct` soll ihn nur spiegeln; der Preflight vergleicht beide und meldet Abweichungen als nachzupflegende Altdaten."
 
 ## Markierte Unklarheiten *(neu)*
 
