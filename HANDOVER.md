@@ -3,7 +3,35 @@
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 > Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-07_inventur-backup.md`.
 
-## 2026-06-08 — Stufe 6 (n8n-Ablösung) **Slice 0 / #160** — Code+Tests FERTIG, PR-fertig, **NICHT deployt**
+## Nachtrag (2026-06-08, später) — Slice 0 **LIVE deployt + verifiziert** (+ Worker-Fix #167)
+
+Slice 0 ist auf dem Mini **deployt und live verifiziert**. Ablauf:
+1. PR **#165** (Slice 0) + **#166** (IR-Runbook #109) → `main` gemergt.
+2. **Mini-Deploy (Slice 0):** `git reset --hard origin/main` → **DDL 0027** auf Prod angewandt
+   (Spalten `error/source/details` + Lese-Indizes; idempotent, verifiziert) → `npm install` (node-cron)
+   → **Worker-Service** in die Mini-Compose `/mnt/c/homelab/docker-compose.yml` (Backup `*.bak-pre-worker`,
+   `docker compose config`-validiert) → `up -d --build worker`. Dashboard/n8n/Postgres **unberührt**
+   (kein Dashboard-Restart — `server.js` unverändert).
+3. **Live-Smoke deckte einen echten Bug auf:** node-cron v4 verwarf auf dem WSL2/Docker-Mini **jeden Tick**
+   als „missed execution" (WSL2-Uhr-Drift + v4-Drift-Schutz) → Heartbeat schrieb nie. node-cron feuert auf
+   dem Dev-Rechner einwandfrei (Nutzung korrekt). **Fix PR #167:** Worker-Scheduler auf **`setInterval`
+   (drift-immun) + `runOnStart`** umgestellt; node-cron bleibt für `cronExpr`-Jobs. **Echt-Timer-Tests**
+   ergänzt (die Fake-cron-Test-Lücke geschlossen). Re-Deploy: `git reset` + `docker compose restart worker`.
+4. **Verifiziert in der In-Container-Prod-DB** (`homelab-postgres`): `audit.workflow_runs`,
+   `workflow_key='worker-heartbeat'` → run **6785** (runOnStart, 05:16 UTC) + run **6798** (Intervall, 05:21 UTC),
+   beide `status=success`. ✅
+   *(Hinweis Verifikations-Falle: `now() AT TIME ZONE 'UTC'` über node-pg wird in Dev-Lokalzeit interpretiert
+   → scheinbare 2-h-Differenz; Dev-Tunnel `127.0.0.1:15432` ist dieselbe Prod-DB.)*
+
+**Trivialer Rest:** Mini-Compose-Env trägt noch das (vom Code ignorierte) `WORKER_HEARTBEAT_CRON` — bei
+Gelegenheit auf `WORKER_HEARTBEAT_MS` umbenennen (sonst greift der Default 300000 = 5 min, was passt).
+
+**Nächster Slice (gemeinsam):** Slice 1 (**#161**) — idempotente Jobs (WF8/MatView/Val/Monitor/Devices)
+durch diese Maschinerie portieren → je Smoke → entsprechende n8n-WF deaktivieren.
+
+---
+
+## 2026-06-08 — Stufe 6 (n8n-Ablösung) **Slice 0 / #160** — Code+Tests + LIVE deployt (Deploy s. Nachtrag oben)
 
 Fundament für die n8n-Ablösung (SPEC: `docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md`,
 Slice 0 = Z. 111). **Kein Verhaltenswechsel — n8n bleibt autoritativ.** Branch
