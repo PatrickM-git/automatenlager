@@ -20,6 +20,8 @@
 
 **Muster (bewiesen an matview):** `lib/jobs/<name>.js` (rein + I/O durch Tür/Infra) → Tests (unit + Live acme/globex) → Worker-Schedule → 1 PR + `git reset`-Deploy + `docker compose restart worker` → `node worker.js --run <job>`-Smoke → WF via n8n-API deaktivieren (`POST /workflows/{id}/deactivate`, Rollback `/activate`). **Stopp vor #163/#164.**
 
+**Beobachtung (2026-06-08):** **WF-Update-Check** (`HvaJ7W28xX3F5qJa`) wirft im Node „Code - Build Update Report" (`latest= current= [line 70]` — n8n-Versionsermittlung leer; **brüchig, vorbestehend** — auch 2026-06-01 `latest=2.23.1 current=`). **NICHT durch die Stufe-6-Arbeit verursacht** (prüft nur n8n-Docker-Image-Updates). Obsolet → **DROP in Slice 2** (SPEC). Harmlos (nur Update-Benachrichtigung). Option: jetzt deaktivieren (stoppt die Fehler-Mails; Rollback `/activate`) oder regulär in Slice 2 droppen.
+
 ---
 
 ## Nachtrag (2026-06-08, noch später) — Stufe 6 **Slice 1 (#161) BEGONNEN: Job 1/5 LIVE**
