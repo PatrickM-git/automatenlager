@@ -25,13 +25,13 @@ test('#161 buildValidationReport: leer ⇒ keine Issues', () => {
 
 test('#161 buildValidationReport: zählt Zeilen, Betreff/HTML faithful, Singular/Plural', () => {
   const r = dv.buildValidationReport({
-    keine_preise: [{ message: 'Aktiver Slot ohne Preis: Cola' }, { message: 'Aktiver Slot ohne Preis: Fanta' }],
+    alte_warnungen: [{ message: '2 ungeloeste Warnungen (Typ: WORKFLOW_ERROR) aelter 7 Tage' }, { message: '1 ungeloeste Warnungen (Typ: UNKNOWN_PRODUCT) aelter 7 Tage' }],
     negative_qty: [{ message: 'Negative Menge (-2) fuer: Snickers' }],
   }, '2026-06-08T00:00:00Z');
   assert.equal(r.count, 3, '3 Zeilen über 2 Typen');
   assert.equal(r.subject, '[DB-Check] 3 Probleme - Automatenlager');
   assert.match(r.html, /WF-Val Pruefung: 3 Probleme/);
-  assert.match(r.html, /Aktive Slots ohne Preis \(2\)/);
+  assert.match(r.html, /Alte ungeloeste Warnungen \(>7 Tage\) \(2\)/);
   assert.match(r.html, /Negative Lagermengen \(1\)/);
   assert.match(r.html, /<li>Negative Menge \(-2\) fuer: Snickers<\/li>/);
 
@@ -39,14 +39,32 @@ test('#161 buildValidationReport: zählt Zeilen, Betreff/HTML faithful, Singular
   assert.equal(one.subject, '[DB-Check] 1 Problem - Automatenlager', 'Singular');
 });
 
+test('#161 Eingedampfter Scope: kein keine_preise; Bestands-/MHD-Typen ausgenommen', () => {
+  assert.ok(!dv.CHECK_ORDER.includes('keine_preise'), 'keine_preise ist entfernt (Rauschen)');
+  for (const t of ['LOW_BATCH', 'LOW_STOCK', 'MHD_NEAR']) {
+    assert.ok(dv.NON_ISSUE_WARNING_TYPES.includes(t), `${t} ist von "alte Warnungen" ausgenommen`);
+  }
+});
+
 test('#161 createDbValidationJob: ohne tenantRunner ⇒ TypeError', () => {
   assert.throws(() => dv.createDbValidationJob({}), /tenantRunner/);
 });
 
 // ── LIVE: Isolation durch die Tür + Mandanten-Alert ──────────────────────────
-test('#161 DB-Validierung LIVE: jeder Mandant nur eigene Inkonsistenzen, Alert an Mandanten-Adresse', async (t) => {
+test('#161 DB-Validierung LIVE: Isolation + LOW_BATCH ausgenommen, WORKFLOW_ERROR drin', async (t) => {
   await inSandbox(t, async (client) => {
-    await seedAcmeGlobex(client); // jeder Mandant hat 1 AKTIVEN Slot OHNE Preis ⇒ keine_preise feuert
+    await seedAcmeGlobex(client);
+    // (a) negative Menge je Mandant (unterscheidbar über den Produktnamen) ⇒ negative_qty
+    await client.query(`UPDATE automatenlager.stock_batches SET remaining_qty = -3 WHERE batch_key IN ('b_acme','b_globex')`);
+    // (b) die WORKFLOW_ERROR-Fixture-Warnung alt + severity setzen ⇒ echter Fehler, bleibt drin
+    await client.query(`UPDATE automatenlager.warnings SET created_at = now() - INTERVAL '10 days', severity = 'warning' WHERE warning_key IN ('warn_acme','warn_globex')`);
+    // (c) alte LOW_BATCH-Warnung je Mandant ⇒ MUSS ausgenommen werden (Ladenhüter-Fix)
+    for (const tid of ['acme', 'globex']) {
+      await client.query(
+        `INSERT INTO automatenlager.warnings (warning_key, warning_type, message, severity, source_workflow, tenant_id, created_at, resolved)
+         VALUES ($1, 'LOW_BATCH', $2, 'warning', 'wf5', $3, now() - INTERVAL '10 days', FALSE)`,
+        [`lowbatch_${tid}`, `Skittles ${tid}: nur noch 4`, tid]);
+    }
     for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
     await client.query('SET ROLE automatenlager_app');
     try {
@@ -55,19 +73,22 @@ test('#161 DB-Validierung LIVE: jeder Mandant nur eigene Inkonsistenzen, Alert a
 
       const mAcme = mk();
       const rA = await dv.validateTenant(db, 'acme', { mailer: mAcme, env: { ALERT_EMAIL_DEFAULT: 'ops@x', ALERT_EMAIL_acme: 'acme-ops@x' } });
-      assert.ok(rA.count >= 1, 'acme hat mind. 1 Inkonsistenz (preisloser Slot, nicht-vakuös)');
       assert.equal(rA.hasIssues, true);
       assert.equal(rA.mailed, true);
       assert.equal(rA.recipient, 'acme-ops@x', 'per-Mandant-Adresse bevorzugt');
-      assert.equal(mAcme.sent.length, 1);
-      assert.match(mAcme.sent[0].html, /Cola acme/, 'acme-Alert nennt acme-Produkt (nicht-vakuös)');
-      assert.ok(!/Cola globex/.test(mAcme.sent[0].html), 'acme-Alert nennt KEIN globex-Produkt (Isolation)');
+      const html = mAcme.sent[0].html;
+      assert.match(html, /Cola acme/, 'negative Menge nennt acme-Produkt (nicht-vakuös)');
+      assert.match(html, /WORKFLOW_ERROR/, 'echter Workflow-Fehler bleibt drin');
+      assert.ok(!/LOW_BATCH/.test(html), 'Bestands-Warnung LOW_BATCH ist AUSGENOMMEN (Ladenhüter-Fix)');
+      assert.ok(!/Skittles/.test(html), 'kein Skittles-Bestands-Rauschen');
+      assert.ok(!/Cola globex/.test(html), 'Isolation: kein globex-Produkt');
 
       const mGlobex = mk();
       const rG = await dv.validateTenant(db, 'globex', { mailer: mGlobex, env: { ALERT_EMAIL_DEFAULT: 'ops@x' } });
-      assert.equal(rG.recipient, 'ops@x', 'Fallback-Default, wenn keine per-Mandant-Adresse');
+      assert.equal(rG.recipient, 'ops@x', 'Fallback-Default ohne per-Mandant-Adresse');
       assert.match(mGlobex.sent[0].html, /Cola globex/);
-      assert.ok(!/Cola acme/.test(mGlobex.sent[0].html), 'globex-Alert nennt KEIN acme-Produkt (Isolation)');
+      assert.ok(!/Cola acme/.test(mGlobex.sent[0].html), 'Isolation: kein acme-Produkt');
+      assert.ok(!/LOW_BATCH/.test(mGlobex.sent[0].html), 'LOW_BATCH auch bei globex ausgenommen');
     } finally {
       await client.query('RESET ROLE');
     }
