@@ -29,9 +29,11 @@ services:
     env_file:
       - ./dashboard/.env.local      # DASHBOARD_V2_PG_URL + DASHBOARD_V2_APP_PG_URL (+ künftige Job-Credentials)
     environment:
-      # Optionaler Override des Heartbeat-Intervalls (Default '*/5 * * * *').
-      WORKER_HEARTBEAT_CRON: "*/5 * * * *"
-      # TZ konsistent zum Web-Dienst halten (Cron-Ausdrücke sind zeitzonenabhängig).
+      # Optionaler Override des Heartbeat-Intervalls in Millisekunden (Default 300000 = 5 min).
+      # Der Heartbeat ist INTERVALL-basiert (setInterval, drift-immun) — NICHT node-cron,
+      # da node-cron v4 auf dem WSL2/Docker-Mini Ticks als "missed execution" verwirft.
+      WORKER_HEARTBEAT_MS: "300000"
+      # TZ konsistent zum Web-Dienst halten (relevant für künftige cronExpr-Jobs).
       TZ: "Europe/Berlin"
     depends_on:
       - db                          # an den bestehenden Postgres-Service anpassen (Name im echten compose)
