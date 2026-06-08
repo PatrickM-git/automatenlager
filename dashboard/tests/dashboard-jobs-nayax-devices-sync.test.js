@@ -27,6 +27,13 @@ test('#161 mapDevices: Feld-Fallbacks + leere IDs verworfen (faithful)', () => {
   assert.deepEqual(rows[1], { nayax_machine_id: '200', machine_number: 'B2', machine_name: 'Keller' });
 });
 
+test('#161 normalizeAuthValue: entfernt führendes "=" (n8n-Expression-Artefakt), sonst unverändert', () => {
+  assert.equal(nx.normalizeAuthValue('=Bearer abc123'), 'Bearer abc123', 'führendes = (n8n-Expression) entfernt');
+  assert.equal(nx.normalizeAuthValue('Bearer abc123'), 'Bearer abc123', 'ohne = unverändert');
+  assert.equal(nx.normalizeAuthValue('  =Token x '), 'Token x', 'getrimmt + = entfernt');
+  assert.equal(nx.normalizeAuthValue(null), '', 'null ⇒ leer');
+});
+
 test('#161 resolveNayaxTenant: explizit > einziger Registry-Mandant; mehrdeutig ⇒ null', () => {
   assert.equal(nx.resolveNayaxTenant({ NAYAX_TENANT_ID: 't_faltrix' }, { listTenantIds: () => ['a', 'b'] }), 't_faltrix');
   assert.equal(nx.resolveNayaxTenant({}, { listTenantIds: () => ['nur_einer'] }), 'nur_einer');
