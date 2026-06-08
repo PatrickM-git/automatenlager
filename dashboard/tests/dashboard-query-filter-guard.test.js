@@ -224,3 +224,55 @@ test('#141 Guard: server.js im Standard-Scan — kein Bypass außerhalb Infra-Al
   assert.deepEqual(violations.map((v) => v.file), [],
     'server.js darf nur Infra-rohes-pg tragen (Startup/Diagnostik); kein HTTP-Layer-Bypass erlaubt');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #160 (Stufe 6, Slice 0) — lib/jobs/* + Worker-Einstieg IM BUILD-BLOCKING-SCAN
+// Die portierten Jobs müssen ALLE durch die Mandanten-Tür schreiben/lesen. Der
+// Scan erfasst jetzt zusätzlich das Unterverzeichnis lib/jobs/ (extraDirs) und den
+// Worker-Einstieg worker.js (entryFiles). Dokumentierte Ausnahmen (rohes pg mit
+// Begründung, KEIN Mandanten-Datenpfad — analog db-schema.js / server.js):
+//   - infra-runner.js : MatView-REFRESH über die Infra-/BYPASSRLS-Verbindung
+//   - worker.js       : Kompositions-Wurzel (new Pool) + Einstieg, injiziert
+//                       Tür+Infra in die Jobs (kein eigener Mandanten-Read)
+// ─────────────────────────────────────────────────────────────────────────────
+const JOBS_DIR = path.join(__dirname, '..', 'lib', 'jobs');
+const WORKER_ENTRY = path.join(__dirname, '..', 'worker.js');
+const SERVER_ENTRY = path.join(__dirname, '..', 'server.js');
+const JOBS_INFRA_ALLOWLIST = [
+  'infra-runner.js', // MatView-REFRESH über Infra/BYPASSRLS — kein Mandanten-Datenpfad
+  'worker.js',       // Komposition/Einstieg (new Pool), injiziert Tür+Infra in die Jobs
+];
+const SLICE6_ALLOWLIST = [...FINAL_ALLOWLIST, ...JOBS_INFRA_ALLOWLIST];
+
+test('#160 Guard build-blocking: lib/jobs/* + Worker — kein Schreibpfad an der Tür vorbei (außer Infra-Ausnahme)', () => {
+  const violations = guard.findViolations({
+    libDir: LIB_DIR,
+    extraDirs: [JOBS_DIR],
+    entryFiles: [SERVER_ENTRY, WORKER_ENTRY],
+    allowlist: SLICE6_ALLOWLIST,
+  });
+  assert.deepEqual(violations.map((v) => v.file), [],
+    'jeder Job muss durch die Tür; ein neuer roher-pg-Job (nicht allowlistet) ⇒ Build rot');
+});
+
+test('#160 Guard: saubere Job-Module sind NICHT geflaggt und NICHT allowlistet (kein Rückfall)', () => {
+  const report = guard.buildReport({ libDir: LIB_DIR, extraDirs: [JOBS_DIR], entryFiles: [WORKER_ENTRY] });
+  const flagged = report.bypass.map((b) => b.file);
+  for (const cleanFile of ['tenant-runner.js', 'shadow-harness.js', 'workflow-runs.js']) {
+    assert.ok(!flagged.includes(cleanFile), `${cleanFile} geht durch die Tür / injiziert (kein rohes pg)`);
+    assert.ok(!SLICE6_ALLOWLIST.includes(cleanFile), `${cleanFile} ist NICHT allowlistet (Rückfall ⇒ Verstoß)`);
+  }
+});
+
+test('#160 Guard: der Infra-Runner trägt bewusst rohes pg und ist dokumentiert allowlistet', () => {
+  const report = guard.buildReport({ libDir: LIB_DIR, extraDirs: [JOBS_DIR] });
+  const flagged = report.bypass.map((b) => b.file);
+  assert.ok(flagged.includes('infra-runner.js'), 'infra-runner.js trägt rohes pool.query (Infra-Ausnahme)');
+  assert.ok(JOBS_INFRA_ALLOWLIST.includes('infra-runner.js'), 'und steht als dokumentierte Ausnahme auf der Allowlist');
+});
+
+test('#160 Guard: ein NEUES lib/jobs-Modul mit rohem pg bräche den Build (nicht allowlistet)', () => {
+  // Strukturbeweis: rohes pg in einem Job wird erkannt; da nicht auf SLICE6_ALLOWLIST ⇒ Verstoß.
+  assert.ok(guard.scanSource("module.exports = async (pool) => pool.query('SELECT * FROM automatenlager.guv_daily');").length > 0);
+  assert.ok(!SLICE6_ALLOWLIST.includes('a-new-raw-job.js'), 'ein neues Job-Modul ist per Definition nicht allowlistet');
+});

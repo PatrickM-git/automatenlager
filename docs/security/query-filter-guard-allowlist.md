@@ -127,3 +127,30 @@ Korridor — abgefangen zur Laufzeit erst durch **RLS (Stufe 5)**.
 Autorisierungs-Tor + der Wächter im CI**, **nicht** ein SQL-prüfender Parser. Ein Leck,
 das am Wächter vorbeikäme, fängt erst **RLS (Stufe 5)** ab — bewusst akzeptierter
 Restrisiko-Korridor; **ein zweiter realer Kunde erst nach Stufe 3+4+5.**
+
+## Stufe 6 (#160) — `lib/jobs/*` + Worker-Einstieg im Scan
+
+Stufe 6 löst n8n ab; die portierten Jobs leben in `lib/jobs/*` und der Scheduler in
+`worker.js`. Beide kommen in den **build-blocking Standard-Scan** des Wächters, damit
+kein Job versehentlich an der Tür vorbei schreibt:
+
+- **`extraDirs`** erweitert `buildReport`/`findViolations` additiv um flache Verzeichnisse
+  (hier `lib/jobs/`), per Basename klassifiziert wie `entryFiles`. Der Worker-Einstieg
+  `worker.js` wird wie `server.js` über `entryFiles` mitgescannt.
+- **Saubere Job-Module** (`tenant-runner.js`, `shadow-harness.js`) tragen **kein** rohes pg
+  (sie bekommen die Tür injiziert) und stehen daher **nicht** auf der Allowlist — ein
+  Rückfall (neues rohes pg) bräche den Build. Der Telemetrie-Schreiber `lib/workflow-runs.js`
+  ist ebenfalls sauber (injizierter `exec`).
+
+### Dokumentierte Datei-Ausnahmen (Stufe 6)
+
+| Datei | Begründung |
+| --- | --- |
+| `infra-runner.js` | Mandantenübergreifende Pflege (`REFRESH MATERIALIZED VIEW …`) über die **Infra-/BYPASSRLS-Verbindung** — der einzige legitime Nicht-Tür-Pfad (kein Mandant zu setzen). Kapselt rohes `pool.query` an EINER Stelle; View-Namen gegen Allowlist validiert (kein Identifier-Injection). Analog `db-schema.js`. |
+| `worker.js` | Kompositions-Wurzel/Einstieg (`new Pool` für Infra- + App-Verbindung), injiziert Tür+Infra in die Jobs. Kein eigener Mandanten-Read. Analog `server.js`. |
+
+`audit.workflow_runs` ist **System-Telemetrie ohne `tenant_id`** (geteilte Pipeline) — der
+Schreiber läuft bewusst über die Infra-Verbindung, nicht durch die Tür.
+
+> Vollständiger Backstop-Nachweis (`n8n_app` verliert BYPASSRLS, „Schreiben ohne GUC kracht")
+> = **Slice 4 (#164)** — erst wenn ALLE ex-n8n-Schreiber durch die Tür gehen.

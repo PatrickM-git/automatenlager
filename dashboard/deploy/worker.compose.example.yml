@@ -1,0 +1,47 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# BEISPIEL-Service-Snippet für den Worker-Dienst (Stufe 6, Slice 0, Issue #160).
+# SPEC: docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md §"Solution" (Worker-Dienst)
+#
+# Der Worker ersetzt n8n als SCHEDULER. Er läuft als EIGENER docker-compose-Service
+# auf dem Mini — gleiches App-Image wie der Web-Dienst, nur ein anderer Entry-Point
+# (`node worker.js` statt `node server.js`), GETRENNT vom Web-Prozess, mit
+# `restart: always` (self-healing; ersetzt n8ns interne Wiederbelebung).
+#
+# Dies ist ein BEISPIEL. Die echte compose-Datei liegt — wie der bestehende Deploy —
+# AUSSERHALB des Repos im Homelab des Mini (Bind-Mount; siehe Memory
+# `mini-deploy-mechanismus`). Dieses Snippet zeigt nur, wie der Service einzuhängen
+# ist. Auf Render wird derselbe Entry-Point ein Background Worker / Cron Job
+# (cloud-agnostisch — Umzug statt Rewrite).
+#
+# WICHTIG: KEIN neuer BYPASS. Der Worker nutzt dieselben zwei Verbindungen wie der
+# Web-Dienst: INFRA (DASHBOARD_V2_PG_URL, BYPASSRLS) für Registry/MatView-Refresh/
+# Telemetrie und APP (DASHBOARD_V2_APP_PG_URL, automatenlager_app/RLS) für die
+# Mandanten-Tür. Beide aus derselben .env.local.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  automatenlager-worker:
+    # Gleiches Image wie der Web-Dienst (ein Build, zwei Entry-Points).
+    image: automatenlager-dashboard:latest
+    # build: ./dashboard            # falls aus dem Quellbaum gebaut wird (wie der Web-Dienst)
+    command: ["node", "worker.js"]  # Entry-Point: Scheduler statt HTTP-Server
+    restart: always                 # self-healing: ein abgestürzter Tick reißt nicht den Web-Dienst mit
+    env_file:
+      - ./dashboard/.env.local      # DASHBOARD_V2_PG_URL + DASHBOARD_V2_APP_PG_URL (+ künftige Job-Credentials)
+    environment:
+      # Optionaler Override des Heartbeat-Intervalls (Default '*/5 * * * *').
+      WORKER_HEARTBEAT_CRON: "*/5 * * * *"
+      # TZ konsistent zum Web-Dienst halten (Cron-Ausdrücke sind zeitzonenabhängig).
+      TZ: "Europe/Berlin"
+    depends_on:
+      - db                          # an den bestehenden Postgres-Service anpassen (Name im echten compose)
+    # Keine Ports: der Worker ist KEIN HTTP-Dienst (nur Scheduler + Jobs).
+    # Logs landen auf stdout (audit.workflow_runs trägt die Lauf-Telemetrie).
+
+# Deploy auf dem Mini (Schema, Details siehe Memory `mini-deploy-mechanismus`):
+#   1) git pull --ff-only           (Bind-Mount des Repos)
+#   2) DDL 0027 anwenden            (audit.workflow_runs-Schreibvertrag; idempotent)
+#   3) npm install --omit=dev       (node-cron ergänzen)
+#   4) docker compose up -d --build automatenlager-worker
+#   5) Live-Smoke: docker compose logs -f automatenlager-worker  →  Heartbeat-Lauf
+#      taucht in audit.workflow_runs auf (workflow_key='worker-heartbeat', status='success').

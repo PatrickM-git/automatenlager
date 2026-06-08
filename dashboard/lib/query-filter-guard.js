@@ -100,15 +100,29 @@ function listJsFiles(dir) {
  * @param {string} opts.libDir              flaches lib-Verzeichnis
  * @param {string[]} [opts.doorFiles]       erlaubte DB-Schicht (Basenames)
  * @param {string[]} [opts.entryFiles]      zusätzliche absolute Dateipfade (additiv)
+ * @param {string[]} [opts.extraDirs]       zusätzliche flache Verzeichnisse (additiv,
+ *                                          z. B. lib/jobs/ — Stufe 6 #160)
  * @returns {{door:{file,reasons}[], bypass:{file,reasons}[], all:{file,reasons}[]}}
  */
-function buildReport({ libDir, doorFiles = DOOR_FILES, entryFiles = [] } = {}) {
+function buildReport({ libDir, doorFiles = DOOR_FILES, entryFiles = [], extraDirs = [] } = {}) {
   if (!libDir) throw new TypeError('query-filter-guard: libDir erforderlich');
   const all = [];
   for (const file of listJsFiles(libDir)) {
     if (SELF_FILES.includes(file)) continue; // der Wächter meldet sich nicht selbst
     const reasons = scanSource(fs.readFileSync(path.join(libDir, file), 'utf8'));
     if (reasons.length) all.push({ file, reasons });
+  }
+  // #160 (Stufe 6): zusätzliche Verzeichnisse (z. B. lib/jobs/) FLACH mitscannen,
+  // per Basename klassifiziert (wie entryFiles). So unterliegen die portierten Jobs
+  // demselben No-Bypass-Vertrag wie lib/ — der Worker injiziert die Tür, der einzige
+  // legitime rohe-pg-Job ist der Infra-Runner (dokumentierte Allowlist-Ausnahme).
+  for (const dir of extraDirs) {
+    if (!fs.existsSync(dir)) continue; // fehlendes Verzeichnis ⇒ nichts zu scannen
+    for (const file of listJsFiles(dir)) {
+      if (SELF_FILES.includes(file) || all.some((r) => r.file === file)) continue;
+      const reasons = scanSource(fs.readFileSync(path.join(dir, file), 'utf8'));
+      if (reasons.length) all.push({ file, reasons });
+    }
   }
   // Additive Einstiegsdateien (absolute Pfade; per Basename klassifiziert).
   for (const fp of entryFiles) {
@@ -127,8 +141,8 @@ function buildReport({ libDir, doorFiles = DOOR_FILES, entryFiles = [] } = {}) {
  * (pro Slice schrumpfenden) Allowlist noch-nicht-migrierter Dateien stehen.
  * Allowlist leer ⇒ jeder bypass ist ein Verstoß (build-blocking-Endzustand).
  */
-function findViolations({ libDir, doorFiles = DOOR_FILES, allowlist = [], entryFiles = [] } = {}) {
-  const { bypass } = buildReport({ libDir, doorFiles, entryFiles });
+function findViolations({ libDir, doorFiles = DOOR_FILES, allowlist = [], entryFiles = [], extraDirs = [] } = {}) {
+  const { bypass } = buildReport({ libDir, doorFiles, entryFiles, extraDirs });
   const allow = new Set(allowlist);
   return bypass.filter((r) => !allow.has(r.file));
 }
