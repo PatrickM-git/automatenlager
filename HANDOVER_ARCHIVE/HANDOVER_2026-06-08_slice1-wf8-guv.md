@@ -1,34 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-08_slice1-wf8-guv.md`.
-
-## Nachtrag (2026-06-08, am spätesten) — Slice 1 **Jobs 3–5: Nayax LIVE cutover; Val + Worker-Monitor LIVE (Code), n8n bleibt an**
-
-**Drei weitere Slice-1-Jobs + gemeinsamer Mailer gebaut, getestet, deployt.** PRs [#174](https://github.com/PatrickM-git/automatenlager/pull/174) + Fix [#178](https://github.com/PatrickM-git/automatenlager/pull/178) gemergt (`main` `848e1b2`), Mini deployt + Worker neu gestartet. Faithful gegen die echten n8n-WF-JSONs (via API ausgelesen) + reale DB-Schema-/RLS-Dumps.
-
-**Cred-Entblockung (gelöst):** Der n8n-API-Key kann **keine** Secrets auslesen (verifiziert: die public API liefert nur Credential-Metadaten). **Nayax-Token via n8ns eigenem `docker exec homelab-n8n n8n export:credentials --all --decrypted` extrahiert** (entschlüsselter Export danach gelöscht), Header-Name `Authorization`, in die Mini-`.env.local` als `NAYAX_API_TOKEN` + `NAYAX_HEADER_NAME` geschrieben (Wert nie im Klartext angezeigt). **Gmail:** die n8n-Cred ist **OAuth2**, KEIN App-Passwort → für den Mailer ungeeignet; Entscheidung (mit dem User): **Resend** (transaktionaler Dienst, Plattform-Absender, Empfänger pro Mandant).
-
-**Gebaut (alle #107-rein, durch die Tür / Infra-exec):**
-- `lib/jobs/mailer.js` — provider-agnostisch. **Absender = Plattform (1 Credential), Empfänger = pro Mandant** (`ALERT_EMAIL_<tenant>`/`ALERT_EMAIL_DEFAULT`). Resend über globales `fetch` (**KEIN npm-Dep**) + fake + „disabled" (kein Key ⇒ Jobs laufen, Mail stumm). SMTP/Postmark/SES später = nur ein weiterer Transport.
-- `lib/jobs/nayax-devices-sync.js` — HTTP GET Nayax-Maschinen → map → **upsert `nayax_devices` ON CONFLICT (nayax_machine_id) PER MANDANT DURCH DIE TÜR** (explizites `tenant_id`, RLS). Ein Token = ein Mandant (`NAYAX_TENANT_ID`/einziger Registry-Mandant). **⚠️ Falle (gefixt, #178):** n8ns httpHeaderAuth-Wert ist eine **n8n-Expression** `=Bearer <token>` — n8n entfernt das `=` zur Laufzeit; `export:credentials` liefert es roh; 1:1 gesendet ⇒ **HTTP 403 „please use API Token"** (ohne `=` ⇒ 200). `normalizeAuthValue()` strippt ein führendes `=`.
-- `lib/jobs/db-validation.js` — WF-Val **nur DB-Konsistenz-Checks** (keine_preise/negative_qty/alte_warnungen/pending_proposals) per Mandant durch die Tür; Alert über Mailer an Mandanten-Adresse. **WF3-Neustart-Mechanik + execution_entity-Check ENTFALLEN** (SPEC).
-- `lib/jobs/monitor.js` — **Worker-Job-Health** aus `audit.workflow_runs` (NO_SUCCESS/SCHEDULE_GAP/LAST_RUN_FAILED) → Mail. **Quellgetrennt** von WF-Monitor (n8n-`execution_entity`) ⇒ kein Doppel-Monitoring.
-- `worker.js` — Schedules `wf-db-validation` (04:15), `wf-nayax-devices-sync` (04:20), `wf-worker-monitor` (10 min); Mailer aus `.env.local` konstruiert + injiziert.
-
-**Live verifiziert (Mini, `--run`):** nayax `{tenant:t_faltrix, fetched:1, mapped:1, upserted:1}`; db-validation `{tenants:1, issues:17, mails:0}` (17 echte Konsistenz-Probleme bei Faltrix — Mail stumm mangels Resend-Key); worker-monitor `{checked:5, okJobs:[heartbeat,guv,matview,db-validation,nayax], alerts:[]}`. Alle drei `audit.workflow_runs status=success`. **Voll-Suite seriell 1171/1171** (+ Nayax-Fix-Tests). #107-Guard 17/17.
-
-**Cutover-Stand:**
-- **WF-Nayax-Devices-Sync `EaVcB3REMttuKZPa` DEAKTIVIERT** (self-contained, kein Mail; Rollback `/activate`).
-- **WF-Val `pdIjiyIfVIIPuJIt` + WF-Monitor `EdgUfv1lMcE25Z3K` bleiben in n8n AKTIV** — bewusst: Val braucht erst einen `RESEND_API_KEY` (sonst Alarm-Loch); WF-Monitors Kern ist der `execution_entity`-Check der **noch laufenden** WF1/2/3/5/7/9 (sein voller Port gehört ans Stufe-6-Ende).
-
-**🔔 OFFEN für DICH (nur du kannst es):**
-1. **Resend scharf schalten:** kostenlosen Account auf resend.com anlegen → `RESEND_API_KEY=…`, `MAIL_FROM=…` (Test: `onboarding@resend.dev`; echt: eigene Domain verifizieren), `ALERT_EMAIL_DEFAULT=patrickzinke@gmx.net` in die Mini-`dashboard/.env.local` → Worker-Restart. Dann mailen db-validation + worker-monitor. **Erst danach WF-Val deaktivieren** (sonst Alarm-Loch).
-2. **WF-Monitor wf8-Fehlalarm (bekannt, harmlos):** WF-Monitor überwacht WF8 (`gyM9…`, jetzt im Worker) in `scheduleLastSuccess.wf8` → ab ~26h kommt **1 SCHEDULE_GAP-Mail/Tag** „wf8 last success …". Bewusst NICHT autonom gefixt (der n8n-Workflow-Update-PUT würde die Überwachung der laufenden Produktiv-WF riskieren). Behebung beim Monitor-Cutover (Stufe-6-Ende) ODER auf Wunsch jetzt (Report-Builder-Edit, mit Risiko-Hinweis).
-
-**HARTER STOPP** bleibt vor **#163** (WF3, datenkritisch) + **#164** (irreversibel).
-
----
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-08_slice1-job1-matview.md`.
 
 ## Nachtrag (2026-06-08, noch später) — Slice 1 **Job 2/5 (WF8 GuV) KOMPLETT cutover + LIVE; WF8 deaktiviert**
 
