@@ -3,6 +3,22 @@
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 > Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-08_slice1-wf8-guv.md`.
 
+## Nachtrag (2026-06-08, Abschluss) — Slice 1 **PRAKTISCH DURCH: Resend live, WF-Val deaktiviert, DB-Check verschlankt**
+
+**Resend scharf + WF-Val voll cutovern.** PRs [#181](https://github.com/PatrickM-git/automatenlager/pull/181) (DB-Check-Verschlankung) gemergt, `main` `05de7f4`, Mini deployt.
+
+- **Mailer LIVE (Resend):** Account vom Nutzer per Google angelegt (`patrickmatthes2609@gmail.com`); API-Key über Claude-Chrome-Erweiterung erzeugt + sicher in die Mini-`.env.local` geschrieben (`RESEND_API_KEY`, `MAIL_FROM=onboarding@resend.dev`, `ALERT_EMAIL_DEFAULT=patrickmatthes2609@gmail.com`). Worker-Boot: `Mailer: resend`. **Erster echter Versand bestätigt** (Nutzer hat die Mail erhalten). ⚠️ Resend-Testmodus sendet nur an die **eigene Account-Adresse** (gmail) — für gmx/andere Empfänger eine **Domain in Resend verifizieren** (offen, später).
+- **WF-Val `pdIjiyIfVIIPuJIt` DEAKTIVIERT** (Mail kam an ⇒ kein Alarm-Loch). Rollback `/activate`.
+- **DB-Check verschlankt (#181, Nutzer-Feedback „nur was ich jetzt ändern kann"):** `keine_preise` (aktive Slots ohne Preis) ENTFERNT (Rauschen, hängt an #163); `alte_warnungen` nimmt **Bestands-/MHD-Typen** aus (`NON_ISSUE_WARNING_TYPES`: LOW_BATCH/LOW_STOCK/EMPTY_BATCH/INSUFFICIENT_BATCH_STOCK/MHD_*/AUTO_REFILL_SLOT/BACKUP_OK) ⇒ behebt den Skittles-Ladenhüter-Fehlalarm. Behalten: negative Mengen, offene Rechnungsvorschläge, echte Workflow-/Datenfehler. Smoke nach Deploy: `issues:0` (keine Quatsch-Mail mehr). Suite seriell **1173/1173**.
+
+**Befund (an #163 hängend):** 15 von 40 aktiven Slots ohne DB-Preis sind **Bestseller** (Snickers, Red Bull, Cola zero …) mit **0 DB-Verkäufen** — starker Beleg, dass WF3 reale Verkäufe nicht persistiert (#163-Umsatzverlust). Preis wird normal aus dem ersten Verkauf gesetzt.
+
+**Slice-1-Endstand:** **abgelöst + n8n-deaktiviert:** WF8-GuV, WF-MatView-Refresh, WF-Nayax-Devices-Sync, WF-Val. **bewusst n8n-aktiv:** WF-Monitor (`EdgU…`, Kern = execution_entity der laufenden WF; voller Port = Stufe-6-Ende) + bekannter wf8-SCHEDULE_GAP-Fehlalalarm (ab ~26h, harmlos). Mein `monitor.js` (Worker-Health via `audit.workflow_runs`) läuft additiv.
+
+**Nächster Schritt (neuer Chat):** **#162 Slice 2** (Trigger-Umlegung WF7/WF9/WF5-Versand/WF-Claude-Proposals + DROP WF0/WF-Update-Check/WF-Drift-Check) — leicht/Trigger, kein Schattenbetrieb. **HARTER STOPP bleibt vor #163 (WF3, datenkritisch) + #164 (irreversibel).** Offene Nebenstränge: GuV-Restatement (#175–#180, eigene SPEC `docs/specs/guv-kostenbasis-kleinunternehmer-restatement-v1.md`), Resend-Domain-Verifizierung, WF-Monitor-Port/Fehlalarm.
+
+---
+
 ## Nachtrag (2026-06-08, am spätesten) — Slice 1 **Jobs 3–5: Nayax LIVE cutover; Val + Worker-Monitor LIVE (Code), n8n bleibt an**
 
 **Drei weitere Slice-1-Jobs + gemeinsamer Mailer gebaut, getestet, deployt.** PRs [#174](https://github.com/PatrickM-git/automatenlager/pull/174) + Fix [#178](https://github.com/PatrickM-git/automatenlager/pull/178) gemergt (`main` `848e1b2`), Mini deployt + Worker neu gestartet. Faithful gegen die echten n8n-WF-JSONs (via API ausgelesen) + reale DB-Schema-/RLS-Dumps.
