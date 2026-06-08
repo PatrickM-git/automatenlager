@@ -1,99 +1,73 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-07_inventur-backup.md`.
 
-## Nachtrag (2026-06-07, später) — PG-Backup auf externe Platte D: eingerichtet
+## 2026-06-08 — Stufe 6 (n8n-Ablösung) **Slice 0 / #160** — Code+Tests FERTIG, PR-fertig, **NICHT deployt**
 
-Tägliches `pg_dump`-Backup der Prod-DB (`homelab`/`automatenlager`) auf die externe
-Platte **D:** des Mini (Sheets ist seit SQL-Cutover kein Backup mehr). Skript
-`C:\homelab\scripts\pg-backup-automatenlager.ps1` (pg_dump -Fc → docker cp → C: →
-Move D:\backups\automatenlager + Aufbewahrung 30 Tage + Log). Windows-Aufgabe
-**`PG-Backup-Automatenlager`** täglich 03:00 (Benutzer patri/console-Sitzung; läuft
-verifiziert, Result 0). Restore-Befehle + Details: Memory `pg-backup-mechanismus`.
-**Offen/optional:** Backup-Skript ins Repo/Homelab-Docs versionieren; Restore-Probe.
+Fundament für die n8n-Ablösung (SPEC: `docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md`,
+Slice 0 = Z. 111). **Kein Verhaltenswechsel — n8n bleibt autoritativ.** Branch
+`feat/n8n-abloesung-stufe-6-slice-0`. Test-first (TDD), alles durch die Mandanten-Tür,
+**kein neuer BYPASS**.
 
-## Nachtrag (2026-06-07, später) — Feature „Inline-Inventur" (#152) LIVE
+### Was gebaut wurde (alle 8 AC)
+- **Worker-Dienst** `dashboard/worker.js` — Scheduler-Ersatz für n8n. `createWorker(...)` rein/
+  testbar (DI: Schedules + Recorder + cron); `buildWorker(...)` verkabelt Infra-/App-Pools wie
+  `server.js`; `node worker.js` = Einstieg. **node-cron lazy** (Tests injizieren Fake-cron →
+  offline). `require('./worker.js')` hat **keine** Seiteneffekte. Slice 0 plant nur einen
+  **Heartbeat** (beweist cron→`audit.workflow_runs`). Beispiel-Compose:
+  `dashboard/deploy/worker.compose.example.yml`.
+- **Per-Mandant-Runner** `dashboard/lib/jobs/tenant-runner.js` — iteriert Registry
+  (`listTenantIds()`), führt Job je Mandant **durch die Tür** aus (GUC). Fail-closed: kein/
+  leerer Mandant ⇒ übersprungen; Verzeichnis nicht bereit ⇒ nichts läuft.
+- **Infra-Runner** `dashboard/lib/jobs/infra-runner.js` — MatView-`REFRESH … CONCURRENTLY`
+  über Infra/BYPASSRLS; View-Namen gegen Allowlist validiert (kein Identifier-Injection).
+  **Dokumentierte #107-Ausnahme** (einziger Nicht-Tür-Pfad, analog `db-schema.js`).
+- **Telemetrie-Schreiber** `dashboard/lib/workflow-runs.js` — `audit.workflow_runs`
+  Start/Ende/Status/Fehler (`workflow_key`=Job-Name). Injizierter `exec` (Infra; System-
+  Telemetrie **ohne** tenant_id). Telemetrie best-effort (Job-Fehler propagiert trotzdem).
+- **Schatten-Harness** `dashboard/lib/jobs/shadow-harness.js` — `diffWrites`/
+  `runShadowComparison` (compute+compare, **schreibt nie**). Kern für Slice 3.
+- **#107-Guard erweitert** `dashboard/lib/query-filter-guard.js` — neuer `extraDirs`-Parameter:
+  `lib/jobs/*` + Worker-Einstieg im **build-blocking** Scan; saubere Job-Module nicht geflaggt;
+  `infra-runner.js`+`worker.js` dokumentiert allowlistet. Doku: `docs/security/query-filter-guard-allowlist.md`.
+- **Migration `0027`** `db-migrations/0027-workflow-runs-write-contract.sql` — idempotent/additiv:
+  ergänzt `audit.workflow_runs` um `error`/`source`/`details` + Lese-Indizes (`pgw_write`
+  unberührt). **Vor Code anwenden.**
+- **Pre-Flight (read-only, live)** `dashboard/tools/preflight-pgw-write.js` → Doku
+  `docs/data-model/pgw-write-und-workflow-runs-preflight.md`.
 
-`/lager`: **Chargenrest pro Charge inline editierbar** (gezählter Lager-Ist; Klick auf
-den Wert → Dialog → speichern). Ändert **nur `remaining_qty`**, NIE `machine_qty`
-(„Im Automaten" = Nayax). Das **Drift-⚠** (Chargenrest-vs-Nayax) ist entfernt (verglich
-Lager gegen Maschine). `lib/inventory-count.js` (`setBatchCountPg` via `db.tx`,
-0..initial_qty, optimistic lock) + `POST /api/v2/inventory/set-count` (`bestand.schreiben`,
-durch die Tür/RLS, JSONL-Audit) + `public/v3.js`. Migration **0016** auf
-`DROP MATERIALIZED VIEW … CASCADE` (Security-View hängt seit Stufe 5 dran). PR #153
-gemergt, Mini `324b08f`, Suite **1089/1089**, Endpoint live (403-Gate verifiziert).
-**Hinweis:** Lokale Preview konnte die daten-gegatete UI nicht zeigen (Dev-Admin ist
-mandantenlos → leer); auf dem Mini (echter Mandant + Admin) rendert sie real.
+### Pre-Flight-Befunde (wichtig für Slice 1–3)
+- `automatenlager.pgw_write(p_event_type, p_batch_run_id, p_payload)` behandelt 11 event_types
+  (`product, product_alias, slot_assignment, invoice, invoice_item, stock_batch, sale,
+  stock_movement, guv_daily, warning, proposal_resolved`) — **vollständige Zieltabellen/
+  Konfliktschlüssel-Tabelle in der Pre-Flight-Doku.**
+- **`pgw_write` ist mandantenblind:** keine `tenant_id`-Inserts, **globale** einspaltige
+  Konfliktschlüssel (`product_key`, `batch_key`, `nayax_transaction_id`, …). Genau deshalb:
+  Ports (Slice 1–3) durch die Tür mit GUC; globale Uniques → `(tenant_id,key)` erst in
+  **Slice 4 (#111)**, nachdem alle Schreiber durch die Tür gehen.
+- Reales `audit.workflow_runs`: `run_id, workflow_key, started_at, finished_at, status,
+  records_in/out/failed, notes` (kein `error`/`source` → 0027 ergänzt).
 
-## Stand: 2026-06-07 — Mandantenfähigkeit STUFE 5 „RLS-Backstop" — KOMPLETT, LIVE & VERIFIZIERT
+### Tests
+- 6 neue Testdateien (shadow-harness, workflow-runs-writer, tenant-runner [+**Live** acme/globex
+  als `automatenlager_app`, RLS aktiv], infra-runner, worker-smoke, migration-0027 [**Live**
+  Round-Trip]). Guard-Test um #160-Block erweitert. Einzeln grün; **Voll-Suite-Lauf**: siehe
+  Commit/PR.
 
-Row-Level-Security als unumgehbarer Backstop für **Lesen UND Schreiben** ist umgesetzt,
-auf den Mini deployt und scharf geschaltet. Issues **#144–#150 geschlossen** (PR
-[#151](https://github.com/PatrickM-git/automatenlager/pull/151) gemergt, Mini auf
-`145ee7b`). Vorbedingungen: Stufe 4 deployt + #132–#139 geschlossen; Pre-Flight #143
-geschlossen. SPEC: `docs/specs/multi-tenant-rls-stufe-5-v1.md`. Suite **1081/1081 grün**.
+### ⚠️ AUSSTEHEND (erst danach „erledigt") — Mini-Deploy (KEIN Code-Schritt mehr offen)
+1. PR `feat/n8n-abloesung-stufe-6-slice-0` mergen.
+2. Mini-Deploy: `git pull --ff-only` → **DDL 0027 anwenden** (vor Code, idempotent) →
+   `npm install --omit=dev` (node-cron) → Worker-Compose-Service einhängen
+   (`deploy/worker.compose.example.yml` als Vorlage) → `docker compose up -d --build`.
+3. **Live-Smoke:** Worker-Logs zeigen Heartbeat; `audit.workflow_runs` trägt
+   `workflow_key='worker-heartbeat', status='success'`.
+4. Danach **Slice 1 (#161):** idempotente Jobs (WF8 GuV, MatView-Refresh, WF-Val, WF-Monitor,
+   WF-Nayax-Devices-Sync) portieren → je Smoke → entsprechende n8n-WF deaktivieren.
 
-### Pre-Flight-Befund (#143) — wichtig
-Die Mini-DB hat eine **out-of-band** Rollen-Hierarchie (NICHT im Repo): `homelab`
-(Owner, super+BYPASSRLS), `app_reader`/`app_writer` (Funktions-Rollen), **`n8n_app`**
-(n8ns Login-Rolle, Mitglied von `app_writer`), `validator`, `migrator`. Die SPEC nahm
-„keine Rollen vorhanden" an — angepasst. tenant_id-Indizes auf allen 5 heißen Tabellen
-vorhanden (kein neuer Index nötig). Siehe Memory `db-rollen-landschaft`.
-
-### Was umgesetzt wurde (Code, 5 Commits)
-- **Slice 1 (#144):** `lib/tenant-db.js` `read()`/`write()` transaktional (read: `BEGIN
-  READ ONLY`) + GUC via `set_config('automatenlager.current_tenant',$1,true)` (kein
-  String-`SET`); `tx()`-Haken gezündet; AMBIENT-Modus für `asDoor(client)`/Sandbox;
-  Pool-Pflicht (sonst wirft). `server.js`: Infra-Pool (homelab) für Registry/Bootstrap
-  + App-Pool (`DASHBOARD_V2_APP_PG_URL`, Fallback Infra) für die Tür.
-- **Slice 2 (#145, Migration 0022):** Rolle `automatenlager_app` (LOGIN, **kein**
-  BYPASSRLS, kein Eigentum), Mitglied von `app_writer` + DELETE auf
-  locations/settings_thresholds; Registry per REVOKE gesperrt; `n8n_app` → BYPASSRLS;
-  search_path-Härtung. (Mat)View-Sicherung inert in 0022 (vor Code-Deploy nötig).
-- **Slices 3a–3d (#146–#149, Migrationen 0023–0026):** `ENABLE`+`FORCE`+`tenant_isolation`
-  (USING+WITH CHECK, einarmiges `current_setting` ⇒ fail-closed; `text=text`) auf 20
-  operativen Tabellen in 4 Gruppen; **Vereinigungs-Policy** `classification_settings`
-  (Spalte `mandant_id`: eigener Mandant ODER `__default__`; Schreiben strikt eigener);
-  `security_invoker` auf `v_warnings_open`/`v_slot_turnover`; **security_barrier-View**
-  `v_inventory_value_daily` statt roher MatView (economics.js/assortment-slots.js
-  umgestellt); rohe MatViews für App-Tier entzogen.
-- **Abschluss (#150):** Break-Glass read-only an der Tür (`forViewer` + supportSession);
-  Rollback-Runbook `docs/security/rls-stufe-5-rollback.md`; Negativ-Matrix-Test
-  `dashboard/tests/dashboard-mt-rls-isolation.test.js` (real als `automatenlager_app`).
-
-### Live-Rollout (gestaffelt, verifiziert)
-1. Migration **0022** angewendet (Rolle+View+Infra, inert). 2. **Code-Deploy** (Mini
-`git reset --hard origin/main` + restart; App noch homelab). 3. **Rollenwechsel:**
-Passwort für `automatenlager_app` gesetzt + `DASHBOARD_V2_APP_PG_URL` in
-`dashboard/.env.local` (Passwort generiert/verwendet **auf dem Mini**, verließ ihn nie)
-+ restart. Verifiziert: Container `current_user=automatenlager_app superuser=off`.
-4. **0023→0024→0025→0026** gestaffelt angewendet, Gruppen-Smoke je Gruppe (als
-`automatenlager_app`, GUC=t_faltrix, transaktional) = **exakt** Faltrix' Zeilen.
-5. Final: `/health` ok, Logs fehlerfrei, **n8n_app=BYPASSRLS** (WF3/WF7 ungebrochen),
-**fail-closed** (fehlender GUC ⇒ Fehler 42704, kein Leck).
-
-### Betrieb / Wissen für die nächste Session
-- Dashboard verbindet jetzt als **`automatenlager_app`** (App-URL in der Mini-
-  `dashboard/.env.local`, Schlüssel `DASHBOARD_V2_APP_PG_URL`). Die Test-Suite/Dev
-  nutzt weiter `DASHBOARD_V2_PG_URL` (homelab, BYPASSRLS) über den Tunnel.
-- **Lockout-Recovery:** `DASHBOARD_V2_APP_PG_URL` in der Mini-`.env.local` leeren ⇒
-  Fallback auf die Infra-URL (homelab, BYPASSRLS) + restart. Siehe Rollback-Runbook.
-- Neue Migrationen **0022–0026** sind auf der Live-DB angewendet (idempotent).
-
-### Restrisiko / Grenzen (unverändert SPEC)
-- n8n schreibt bewusst über die **BYPASS**-Rolle (außerhalb des Backstops bis Stufe 6);
-  MatView-`REFRESH` mandantenübergreifend (Infra). Mit **einem** Mandanten (Faltrix)
-  akzeptiert. **Kein zweiter echter Kunde vor Stufe 6.**
-- WF3/WF7 wurden NICHT real getriggert (keine Prod-Mutation); n8n auf Rollenebene
-  verifiziert (BYPASSRLS) — der nächste reguläre WF-Lauf bestätigt End-to-End.
-
-### Offene Issues (bewusst NICHT in diesem Loop)
-- **#108** Übergangs-Cleanup (tenantColumn-Brücke + `__default__`-Abbau) → **Stufe 6**.
-- **#109** IR-Runbook → **separat**, braucht org-spezifischen Input (Kontakte/Eskalation).
-- **#111** globale (key)-Uniques droppen + `ON CONFLICT (tenant_id,key)` → **Stufe 6**.
-
-### Nächste Schritte
-1. **Stufe 6 planen** (`grill-me`): n8n-Eigenabsicherung/-Ablösung (raus aus dem
-   BYPASS), per-Mandant-Config, #108 + #111 — erst danach 2. realer Kunde möglich.
-2. **#109 IR-Runbook** mit dem Betreiber gemeinsam erstellen.
-3. Beim nächsten WF3/WF7-Lauf das n8n-Run-Log auf DB-Fehler prüfen (End-to-End-Bestätigung).
+## Standing-Kontext (unverändert)
+- Mandantenfähigkeit **Stufe 0–5 LIVE** (RLS-Backstop liest+schreibt). 1 echter Kunde (Faltrix)
+  auf dem Heim-Mini; n8n macht noch WF1/2/3/5/7/8/9 im BYPASS (außerhalb des Backstops, bis
+  Slice 4). Nordstern/Reihenfolge: `docs/ROADMAP.md`. **Kein zweiter realer Kunde vor Stufe 6 + Cloud.**
+- Tägliches PG-Backup auf externe Platte D: (Memory `pg-backup-mechanismus`); Deploy-Mechanismus
+  Memory `mini-deploy-mechanismus`. Stufe-5-Details: `HANDOVER_ARCHIVE/HANDOVER_2026-06-07_inventur-backup.md`.

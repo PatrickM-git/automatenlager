@@ -8,6 +8,7 @@
     "test": "node --test"
   },
   "dependencies": {
+    "node-cron": "^4.2.1",
     "pg": "^8.21.0"
   }
 }
