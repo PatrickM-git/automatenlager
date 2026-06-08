@@ -31,11 +31,27 @@
 
 const HEARTBEAT_JOB = 'worker-heartbeat';
 
+// Millisekunden bis zum nächsten Auftreten von "HH:MM" in LOKALER Zeit (Container-TZ).
+// Drift-tolerant: wird bei JEDEM Tick neu aus der aktuellen Wanduhr berechnet (kein
+// akkumulierender Drift) und nutzt lokale Date-Methoden ⇒ DST-korrekt. Für nächtliche
+// Ex-n8n-Jobs (scheduleTrigger), wo node-cron auf dem WSL-Mini unzuverlässig ist.
+function msUntilNextDailyAt(hhmm, now = new Date()) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm == null ? '' : hhmm).trim());
+  if (!m) throw new Error(`worker: ungültige dailyAt-Zeit "${hhmm}" (erwartet "HH:MM")`);
+  const h = Number(m[1]); const min = Number(m[2]);
+  if (h > 23 || min > 59) throw new Error(`worker: dailyAt-Zeit außerhalb 00:00–23:59: "${hhmm}"`);
+  const target = new Date(now);
+  target.setHours(h, min, 0, 0);
+  if (target.getTime() <= now.getTime()) target.setDate(target.getDate() + 1);
+  return target.getTime() - now.getTime();
+}
+
 /**
  * Reine Worker-Maschinerie (DI, testbar).
  * @param {object} opts
- * @param {{name:string, intervalMs?:number, cronExpr?:string, runOnStart?:boolean, run:()=>Promise<any>}[]} opts.schedules
- *        Je Schedule ENTWEDER intervalMs (setInterval, drift-immun) ODER cronExpr (node-cron).
+ * @param {{name:string, intervalMs?:number, cronExpr?:string, dailyAt?:string, runOnStart?:boolean, run:()=>Promise<any>}[]} opts.schedules
+ *        Je Schedule GENAU EINES: intervalMs (setInterval, drift-immun) | dailyAt "HH:MM"
+ *        (drift-toleranter Selbst-Reschedule, für nächtliche Jobs) | cronExpr (node-cron).
  * @param {{recordRun:Function}} opts.recorder    Telemetrie (audit.workflow_runs).
  * @param {{schedule:Function, validate?:Function}} [opts.cron]  Default: lazy node-cron (nur für cronExpr).
  * @param {(...a:any[])=>void} [opts.logger]
@@ -90,8 +106,22 @@ function createWorker({ schedules = [], recorder, cron, logger } = {}) {
         const task = cronImpl.schedule(s.cronExpr, () => tick(s.name));
         stoppers.push(() => { try { if (task && typeof task.stop === 'function') task.stop(); } catch { /* idempotent */ } });
         log(`geplant: ${s.name} (${s.cronExpr}, cron)`);
+      } else if (s.dailyAt) {
+        // TÄGLICH zu fester Uhrzeit (HH:MM lokal) — drift-toleranter Selbst-Reschedule:
+        // setTimeout bis zum nächsten Auftreten, nach dem Lauf neu aus der Wanduhr
+        // berechnen. Ersetzt n8n-scheduleTrigger ZUVERLÄSSIG (node-cron-Drift auf dem
+        // WSL-Mini umgangen). NICHT unref(): hält den Prozess am Leben.
+        let timer = null;
+        let cancelled = false;
+        const arm = () => {
+          if (cancelled) return;
+          timer = setTimeout(() => { arm(); tick(s.name); }, msUntilNextDailyAt(s.dailyAt, new Date()));
+        };
+        arm();
+        stoppers.push(() => { cancelled = true; if (timer) clearTimeout(timer); });
+        log(`geplant: ${s.name} (täglich ${s.dailyAt})`);
       } else {
-        throw new Error(`worker: Schedule "${s.name}" braucht intervalMs ODER cronExpr`);
+        throw new Error(`worker: Schedule "${s.name}" braucht intervalMs, cronExpr ODER dailyAt`);
       }
     }
     started = true;
@@ -108,7 +138,7 @@ function createWorker({ schedules = [], recorder, cron, logger } = {}) {
     start,
     stop,
     runJobNow: runOnce,
-    listSchedules: () => schedules.map((s) => ({ name: s.name, intervalMs: s.intervalMs, cronExpr: s.cronExpr, runOnStart: !!s.runOnStart })),
+    listSchedules: () => schedules.map((s) => ({ name: s.name, intervalMs: s.intervalMs, cronExpr: s.cronExpr, dailyAt: s.dailyAt, runOnStart: !!s.runOnStart })),
     isStarted: () => started,
   };
   return handle;
@@ -125,6 +155,7 @@ function buildWorker(env = process.env) {
   const { createInfraJobRunner } = require('./lib/jobs/infra-runner.js');
   const { createTenantJobRunner } = require('./lib/jobs/tenant-runner.js');
   const { createWorkflowRunRecorder } = require('./lib/workflow-runs.js');
+  const { createMatViewRefreshJob } = require('./lib/jobs/matview-refresh.js');
 
   function loadLocalEnv() {
     // Minimaler .env.local-Leser (Projekt- + dashboard-Ebene), wie server.js.
@@ -170,29 +201,61 @@ function buildWorker(env = process.env) {
   });
   const tenantRunner = (tenantDb && directory) ? createTenantJobRunner({ db: tenantDb, directory, logger: (...a) => console.error('[tenant-runner]', ...a) }) : null;
 
-  // Slice 0: nur der Heartbeat (beweist Scheduler→audit.workflow_runs). INTERVALL-
-  // basiert (drift-immun auf dem WSL2-Mini) + runOnStart (sofortiger Beat bei (Re)Start).
-  // Reale Jobs: Slice 1 (WF8/MatView/Val/Monitor/Devices), Slice 2 (WF7/9/5), Slice 3 (WF3/1/2).
+  // Infra-Jobs (mandantenübergreifend, über die BYPASSRLS-Verbindung).
+  const matViewRefreshJob = infraRunner ? createMatViewRefreshJob({ infraRunner }) : null;
+
+  // Heartbeat (Slice 0) + portierte idempotente Jobs (Slice 1). Nächtliche Jobs nutzen
+  // dailyAt (drift-tolerant), nicht node-cron (auf dem WSL-Mini unzuverlässig).
+  // Weiter: Slice 1 GuV/Val/Monitor/Nayax-Devices, Slice 2 (WF7/9/5), Slice 3 (WF3/1/2).
   const schedules = [
     { name: HEARTBEAT_JOB, intervalMs: Number(env.WORKER_HEARTBEAT_MS) || 5 * 60 * 1000, runOnStart: true, kind: 'infra',
       run: async () => ({ ok: true }) },
   ];
+  // WF-MatView-Refresh (n8n: nächtlich 04:45) → Infra-Job, dailyAt.
+  if (matViewRefreshJob) {
+    schedules.push({ name: matViewRefreshJob.key, dailyAt: env.WORKER_MATVIEW_AT || '04:45', kind: 'infra',
+      run: () => matViewRefreshJob.run() });
+  }
 
   const worker = createWorker({ schedules, recorder, logger: (...a) => console.log('[worker]', ...a) });
   return { worker, deps: { infraPool, appPool, directory, tenantDb, infraRunner, tenantRunner, recorder } };
 }
 
 async function main() {
+  const args = process.argv.slice(2);
   const { worker, deps } = buildWorker();
+  const cleanup = async () => {
+    try { if (deps.directory) deps.directory.stop(); } catch { /* */ }
+    try { if (deps.infraPool) await deps.infraPool.end(); } catch { /* */ }
+    try { if (deps.appPool) await deps.appPool.end(); } catch { /* */ }
+  };
+
+  // Einmallauf (CLI / Render-Cron / Live-Smoke, US4): node worker.js --run <jobname>
+  const runIdx = args.indexOf('--run');
+  if (runIdx !== -1) {
+    const jobName = args[runIdx + 1];
+    if (deps.directory) { try { await deps.directory.init(); } catch (e) { console.error('[worker] Verzeichnis-Init:', e && e.message); } }
+    try {
+      const res = await worker.runJobNow(jobName);
+      console.log(`[worker] Einmallauf "${jobName}" ok:`, JSON.stringify(res));
+      await cleanup();
+      process.exit(0);
+    } catch (e) {
+      console.error(`[worker] Einmallauf "${jobName}" FEHLER:`, e && e.message);
+      await cleanup();
+      process.exit(1);
+    }
+    return;
+  }
+
+  // Dauerbetrieb (Scheduler).
   if (deps.directory) { try { await deps.directory.init(); deps.directory.startAutoRefresh(); } catch (e) { console.error('[worker] Verzeichnis-Init:', e && e.message); } }
   worker.start();
   console.log('[worker] gestartet.');
   const shutdown = async (sig) => {
     console.log(`[worker] ${sig} — fahre herunter.`);
     worker.stop();
-    try { if (deps.directory) deps.directory.stop(); } catch { /* */ }
-    try { if (deps.infraPool) await deps.infraPool.end(); } catch { /* */ }
-    try { if (deps.appPool) await deps.appPool.end(); } catch { /* */ }
+    await cleanup();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -203,4 +266,4 @@ if (require.main === module) {
   main().catch((err) => { console.error('[worker] Fatal:', err && err.stack || err); process.exit(1); });
 }
 
-module.exports = { createWorker, buildWorker, HEARTBEAT_JOB };
+module.exports = { createWorker, buildWorker, HEARTBEAT_JOB, msUntilNextDailyAt };

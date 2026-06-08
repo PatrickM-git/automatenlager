@@ -13,7 +13,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createWorker, HEARTBEAT_JOB } = require('../worker.js');
+const { createWorker, HEARTBEAT_JOB, msUntilNextDailyAt } = require('../worker.js');
 const { createWorkflowRunRecorder } = require('../lib/workflow-runs.js');
 
 // In-Memory-Attrappe von audit.workflow_runs (INSERT…RETURNING run_id / UPDATE).
@@ -176,5 +176,42 @@ test('#160 Worker: Schedule ohne intervalMs UND ohne cronExpr ⇒ start wirft (f
     schedules: [{ name: 'leer', run: async () => 1 }],
     recorder: createWorkflowRunRecorder({ exec: async () => ({ rows: [{ run_id: 1 }], rowCount: 1 }) }),
   });
-  assert.throws(() => worker.start(), /intervalMs ODER cronExpr/);
+  assert.throws(() => worker.start(), /intervalMs, cronExpr ODER dailyAt/);
+});
+
+// ── #161: dailyAt (drift-toleranter Nacht-Scheduler, ersetzt n8n-scheduleTrigger) ──
+test('#161 msUntilNextDailyAt: heutige Zeit noch in der Zukunft ⇒ heute', () => {
+  const now = new Date(2026, 5, 8, 3, 0, 0); // 8. Juni 2026 03:00 LOKAL
+  const expected = new Date(2026, 5, 8, 4, 45, 0, 0).getTime() - now.getTime();
+  assert.equal(msUntilNextDailyAt('04:45', now), expected);
+});
+
+test('#161 msUntilNextDailyAt: Zeit heute vorbei ⇒ morgen', () => {
+  const now = new Date(2026, 5, 8, 10, 0, 0);
+  const expected = new Date(2026, 5, 9, 4, 45, 0, 0).getTime() - now.getTime();
+  assert.equal(msUntilNextDailyAt('04:45', now), expected);
+});
+
+test('#161 msUntilNextDailyAt: exakt zur Zielzeit ⇒ morgen (nicht 0, kein Doppellauf)', () => {
+  const now = new Date(2026, 5, 8, 4, 45, 0, 0);
+  assert.equal(msUntilNextDailyAt('04:45', now), 24 * 60 * 60 * 1000);
+});
+
+test('#161 msUntilNextDailyAt: ungültige Zeit ⇒ wirft', () => {
+  const now = new Date(2026, 5, 8, 3, 0, 0);
+  assert.throws(() => msUntilNextDailyAt('25:00', now), /außerhalb|ungültig/);
+  assert.throws(() => msUntilNextDailyAt('abc', now), /ungültig/);
+});
+
+test('#161 Worker: dailyAt-Schedule registriert + stoppbar (kein Throw, listSchedules zeigt dailyAt)', () => {
+  const worker = createWorker({
+    schedules: [{ name: 'nightly', dailyAt: '04:45', run: async () => 1 }],
+    recorder: createWorkflowRunRecorder({ exec: async () => ({ rows: [{ run_id: 1 }], rowCount: 1 }) }),
+  });
+  try {
+    assert.doesNotThrow(() => worker.start());
+    assert.equal(worker.listSchedules()[0].dailyAt, '04:45');
+  } finally {
+    worker.stop(); // PFLICHT: das nicht-unref'te dailyAt-Timeout hielte sonst den Testlauf am Leben
+  }
 });
