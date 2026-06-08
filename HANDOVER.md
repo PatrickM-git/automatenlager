@@ -3,6 +3,25 @@
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 > Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-07_inventur-backup.md`.
 
+## Nachtrag (2026-06-08, noch später) — Stufe 6 **Slice 1 (#161) BEGONNEN: Job 1/5 LIVE**
+
+**Job 1/5 (WF-MatView-Refresh) komplett end-to-end live cutover** — der ganze Slice-1-Muster-Weg inkl. der heiklen **n8n-Deaktivierung** ist damit bewiesen:
+- `lib/jobs/matview-refresh.js` (delegiert an Infra-Runner, REFRESH der 3 MatViews über BYPASSRLS). PR **#170** gemergt (`main` `b8d77d4`), auf den Mini deployt, Worker neu gestartet.
+- Neuer **Worker-Scheduler `dailyAt`** (drift-toleranter Selbst-Reschedule, ersetzt n8n-`scheduleTrigger` zuverlässig — node-cron auf dem Mini unbrauchbar) + **`node worker.js --run <job>`** (Einmallauf, US4 + Live-Smoke).
+- Live verifiziert: `--run wf-matview-refresh` → 3 MatViews refresht, `audit.workflow_runs` `wf-matview-refresh=success`; Worker plant `wf-matview-refresh (täglich 04:45)`.
+- **WF-MatView-Refresh in n8n deaktiviert** (API, id `axeg30n8SVKlCW54`, active=False; **Rollback = reactivate**). n8n-Workflow-IDs (Slice 1): WF-Val `pdIjiyIfVIIPuJIt`, WF8-GuV `gyM9rnvUMfnv4x3G`, WF-Monitor `EdgUfv1lMcE25Z3K`, WF-Nayax-Devices-Sync `EaVcB3REMttuKZPa` (alle noch active). n8n-API: `https://hp-mini-server.tail573a13.ts.net/api/v1`, Key `C:\Users\patri\.n8n-api-key`, `POST /workflows/{id}/deactivate|activate`.
+
+**OFFEN — Slice 1 Jobs 2–5** (je: faithful Port aus der WF-JSON + Tür/Infra + Tests + Deploy + `--run`-Smoke + WF deaktivieren):
+- `guv-aggregate.js` (WF8, gyM9…) — GuV-Tagesposten `guv_daily` aus sales+batches+classification, **per Mandant durch die Tür**, idempotent (upsert `guv_key`). **Finanz-Logik → sorgfältig + faithful porten** (economics.js/guv-ek.js wiederverwenden).
+- `db-validation.js` (WF-Val, pdIj…) — Konsistenz-Checks (Slots ohne Preis, neg. Mengen, alte Warnungen/Proposals, Verkaufs-Lag).
+- `monitor.js` (WF-Monitor, EdgU…) — Container/Heartbeat/Backup-Checks; n8n-execution_entity-Checks → `audit.workflow_runs`.
+- `nayax-devices-sync.js` (WF-Nayax-Devices-Sync, EaVc…) — `nayax_devices`-Upsert aus der **externen Nayax-API** (HTTP-Client + Token aus `.env.local` — sorgfältig).
+- Muster steht (matview): Port → Test → 1 PR/Deploy → `--run`-Smoke je Job → WF deaktivieren. **Stopp vor #163 (datenkritisch) + #164 (irreversibel)** bleibt.
+
+**Test-Hinweis (neu):** Mit dem **live laufenden Worker** (queriet die Mini-DB) flakt die Voll-Suite vom Dev gegen dieselbe Prod-DB (Lock-Kontention, wenn Live-Tests RLS-DDL im Sandbox anwenden) — `dashboard-jobs-tenant-runner` fiel seriell 1× aus, **isoliert 5/5 grün**. Künftig: verdächtige Live-Fehler isoliert gegenprüfen (Memory `node-cron-wsl-mini-unreliable`/`suite-parallel-flakiness`).
+
+---
+
 ## Nachtrag (2026-06-08, später) — Slice 0 **LIVE deployt + verifiziert** (+ Worker-Fix #167)
 
 Slice 0 ist auf dem Mini **deployt und live verifiziert**. Ablauf:
