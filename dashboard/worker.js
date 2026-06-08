@@ -157,6 +157,10 @@ function buildWorker(env = process.env) {
   const { createWorkflowRunRecorder } = require('./lib/workflow-runs.js');
   const { createMatViewRefreshJob } = require('./lib/jobs/matview-refresh.js');
   const { createGuvAggregateJob } = require('./lib/jobs/guv-aggregate.js');
+  const { createDbValidationJob } = require('./lib/jobs/db-validation.js');
+  const { createNayaxDevicesSyncJob } = require('./lib/jobs/nayax-devices-sync.js');
+  const { createWorkerHealthMonitorJob } = require('./lib/jobs/monitor.js');
+  const { buildMailerFromEnv } = require('./lib/jobs/mailer.js');
 
   function loadLocalEnv() {
     // Minimaler .env.local-Leser (Projekt- + dashboard-Ebene), wie server.js.
@@ -202,10 +206,23 @@ function buildWorker(env = process.env) {
   });
   const tenantRunner = (tenantDb && directory) ? createTenantJobRunner({ db: tenantDb, directory, logger: (...a) => console.error('[tenant-runner]', ...a) }) : null;
 
+  // Laufzeit-Env = .env.local (Secrets: RESEND_API_KEY, ALERT_EMAIL_*, NAYAX_*)
+  // gemerged mit process.env (process.env gewinnt, wenn gesetzt).
+  const runtimeEnv = { ...local, ...env };
+  // Provider-agnostischer Mailer (Resend, wenn RESEND_API_KEY gesetzt; sonst „disabled":
+  // Jobs laufen, mailen aber nicht — kein fehlender Key bricht etwas).
+  const { mailer, kind: mailerKind } = buildMailerFromEnv(runtimeEnv);
+  console.log(`[worker] Mailer: ${mailerKind}`);
+
   // Infra-Jobs (mandantenübergreifend, über die BYPASSRLS-Verbindung).
   const matViewRefreshJob = infraRunner ? createMatViewRefreshJob({ infraRunner }) : null;
-  // Per-Mandant-Jobs (durch die Tür, GUC je Mandant). WF8 GuV (Slice 1).
+  // Worker-Job-Health-Monitor (liest audit.workflow_runs über die Infra-Verbindung).
+  const workerMonitorJob = infraRunner ? createWorkerHealthMonitorJob({ exec: infraRunner.exec, mailer, env: runtimeEnv }) : null;
+  // Per-Mandant-Jobs (durch die Tür, GUC je Mandant). WF8 GuV + DB-Validierung (Slice 1).
   const guvAggregateJob = tenantRunner ? createGuvAggregateJob({ tenantRunner }) : null;
+  const dbValidationJob = tenantRunner ? createDbValidationJob({ tenantRunner, mailer, env: runtimeEnv }) : null;
+  // Nayax-Devices-Sync: ein Token = ein Mandant (NAYAX_TENANT_ID oder einziger Registry-Mandant).
+  const nayaxDevicesSyncJob = (tenantDb && directory) ? createNayaxDevicesSyncJob({ db: tenantDb, directory, env: runtimeEnv }) : null;
 
   // Heartbeat (Slice 0) + portierte idempotente Jobs (Slice 1). Nächtliche Jobs nutzen
   // dailyAt (drift-tolerant), nicht node-cron (auf dem WSL-Mini unzuverlässig).
@@ -225,6 +242,22 @@ function buildWorker(env = process.env) {
   if (guvAggregateJob) {
     schedules.push({ name: guvAggregateJob.key, intervalMs: Number(env.WORKER_GUV_MS) || 15 * 60 * 1000, kind: 'tenant',
       run: () => guvAggregateJob.run() });
+  }
+  // WF-Val DB-Konsistenz-Checks (n8n: cron 0 15 4 ⇒ täglich 04:15) → per Mandant, dailyAt.
+  if (dbValidationJob) {
+    schedules.push({ name: dbValidationJob.key, dailyAt: env.WORKER_DBVAL_AT || '04:15', kind: 'tenant',
+      run: () => dbValidationJob.run() });
+  }
+  // WF-Nayax-Devices-Sync (n8n: täglich 04:20) → ein Token/Mandant, dailyAt.
+  if (nayaxDevicesSyncJob) {
+    schedules.push({ name: nayaxDevicesSyncJob.key, dailyAt: env.WORKER_NAYAX_AT || '04:20', kind: 'infra',
+      run: () => nayaxDevicesSyncJob.run() });
+  }
+  // Worker-Job-Health-Monitor (audit.workflow_runs) → intervalMs. KEIN runOnStart
+  // (erst nach den ersten Job-Läufen prüfen, sonst NO_SUCCESS-Fehlalarm).
+  if (workerMonitorJob) {
+    schedules.push({ name: workerMonitorJob.key, intervalMs: Number(env.WORKER_MONITOR_MS) || 10 * 60 * 1000, kind: 'infra',
+      run: () => workerMonitorJob.run() });
   }
 
   const worker = createWorker({ schedules, recorder, logger: (...a) => console.log('[worker]', ...a) });
