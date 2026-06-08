@@ -1,28 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-08_slice1-job1-matview.md`.
-
-## Nachtrag (2026-06-08, noch später) — Slice 1 **Job 2/5 (WF8 GuV) KOMPLETT cutover + LIVE; WF8 deaktiviert**
-
-**WF8 GuV-Aggregator (n8n `gyM9rnvUMfnv4x3G`) vollständig durch `dashboard/lib/jobs/guv-aggregate.js` ersetzt — end-to-end live, WF8 DEAKTIVIERT.** PR [#171](https://github.com/PatrickM-git/automatenlager/pull/171) gemergt (`main` `42bc63f`), Mini deployt (`git reset` + `docker compose restart worker`).
-
-- **Faithful Port** (gegen die ECHTEN WF8-Nodes + realen DB-Dump, nicht Doku-Annahmen): compute = 1:1 „Code - GuV aggregieren" + „Prepare PGW - guv_daily". **Bewusste Faithfulness-Befunde repliziert:** Konfig **snake_case** (`cfg->>'kleinunternehmer_aktiv'`) ⇒ **kleinunternehmer effektiv FALSE** (der reale camelCase-Wert `{"kleinunternehmerAktiv":true}` wird — wie in WF8 — NICHT gesehen); Zwischen-Rundung (`gross_profit=r2(Σumsatz−Σwarenein)`); Einkaufs- vs. Verkaufs-MwSt getrennt. Pre-Flight read-only Tool `dashboard/tools/preflight-guv-daily.js` + Doku `docs/data-model/wf8-guv-port-preflight.md`.
-- **Mandantenfähig + sicher:** Reads je Mandant DURCH DIE TÜR (sequenziell, Vorbild `alert-digest`, RLS-/$1-gefiltert); Write `db.tx` (machine_key→machine_id / product_key→product_id **tenant-scoped** auflösen + **explizites tenant_id**, idempotent `ON CONFLICT (guv_key) DO NOTHING`). **KEIN rohes pg** (#107-rein). Worker-Schedule `wf-guv-aggregate` **intervalMs 900000** (echte WF8-Regel = alle 15 min; der Node-Name „Täglich 02:00" war irreführend).
-- **Finanz-Cutover-Gate (PFLICHT, drift-immun):** `dashboard/tools/shadow-guv-parity.js` (read-only) führt WF8s **WÖRTLICHEN** Node-Code (aus der Workflow-JSON) und den Port auf **IDENTISCHEN Live-Inputs** aus ⇒ **BYTE-IDENTISCH 224/224 Keys** (lokal gegen die Prod-DB UND auf der Mini verifiziert, exit 0). **Bewusst NICHT „recompute vs. gespeichert"**: WF8s `cost_of_goods` hängt am FIFO-Chargen-Snapshot (status aktiv→leer driftet täglich); heute neu berechnete Vergangenheitstage weichen legitim ab, WF8 überschreibt historische Zeilen nie. Die drift-immune Äquivalenz ist die Parität auf identischen Inputs.
-- **Live verifiziert (Mini):** `docker exec homelab-worker node worker.js --run wf-guv-aggregate` → idempotent (`inserted=0, skippedExisting=310, skippedStatus=64` — die 64 = reale `INSUFFICIENT_BATCH_STOCK`/`SKIPPED_BEFORE_CUTOVER`-Verkäufe, status≠OK, faithful übersprungen); `audit.workflow_runs` run **6973 status=success**. Worker plant `wf-guv-aggregate (alle 900s)`.
-- **WF8 in n8n DEAKTIVIERT** (API `POST /workflows/gyM9rnvUMfnv4x3G/deactivate`, Identität vorher verifiziert, jetzt `active=false`; **Rollback = `/activate`**).
-- Tests: 10 neu (compute-Parität: Status/Sentinel/EK/Aggregat/Kleinunternehmer brutto+netto/`revenue_net` @7%+@19%/`mdb_code`→null/`skipExisting`; Factory; **LIVE acme/globex-Isolation + Idempotenz** als `automatenlager_app`, RLS aktiv, nicht-vakuös: jeder bucht aus SEINER Charge). Voll-Suite **seriell 1130/1131** (1 vorbestehender Live-Flake `dashboard-v2-product-onboarding`, isoliert **34/34 grün** — bekannte Suite-Flakiness). #107-Guard 17/17.
-
-**Separater Finanz-Befund (NICHT gefixt — eigenes Issue nötig):** die **Live-Dashboard-Ökonomie** (`category-config.js`/`economics.js`) liest `kleinunternehmerAktiv` **camelCase = true** ⇒ Brutto-Kostenbasis für „heutige" provisorische Posten, während die Nacht-GuV (`guv_daily`) **Netto** bucht (snake_case=false). **Live/Nacht-Divergenz** der Kostenbasis. Ein stiller Fix im Port hätte den Schatten-Match gebrochen ⇒ bewusst getrennt.
-
-**🔒 Slice 1 Jobs 3–5 (WF-Val / WF-Monitor / WF-Nayax-Devices-Sync) WEITER BLOCKIERT — Cred-Befund 2026-06-08 bestätigt:** Mini `dashboard/.env.local` hat **kein** `GMAIL_*` / `NAYAX_API_TOKEN` (geprüft: GMAIL=0, NAYAX=0; der einzige „nayax" in der Compose ist `NAYAX_ABGLEICH_WEBHOOK_URL`, **kein** API-Token). Diese Secrets liegen in n8ns verschlüsseltem Store — **nur DU kannst sie in die Mini-`dashboard/.env.local` legen** (`GMAIL_USER`+`GMAIL_APP_PASSWORD` für den Val/Monitor-Mailer; `NAYAX_API_TOKEN` für Devices-Sync). Bis dahin **übersprungen** (wie geplant).
-
-**Slice-1-Stand:** Job 1/5 MatView ✅ · **Job 2/5 WF8 GuV ✅** · Jobs 3–5 ⏸ (Cred-Block). **In n8n noch aktiv:** WF-Val `pdIjiyIfVIIPuJIt`, WF-Monitor `EdgUfv1lMcE25Z3K`, WF-Nayax-Devices-Sync `EaVcB3REMttuKZPa`. **Deaktiviert (Slice 1):** WF-MatView-Refresh `axeg30n8SVKlCW54`, **WF8-GuV `gyM9rnvUMfnv4x3G`** (+ vorab WF-Update-Check `HvaJ7W28xX3F5qJa`). n8n-API: `https://hp-mini-server.tail573a13.ts.net/api/v1`, Key `C:\Users\patri\.n8n-api-key`.
-
-**Nächste Schritte:** (a) Creds in die Mini-`.env.local` legen ⇒ neuer Chat baut **WF-Val** (nur DB-Konsistenz-Checks, NICHT die WF3-Neustart-Mechanik) + **WF-Monitor** + **shared Mailer-Modul** + **WF-Nayax-Devices-Sync** nach genau diesem Muster (Port→Test→1 PR/Deploy→`--run`-Smoke→WF deaktivieren). (b) **HARTER STOPP bleibt** vor **#163** (datenkritisch, WF3 — Root-Cause/Fix-Anforderung unten + im #163-Kommentar) und **#164** (irreversibel).
-
----
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-07_inventur-backup.md`.
 
 ## Nachtrag (2026-06-08, Slice-1-Fortschritt) — Jobs 2–5: Blocker + GuV-Recon/Build-Plan
 
