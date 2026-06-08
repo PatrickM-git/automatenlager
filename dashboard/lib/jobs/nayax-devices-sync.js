@@ -26,6 +26,17 @@ const WORKFLOW_KEY = 'wf-nayax-devices-sync';
 const NAYAX_MACHINES_URL = 'https://lynx.nayax.com/operational/v1/machines';
 const DEFAULT_RESULTS_LIMIT = 500;
 
+// n8n-httpHeaderAuth-Werte können n8n-EXPRESSIONS sein (führendes '='): n8n wertet
+// sie zur Laufzeit aus und sendet NUR den Teil DANACH (z. B. `=Bearer <token>` →
+// Header `Bearer <token>`). `export:credentials` liefert die rohe Expression INKL.
+// '=' — würde man sie 1:1 senden, lehnt die API ab (403 „please use API Token").
+// Daher ein einzelnes führendes '=' defensiv entfernen (verifiziert live: mit '=' →
+// 403, ohne → 200).
+function normalizeAuthValue(v) {
+  const s = String(v == null ? '' : v).trim();
+  return s.startsWith('=') ? s.slice(1) : s;
+}
+
 function firstNonEmpty(obj, keys) {
   for (const k of keys) {
     if (obj && obj[k] != null && String(obj[k]).trim() !== '') return String(obj[k]).trim();
@@ -109,7 +120,7 @@ function createNayaxDevicesSyncJob({ db, directory, env = process.env, fetchImpl
   return {
     key: WORKFLOW_KEY,
     run: async () => {
-      const token = env.NAYAX_API_TOKEN && String(env.NAYAX_API_TOKEN).trim();
+      const token = normalizeAuthValue(env.NAYAX_API_TOKEN);
       if (!token) return { skipped: 'kein NAYAX_API_TOKEN in der Env' };
       const tenant = resolveNayaxTenant(env, directory);
       if (!tenant) return { skipped: 'kein eindeutiger Nayax-Mandant (NAYAX_TENANT_ID setzen)' };
@@ -130,6 +141,7 @@ function createNayaxDevicesSyncJob({ db, directory, env = process.env, fetchImpl
 module.exports = {
   createNayaxDevicesSyncJob,
   mapDevices,
+  normalizeAuthValue,
   resolveNayaxTenant,
   fetchNayaxMachines,
   upsertDevices,
