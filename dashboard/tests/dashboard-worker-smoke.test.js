@@ -134,3 +134,47 @@ test('#160 buildWorker: require hat KEINE Seiteneffekte — exportiert die Fabri
   assert.equal(typeof mod.buildWorker, 'function');
   assert.equal(mod.HEARTBEAT_JOB, 'worker-heartbeat');
 });
+
+// ── REALE Timer (kein Fake-cron) — schließt die Lücke, die den WSL-node-cron-Bug verbarg ──
+test('#160 Worker: REALER Intervall-Scheduler feuert periodisch (setInterval, kein Fake)', async () => {
+  // Hätte gefangen, dass der Scheduler in Prod nicht feuert: nutzt setInterval ECHT.
+  const audit = memAudit();
+  const recorder = createWorkflowRunRecorder({ exec: audit.exec, now: FIXED });
+  const worker = createWorker({
+    schedules: [{ name: HEARTBEAT_JOB, intervalMs: 40, run: async () => ({ ok: true }) }],
+    recorder, // KEIN cron injiziert ⇒ realer setInterval-Pfad
+  });
+  try {
+    worker.start();
+    await new Promise((r) => setTimeout(r, 160)); // ~3–4 Ticks
+    const beats = audit.rows.filter((r) => r.workflow_key === HEARTBEAT_JOB && r.status === 'success');
+    assert.ok(beats.length >= 2, `Intervall-Scheduler feuerte mehrfach (>=2), war ${beats.length}`);
+  } finally {
+    worker.stop(); // PFLICHT: das nicht-unref'te Intervall hielte sonst den Testlauf am Leben
+  }
+});
+
+test('#160 Worker: runOnStart feuert sofort beim Start (ohne aufs Intervall zu warten)', async () => {
+  const audit = memAudit();
+  const recorder = createWorkflowRunRecorder({ exec: audit.exec, now: FIXED });
+  const worker = createWorker({
+    schedules: [{ name: HEARTBEAT_JOB, intervalMs: 999999, runOnStart: true, run: async () => ({ ok: true }) }],
+    recorder,
+  });
+  try {
+    worker.start();
+    await new Promise((r) => setTimeout(r, 40)); // Microtask des runOnStart abwarten
+    assert.ok(audit.rows.some((r) => r.workflow_key === HEARTBEAT_JOB && r.status === 'success'),
+      'sofortiger Heartbeat bei Start (runOnStart)');
+  } finally {
+    worker.stop();
+  }
+});
+
+test('#160 Worker: Schedule ohne intervalMs UND ohne cronExpr ⇒ start wirft (fail-closed)', () => {
+  const worker = createWorker({
+    schedules: [{ name: 'leer', run: async () => 1 }],
+    recorder: createWorkflowRunRecorder({ exec: async () => ({ rows: [{ run_id: 1 }], rowCount: 1 }) }),
+  });
+  assert.throws(() => worker.start(), /intervalMs ODER cronExpr/);
+});

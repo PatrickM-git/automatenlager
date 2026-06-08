@@ -20,8 +20,13 @@
 //   * main()             — startet buildWorker() (nur bei direktem `node worker.js`).
 //
 // Slice 0 schaltet KEINEN n8n-Prozess ab (n8n bleibt autoritativ). Einziger
-// geplanter Lauf ist ein Heartbeat, der die Pipeline (cron feuert → Lauf landet in
-// audit.workflow_runs) beweist. Echte Job-Ports kommen in Slice 1–3.
+// geplanter Lauf ist ein Heartbeat, der die Pipeline (Scheduler feuert → Lauf landet
+// in audit.workflow_runs) beweist. Echte Job-Ports kommen in Slice 1–3.
+//
+// SCHEDULER: zwei Pfade je Schedule — `intervalMs` (setInterval, drift-IMMUN, Default
+// für periodische Jobs) ODER `cronExpr` (node-cron, für feste Uhrzeiten). Grund für
+// den Intervall-Default: node-cron v4 verwirft auf dem WSL2/Docker-Mini jeden Tick als
+// "missed execution" (Uhr-Drift + v4-Drift-Schutz). `runOnStart` feuert sofort bei Start.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const HEARTBEAT_JOB = 'worker-heartbeat';
@@ -29,9 +34,10 @@ const HEARTBEAT_JOB = 'worker-heartbeat';
 /**
  * Reine Worker-Maschinerie (DI, testbar).
  * @param {object} opts
- * @param {{name:string, cronExpr:string, run:()=>Promise<any>}[]} opts.schedules
+ * @param {{name:string, intervalMs?:number, cronExpr?:string, runOnStart?:boolean, run:()=>Promise<any>}[]} opts.schedules
+ *        Je Schedule ENTWEDER intervalMs (setInterval, drift-immun) ODER cronExpr (node-cron).
  * @param {{recordRun:Function}} opts.recorder    Telemetrie (audit.workflow_runs).
- * @param {{schedule:Function, validate?:Function}} [opts.cron]  Default: lazy node-cron.
+ * @param {{schedule:Function, validate?:Function}} [opts.cron]  Default: lazy node-cron (nur für cronExpr).
  * @param {(...a:any[])=>void} [opts.logger]
  */
 function createWorker({ schedules = [], recorder, cron, logger } = {}) {
@@ -40,41 +46,61 @@ function createWorker({ schedules = [], recorder, cron, logger } = {}) {
   }
   const log = typeof logger === 'function' ? logger : (...a) => console.log('[worker]', ...a);
   const byName = new Map(schedules.map((s) => [s.name, s]));
-  let tasks = [];
+  let stoppers = []; // einheitliche Stop-Funktionen (clearInterval ODER node-cron task.stop)
   let started = false;
 
   // Ein Tick: den Job durch die Telemetrie laufen lassen. recordRun wirft den
   // Job-Fehler weiter (Status bereits als error protokolliert) — am Tick-Rand
   // abfangen, damit ein Fehlschlag den Scheduler nicht abreißen lässt (self-heal
-  // ergänzt `restart: always`).
+  // ergänzt `restart: unless-stopped`).
   async function runOnce(name) {
     const s = byName.get(name);
     if (!s) throw new Error(`worker: unbekannter Job "${name}"`);
     return recorder.recordRun(s.name, s.run);
   }
+  function tick(name) {
+    return runOnce(name).catch((err) => log(`Job "${name}" fehlgeschlagen:`, err && err.message));
+  }
 
   function start() {
     if (started) return handle;
-    const cronImpl = cron || require('node-cron');
+    let cronImpl = cron; // node-cron NUR lazy laden, falls ein cronExpr-Schedule existiert
     for (const s of schedules) {
-      if (typeof cronImpl.validate === 'function' && !cronImpl.validate(s.cronExpr)) {
-        throw new Error(`worker: ungültiger Cron-Ausdruck für "${s.name}": ${s.cronExpr}`);
+      // runOnStart: sofortiger erster Lauf (Heartbeat sofort sichtbar + resilient
+      // gegen verpasste erste Intervalle nach (Re)Start).
+      if (s.runOnStart) tick(s.name);
+
+      if (Number.isFinite(s.intervalMs) && s.intervalMs > 0) {
+        // INTERVALL-Scheduler (setInterval) — drift-IMMUN (libuv-Monotonic-Timer statt
+        // Wanduhr-Cron-Matching). Bewusst gewählt: node-cron v4 verwirft auf dem
+        // WSL2/Docker-Mini JEDEN Tick als "missed execution" (WSL2-Uhr-Drift trifft auf
+        // v4-Drift-Schutz, den v3 nicht hatte). NICHT unref(): das Intervall hält den
+        // Worker-Prozess am Leben (sein Daseinszweck).
+        const h = setInterval(() => tick(s.name), s.intervalMs);
+        stoppers.push(() => clearInterval(h));
+        log(`geplant: ${s.name} (alle ${Math.round(s.intervalMs / 1000)}s, Intervall)`);
+      } else if (s.cronExpr) {
+        // CRON-Ausdruck (feste Uhrzeiten) über node-cron. ⚠️ Auf dem WSL2-Mini
+        // drift-anfällig (s. o.) — für feste Uhrzeiten ggf. drift-toleranten Ansatz
+        // wählen. Nur optionale/künftige Jobs nutzen diesen Pfad; der Heartbeat nicht.
+        if (!cronImpl) cronImpl = require('node-cron');
+        if (typeof cronImpl.validate === 'function' && !cronImpl.validate(s.cronExpr)) {
+          throw new Error(`worker: ungültiger Cron-Ausdruck für "${s.name}": ${s.cronExpr}`);
+        }
+        const task = cronImpl.schedule(s.cronExpr, () => tick(s.name));
+        stoppers.push(() => { try { if (task && typeof task.stop === 'function') task.stop(); } catch { /* idempotent */ } });
+        log(`geplant: ${s.name} (${s.cronExpr}, cron)`);
+      } else {
+        throw new Error(`worker: Schedule "${s.name}" braucht intervalMs ODER cronExpr`);
       }
-      // Tick gibt das Promise ZURÜCK (node-cron ignoriert den Rückgabewert; Tests
-      // können den gefeuerten Lauf awaiten). Fehler am Tick-Rand abfangen, damit ein
-      // Fehlschlag den Scheduler nicht abreißt (self-heal ergänzt `restart: always`).
-      const task = cronImpl.schedule(s.cronExpr, () =>
-        runOnce(s.name).catch((err) => log(`Job "${s.name}" fehlgeschlagen:`, err && err.message)));
-      tasks.push(task);
-      log(`geplant: ${s.name} (${s.cronExpr})`);
     }
     started = true;
     return handle;
   }
 
   function stop() {
-    for (const t of tasks) { try { if (t && typeof t.stop === 'function') t.stop(); } catch { /* idempotent */ } }
-    tasks = [];
+    for (const st of stoppers) { try { st(); } catch { /* idempotent */ } }
+    stoppers = [];
     started = false;
   }
 
@@ -82,7 +108,7 @@ function createWorker({ schedules = [], recorder, cron, logger } = {}) {
     start,
     stop,
     runJobNow: runOnce,
-    listSchedules: () => schedules.map((s) => ({ name: s.name, cronExpr: s.cronExpr })),
+    listSchedules: () => schedules.map((s) => ({ name: s.name, intervalMs: s.intervalMs, cronExpr: s.cronExpr, runOnStart: !!s.runOnStart })),
     isStarted: () => started,
   };
   return handle;
@@ -144,10 +170,11 @@ function buildWorker(env = process.env) {
   });
   const tenantRunner = (tenantDb && directory) ? createTenantJobRunner({ db: tenantDb, directory, logger: (...a) => console.error('[tenant-runner]', ...a) }) : null;
 
-  // Slice 0: nur der Heartbeat (beweist cron→audit.workflow_runs). Reale Jobs:
-  // Slice 1 (WF8/MatView/Val/Monitor/Devices), Slice 2 (WF7/9/5), Slice 3 (WF3/1/2).
+  // Slice 0: nur der Heartbeat (beweist Scheduler→audit.workflow_runs). INTERVALL-
+  // basiert (drift-immun auf dem WSL2-Mini) + runOnStart (sofortiger Beat bei (Re)Start).
+  // Reale Jobs: Slice 1 (WF8/MatView/Val/Monitor/Devices), Slice 2 (WF7/9/5), Slice 3 (WF3/1/2).
   const schedules = [
-    { name: HEARTBEAT_JOB, cronExpr: env.WORKER_HEARTBEAT_CRON || '*/5 * * * *', kind: 'infra',
+    { name: HEARTBEAT_JOB, intervalMs: Number(env.WORKER_HEARTBEAT_MS) || 5 * 60 * 1000, runOnStart: true, kind: 'infra',
       run: async () => ({ ok: true }) },
   ];
 
