@@ -167,6 +167,7 @@ function buildWorker(env = process.env) {
   const { createNayaxSalesJob } = require('./lib/jobs/nayax-sales.js');
   const { createInvoiceIntakeJob } = require('./lib/jobs/invoice-intake.js');
   const { createCutoverMonitorJob } = require('./lib/jobs/cutover-monitor.js');
+  const { buildGithubIssuesFromEnv } = require('./lib/jobs/github-issues.js');
   const { buildMailerFromEnv } = require('./lib/jobs/mailer.js');
   const { buildAnthropicFromEnv } = require('./lib/anthropic-client.js');
   const { buildDriveFromEnv } = require('./lib/google-drive-client.js');
@@ -261,8 +262,10 @@ function buildWorker(env = process.env) {
   // Cutover-Readiness-Wächter (#198): ruft die Schatten-Jobs read-only, zählt deckungsgleiche
   // aktive Läufe in workflow_state und mailt, sobald das Cutover-Kriterium erfüllt ist.
   const cutoverTenant = (runtimeEnv.NAYAX_TENANT_ID || runtimeEnv.WF1_TENANT_ID || runtimeEnv.WF9_TENANT_ID || '').trim();
+  const cutoverIssues = buildGithubIssuesFromEnv(runtimeEnv); // null ohne GITHUB_TOKEN/REPO
+  console.log(`[worker] Cutover-Issues: ${cutoverIssues ? 'live' : 'disabled (kein GITHUB_TOKEN/REPO)'}`);
   const cutoverMonitorJob = (tenantDb && cutoverTenant) ? createCutoverMonitorJob({
-    db: tenantDb, env: runtimeEnv, mailer,
+    db: tenantDb, env: runtimeEnv, mailer, issues: cutoverIssues,
     checks: [
       { streakKey: 'CUTOVER_STREAK_WF3', label: 'WF3 Nayax-Verkäufe', tenant: cutoverTenant, job: nayaxSalesJob },
       { streakKey: 'CUTOVER_STREAK_WF1', label: 'WF1 Rechnungseingang', tenant: cutoverTenant, job: invoiceIntakeJob },

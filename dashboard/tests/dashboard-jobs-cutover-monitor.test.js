@@ -86,6 +86,28 @@ test('#198 createCutoverMonitorJob: Diff ⇒ feldgenaue Diff-Mail genau einmal (
   assert.equal((db._store.get('acme#K') || {}).streak, 0, 'Serie bei Diff zurückgesetzt');
 });
 
+test('#198 createCutoverMonitorJob: Diff ⇒ GitHub-Issue genau einmal eröffnet; Auflösung ⇒ Kommentar', async () => {
+  const db = inMemoryDb();
+  const created = []; const comments = [];
+  const issues = { createIssue: async (i) => { created.push(i); return 207; }, commentIssue: async (n, b) => { comments.push({ n, b }); return true; } };
+  const sample = { sales: { counts: { onlyIntended: 1, onlyActual: 0, mismatched: 0 }, onlyIntended: ['T9'], onlyActual: [], mismatched: [] } };
+  let result = { mode: 'shadow', equal: false, fetched: 2, diffSample: sample };
+  const job = { run: async () => result };
+  const monitor = cm.createCutoverMonitorJob({ db, env: {}, issues, checks: [{ streakKey: 'K', label: 'WF3', tenant: 'acme', job }] });
+
+  await monitor.run(); // neuer Diff → Issue eröffnet
+  await monitor.run(); // identischer Diff → kein neues Issue, kein Kommentar
+  assert.equal(created.length, 1, 'genau ein Issue eröffnet');
+  assert.equal(comments.length, 0);
+  assert.equal((db._store.get('acme#K') || {}).diffIssue, 207, 'Issue-Nummer im State');
+
+  // Diff aufgelöst (equal + Aktivität) → Kommentar + Marker gelöscht
+  result = { mode: 'shadow', equal: true, fetched: 2 };
+  await monitor.run();
+  assert.equal(comments.length, 1, 'Auflösungs-Kommentar');
+  assert.equal((db._store.get('acme#K') || {}).diffIssue, null, 'Marker gelöscht');
+});
+
 test('#198 createCutoverMonitorJob: Cutover-/skip-Ergebnis wird nicht als Streak gewertet', async () => {
   const db = inMemoryDb();
   const mailer = { send: async () => {} };
