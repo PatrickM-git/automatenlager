@@ -1,28 +1,30 @@
 'use strict';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Job: GuV-Tagesposten-Aggregator — Issue #161 (Stufe 6, Slice 1). Ersetzt WF8.
-// SPEC: docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md §"Pro-Workflow-Disposition"
+// Job: GuV-Tagesposten-Aggregator — Issue #161 (Stufe 6, Slice 1), Kostenbasis-
+// Korrektur Issue #176. Ersetzt WF8.
+// SPEC: docs/specs/guv-kostenbasis-kleinunternehmer-restatement-v1.md
+//       (Vorgeschichte: docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md)
 //
-// FAITHFUL PORT von WF8 ("Code - GuV aggregieren" + "Prepare PGW - guv_daily" +
-// dem pgw_write('guv_daily')-Zweig). Verifiziert gegen die ECHTEN WF8-JSON-Nodes
-// UND den realen DB-Dump (docs/data-model/wf8-guv-port-preflight.md), NICHT gegen
-// Doku-Annahmen. Das Sicherheitsnetz ist der Schatten-Harness (#160): die hier
-// berechneten guv_daily-Zeilen MÜSSEN exakt WF8s gespeicherten Zeilen entsprechen,
-// bevor WF8 deaktiviert wird (Kunden-P&L).
+// Port von WF8 ("Code - GuV aggregieren" + "Prepare PGW - guv_daily" + dem
+// pgw_write('guv_daily')-Zweig), verifiziert gegen die ECHTEN WF8-JSON-Nodes UND
+// den realen DB-Dump (docs/data-model/wf8-guv-port-preflight.md).
 //
-// WICHTIGE FAITHFULNESS-BEFUNDE (bewusst 1:1 nachgebaut, NICHT "korrigiert"):
-//   * WF8s Konfig-SQL liest `cfg->>'kleinunternehmer_aktiv'` (snake_case); der
-//     gespeicherte Schlüssel ist aber `kleinunternehmerAktiv` (camelCase) ⇒ WF8
-//     sieht IMMER den COALESCE-Default 'FALSE'. Wir replizieren das exakt (sonst
-//     bricht der Schatten-Match + ändert die Kunden-P&L). Die Live-Dashboard-
-//     Ökonomie liest dagegen camelCase=true → bestehende Live/Nacht-Divergenz,
-//     als separater Befund dokumentiert (kein stiller Fix in diesem Port).
-//   * Der EINKAUFS-MwSt-Fallback (mwstVonProduktart) und die VERKAUFS-MwSt
-//     (revenue_net) sind ZWEI verschiedene Ableitungen — beide wörtlich portiert.
-//   * Zwischen-Rundung zählt: gross_profit = r2(Σumsatz − Σwarenein), NICHT
-//     r2(Σumsatz) − r2(Σwarenein); revenue_net rechnet mit dem bereits gerundeten
-//     revenue_gross.
+// #176 KOSTENBASIS-KORREKTUR (bewusste Abkehr vom WF8-Bug):
+//   * Das Besteuerungsmodell wird über die EINE gemeinsame Lesefunktion
+//     `readKleinunternehmer` gelesen (camelCase kanonisch, snake_case Legacy-
+//     Fallback, camelCase gewinnt) — identisch zum Live-Pfad. WF8 las nur
+//     snake_case und buchte deshalb für den Kleinunternehmer fälschlich netto;
+//     dieser Bug ist behoben (Go-forward), die Historie wird in 0030 restated.
+//   * MwSt-Quelle = KANONISCHER Kategorie-Satz aus der effektiven Config
+//     (resolveCategory(...).mwstPct), exakt wie economics.js (Live) — damit
+//     Live == Nacht. Nicht mehr products.vat_rate_pct / config-mwst.
+//   * Kleinunternehmer ⇒ Brutto-Kostenbasis (netto-EK × (1+MwSt/100)) UND
+//     revenue_net = revenue_gross (keine USt auf den Umsatz). Jede neue Zeile
+//     wird mit cost_basis ('brutto'/'netto') gestempelt.
+//   * Zwischen-Rundung zählt weiter: gross_profit = r2(Σumsatz − Σwarenein),
+//     NICHT r2(Σumsatz) − r2(Σwarenein); revenue_net rechnet mit dem bereits
+//     gerundeten revenue_gross.
 //
 // Datenzugriff: PER MANDANT DURCH DIE TÜR (lib/tenant-db.js). Reads RLS-/$1-gefiltert
 // (Vorbild lib/alert-digest.js), Write als `db.tx` (Resolve machine_key→machine_id /
@@ -30,9 +32,12 @@
 // NOTHING`. KEIN rohes pg ⇒ #107-Wächter-rein (Worker injiziert die Tür).
 // ─────────────────────────────────────────────────────────────────────────────
 
+const { readKleinunternehmer, costBasisMultiplier } = require('../guv-ek.js');
+const { buildEffectiveConfig, sanitizeOverride, resolveCategory } = require('../category-config.js');
+
 const WORKFLOW_KEY = 'wf-guv-aggregate';
-// Faithful: dieselbe `source`-Markierung wie WF8 (sonst kein Schatten-Match und
-// die Live-Ökonomie unterscheidet historic_backfill nicht mehr von der Aggregation).
+// Dieselbe `source`-Markierung wie WF8, damit die Live-Ökonomie historic_backfill
+// weiterhin von der laufenden Aggregation unterscheidet.
 const SOURCE = 'wf8_guv_aggregator';
 
 // ── Reine Helfer (wörtlich aus dem WF8-Code-Node) ────────────────────────────
@@ -41,9 +46,13 @@ function num(v) { const n = Number(String(v == null ? '' : v).replace(',', '.'))
 function r2(n) { return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0; }
 
 /**
- * Konfig wie WF8s "Read - GuV_Konfiguration"-SQL: snake_case-Schlüssel mit
- * COALESCE-Defaults. `config` ist der rohe JSONB-Wert (classification_settings
- * __default__) — die SQL las einzelne `cfg->>'…'`, wir tun dasselbe in JS.
+ * Konfig aus dem rohen classification_settings-JSONB (__default__).
+ * #176: Das Besteuerungsmodell wird über die EINE gemeinsame Lesefunktion
+ * `readKleinunternehmer` gelesen (camelCase kanonisch, snake_case Legacy-Fallback,
+ * camelCase gewinnt) — identisch zum Live-Pfad, kein snake-only-Bug mehr.
+ * Die MwSt-Sätze stammen ab #176 aus der effektiven Kategorie-Config (resolveCategory),
+ * nicht mehr aus config-level mwst_snack/mwst_getraenk; diese Felder bleiben nur als
+ * defensiver Default erhalten.
  */
 function parseConfig(config) {
   const cfg = config && typeof config === 'object' ? config : {};
@@ -52,20 +61,10 @@ function parseConfig(config) {
     return v == null || v === '' ? dflt : v;
   };
   return {
-    // FAITHFUL: snake_case — der camelCase-Wert wird (wie in WF8) NICHT gesehen.
-    kleinunternehmerAktiv: clean(get('kleinunternehmer_aktiv', 'FALSE')).toUpperCase() === 'TRUE',
+    kleinunternehmerAktiv: readKleinunternehmer(cfg),
     mwstSnack: num(get('mwst_snack', '7')) || 7,
     mwstGetraenk: num(get('mwst_getraenk', '19')) || 19,
   };
-}
-
-// EINKAUFS-MwSt-Fallback (Code-Node) — nur relevant, wenn die Charge keine MwSt
-// trägt; bei Kleinunternehmer=false ohnehin ohne Effekt auf guv_daily.
-function mwstVonProduktart(art, mwstSnack, mwstGetraenk) {
-  const a = clean(art).toLowerCase();
-  if (a === 'snack' || a.includes('snack') || a === 'riegel') return mwstSnack;
-  if (a === 'getraenk' || a.includes('getraenk') || a.includes('drink')) return mwstGetraenk;
-  return mwstGetraenk;
 }
 
 function deriveDate(tx) {
@@ -94,7 +93,10 @@ function aggKey(date, machineId, productKey) { return date + '|' + machineId + '
  * @returns {{rows:object[], stats:object}}  rows = guv_daily-Payload je Aggregat.
  */
 function computeGuvRows({ transactions = [], batches = [], products = [], config = {}, existingKeys = [], skipExisting = true } = {}) {
-  const { kleinunternehmerAktiv, mwstSnack, mwstGetraenk } = parseConfig(config);
+  const { kleinunternehmerAktiv } = parseConfig(config);
+  // #176: effektive Kategorie-Config (Defaults + Override) als kanonische MwSt-Quelle
+  // — exakt dieselbe Ableitung wie der Live-Pfad (economics.js), damit Live == Nacht.
+  const eff = buildEffectiveConfig(sanitizeOverride(config));
 
   const batchMap = new Map();
   for (const b of batches) { const id = clean(b.batch_id); if (id) batchMap.set(id, b); }
@@ -132,18 +134,17 @@ function computeGuvRows({ transactions = [], batches = [], products = [], config
 
     const batchIds = clean(tx.batch_id_abgebucht).split(',').map((s) => s.trim()).filter(Boolean);
     let ekNetto = 0;
-    let mwstEinkauf = 0;
     if (batchIds.length > 0) {
       const firstBatch = batchMap.get(batchIds[0]);
-      if (firstBatch) { ekNetto = num(firstBatch.unit_cost); mwstEinkauf = num(firstBatch.mwst_satz); }
+      if (firstBatch) ekNetto = num(firstBatch.unit_cost);
     }
 
     const product = productMap.get(productKey) || {};
     const produktart = clean(product.produktart);
-    if (!mwstEinkauf || mwstEinkauf <= 0) mwstEinkauf = mwstVonProduktart(produktart, mwstSnack, mwstGetraenk);
-
-    const ekBrutto = mwstEinkauf > 0 ? ekNetto * (1 + mwstEinkauf / 100) : ekNetto;
-    const warenein = qty * ((kleinunternehmerAktiv && mwstEinkauf > 0) ? ekBrutto : ekNetto);
+    // #176: Wareneinsatz auf der Kostenbasis des Besteuerungsmodells — Faktor aus dem
+    // KANONISCHEN Kategorie-MwSt-Satz (resolveCategory), identisch zum Live-Pfad.
+    const catMwst = resolveCategory(eff, produktart).mwstPct;
+    const warenein = qty * ekNetto * costBasisMultiplier(catMwst, { kleinunternehmer: kleinunternehmerAktiv });
 
     if (!aggregates.has(key)) {
       aggregates.set(key, {
@@ -166,10 +167,14 @@ function computeGuvRows({ transactions = [], batches = [], products = [], config
     const umsatzBrutto = r2(a.umsatz_sum);
     const wareneinsatzBrutto = r2(a.warenein_sum);
     const guv = r2(a.umsatz_sum - a.warenein_sum);
-    const art = clean(a.produktart).toLowerCase();
-    const vatRate = kleinunternehmerAktiv ? 0
-      : (art === 'snack' || art.includes('snack') || art === 'riegel' ? 7 : 19);
+    // #176: VK-MwSt aus dem kanonischen Kategorie-Satz. Kleinunternehmer ⇒ keine USt
+    // auf den Umsatz ⇒ revenue_net = revenue_gross (gekoppelt an dasselbe Flag wie die
+    // Kostenbasis, damit Historie == go-forward). cost_basis stempelt die tatsächlich
+    // benutzte Basis je neuer Zeile.
+    const catMwst = resolveCategory(eff, a.produktart).mwstPct;
+    const vatRate = kleinunternehmerAktiv ? 0 : catMwst;
     const revenueNet = vatRate === 0 ? umsatzBrutto : Math.round(umsatzBrutto / (1 + vatRate / 100) * 100) / 100;
+    const costBasis = (kleinunternehmerAktiv && catMwst > 0) ? 'brutto' : 'netto';
     rows.push({
       guv_key: aggKey(a.date, a.machine_id, a.product_key),
       posting_date: a.date,
@@ -181,6 +186,7 @@ function computeGuvRows({ transactions = [], batches = [], products = [], config
       revenue_net: revenueNet,
       cost_of_goods: wareneinsatzBrutto,
       gross_profit: guv,
+      cost_basis: costBasis,
       source: SOURCE,
     });
   }
@@ -327,12 +333,12 @@ async function writeGuvRows(db, tenant, rows) {
         text:
           `INSERT INTO automatenlager.guv_daily
              (tenant_id, guv_key, posting_date, machine_id, mdb_code, product_id,
-              quantity_sold, revenue_gross, revenue_net, cost_of_goods, gross_profit, source)
+              quantity_sold, revenue_gross, revenue_net, cost_of_goods, gross_profit, cost_basis, source)
            VALUES ($1, $2, $3::date, $4::bigint, $5::integer, $6::bigint,
-                   $7::integer, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12)
+                   $7::integer, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12, $13)
            ON CONFLICT (guv_key) DO NOTHING`,
         params: [row.guv_key, row.posting_date, machineId, row.mdb_code, productId,
-          row.quantity_sold, row.revenue_gross, row.revenue_net, row.cost_of_goods, row.gross_profit, row.source],
+          row.quantity_sold, row.revenue_gross, row.revenue_net, row.cost_of_goods, row.gross_profit, row.cost_basis, row.source],
       });
       const n = ins && typeof ins.rowCount === 'number' ? ins.rowCount : 0;
       if (n > 0) result.inserted += n; else result.conflictSkipped++;
@@ -349,46 +355,13 @@ async function runGuvAggregateForTenant(db, tenant, _opts = {}) {
   return { tenant, computed: rows.length, stats, ...writeRes };
 }
 
-// ── Schatten-Sicherheitsnetz (rechnet, schreibt NIE) ─────────────────────────
-// computeShadowIntended: ALLE Aggregate (skipExisting:false), damit gegen WF8s
-// gespeicherte Zeilen verglichen werden kann. readActualWf8Guv: die echten,
-// von WF8 geschriebenen guv_daily-Zeilen (source='wf8_guv_aggregator') derselben
-// Tage. Beide auf eine vergleichbare, normalisierte Form gebracht.
-function normalizeGuvForCompare(row) {
-  return {
-    guv_key: String(row.guv_key),
-    quantity_sold: Number(row.quantity_sold),
-    revenue_gross: r2(Number(row.revenue_gross)),
-    revenue_net: r2(Number(row.revenue_net)),
-    cost_of_goods: r2(Number(row.cost_of_goods)),
-    gross_profit: r2(Number(row.gross_profit)),
-  };
-}
-
-async function computeShadowIntended(db, tenant) {
-  const inputs = await readGuvInputs(db, tenant);
-  const { rows } = computeGuvRows({ ...inputs, skipExisting: false });
-  return rows.map(normalizeGuvForCompare);
-}
-
-// Liest WF8s tatsächliche guv_daily-Zeilen (nur source='wf8_guv_aggregator') der
-// letzten `days` Tage, in vergleichbarer Form. So vergleicht der Schatten-Harness
-// Äpfel mit Äpfeln (historic_backfill/sheets_seed bleiben außen vor).
-async function readActualWf8Guv(db, tenant, { days = 120 } = {}) {
-  const res = await db.read({
-    tenant,
-    tables: ['guv_daily'],
-    params: [String(days)],
-    text:
-      `SELECT gd.guv_key, gd.quantity_sold, gd.revenue_gross, gd.revenue_net,
-              gd.cost_of_goods, gd.gross_profit
-         FROM automatenlager.guv_daily gd
-        WHERE gd.tenant_id = $1
-          AND gd.source = 'wf8_guv_aggregator'
-          AND gd.posting_date > CURRENT_DATE - ($2 || ' days')::interval`,
-  });
-  return (res.rows || []).map(normalizeGuvForCompare);
-}
+// #176: Das GuV-spezifische Schatten-Paritäts-Gate (computeShadowIntended /
+// readActualWf8Guv / tools/shadow-guv-parity.js) ist entfallen. Es verglich die
+// beabsichtigten Nacht-Zeilen byte-genau gegen WF8s gespeicherte Zeilen (netto) —
+// nach der Kostenbasis-Korrektur bucht der Job bewusst brutto, sodass dieser
+// Vergleich nicht mehr deckungsgleich sein KANN und auch nicht mehr soll (WF8 ist
+// deaktiviert, der Port ist alleiniger Produzent). An seine Stelle tritt der
+// Konsistenz-Anker Live == Nacht (dashboard-jobs-guv-aggregate.test.js).
 
 // ── Job-Factory für den Worker ───────────────────────────────────────────────
 /**
@@ -416,13 +389,9 @@ module.exports = {
   runGuvAggregateForTenant,
   computeGuvRows,
   parseConfig,
-  mwstVonProduktart,
   deriveDate,
   readGuvInputs,
   writeGuvRows,
-  computeShadowIntended,
-  readActualWf8Guv,
-  normalizeGuvForCompare,
   WORKFLOW_KEY,
   SOURCE,
 };

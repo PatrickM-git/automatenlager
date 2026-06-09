@@ -14,7 +14,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { ekFromNet, wareneinsatzNet } = require('../lib/guv-ek.js');
+const { ekFromNet, wareneinsatzNet, readKleinunternehmer, costBasisMultiplier } = require('../lib/guv-ek.js');
+const { buildEffectiveConfig, sanitizeOverride, resolveCategory } = require('../lib/category-config.js');
 
 test('ekFromNet: unit_cost ist netto -> brutto wird obendrauf gerechnet (Snickers 7 %)', () => {
   const ek = ekFromNet(0.48, 7);
@@ -63,4 +64,69 @@ test('wareneinsatzNet: ungültige Eingaben -> 0', () => {
   assert.equal(wareneinsatzNet(null, 0.48), 0);
   assert.equal(wareneinsatzNet(64, null), 0);
   assert.equal(wareneinsatzNet(-5, 0.48), 0);
+});
+
+// ── #176: gemeinsame Lesefunktion für das Besteuerungsmodell (Konflikt-Regel) ──
+
+test('#176 readKleinunternehmer: Konflikt-Matrix — camelCase ist kanonisch, gewinnt', () => {
+  // camelCase=true, snake=false → true (camelCase gewinnt)
+  assert.equal(readKleinunternehmer({ kleinunternehmerAktiv: true, kleinunternehmer_aktiv: false }), true);
+  // camelCase=false, snake=true → false (camelCase gewinnt)
+  assert.equal(readKleinunternehmer({ kleinunternehmerAktiv: false, kleinunternehmer_aktiv: true }), false);
+  // nur snake=true → true (Legacy-Fallback)
+  assert.equal(readKleinunternehmer({ kleinunternehmer_aktiv: true }), true);
+  // nur snake=false → false
+  assert.equal(readKleinunternehmer({ kleinunternehmer_aktiv: false }), false);
+  // beide fehlen → definierter Default false
+  assert.equal(readKleinunternehmer({}), false);
+  assert.equal(readKleinunternehmer(null), false);
+  // nur camelCase=true → true
+  assert.equal(readKleinunternehmer({ kleinunternehmerAktiv: true }), true);
+});
+
+test('#176 readKleinunternehmer: akzeptiert bool und String "true"/"false" (case-insensitiv)', () => {
+  assert.equal(readKleinunternehmer({ kleinunternehmerAktiv: 'TRUE' }), true);
+  assert.equal(readKleinunternehmer({ kleinunternehmerAktiv: 'False' }), false);
+  assert.equal(readKleinunternehmer({ kleinunternehmer_aktiv: 'true' }), true);
+  assert.equal(readKleinunternehmer({ kleinunternehmerAktiv: ' true ' }), true);
+});
+
+test('#176 readKleinunternehmer: bei doppeltem Schlüssel wird genau ein Warning geloggt', () => {
+  const warnings = [];
+  const logger = { warn: (m) => warnings.push(m) };
+  const out = readKleinunternehmer({ kleinunternehmerAktiv: true, kleinunternehmer_aktiv: false }, { logger });
+  assert.equal(out, true, 'camelCase gewinnt');
+  assert.equal(warnings.length, 1, 'genau ein Warning');
+  assert.equal(warnings[0], 'Config contains both kleinunternehmerAktiv and kleinunternehmer_aktiv; using camelCase.');
+});
+
+test('#176 readKleinunternehmer: nur EIN Schlüssel ⇒ kein Warning', () => {
+  const warnings = [];
+  const logger = { warn: (m) => warnings.push(m) };
+  readKleinunternehmer({ kleinunternehmerAktiv: true }, { logger });
+  readKleinunternehmer({ kleinunternehmer_aktiv: true }, { logger });
+  readKleinunternehmer({}, { logger });
+  assert.equal(warnings.length, 0, 'kein Warning ohne Konflikt');
+});
+
+// ── #176: reine Brutto-Rechnung aus dem Kategorie-MwSt-Satz (ohne DB) ──────────
+
+test('#176 Brutto-Kostenbasis (Kategorie-MwSt): KU+Snack ×1,07, KU+Getränk ×1,19, KU+unbekannt ×1,19', () => {
+  const eff = buildEffectiveConfig(sanitizeOverride({})); // Defaults: snack 7 %, getraenk 19 %, default 19 %
+  const ku = { kleinunternehmer: true };
+  const snackMwst = resolveCategory(eff, 'snack').mwstPct;
+  const drinkMwst = resolveCategory(eff, 'getraenk').mwstPct;
+  const unknownMwst = resolveCategory(eff, 'gibtsnicht').mwstPct;
+  assert.equal(snackMwst, 7);
+  assert.equal(drinkMwst, 19);
+  assert.equal(unknownMwst, 19, 'unbekannte Kategorie ⇒ defaultMwstPct 19');
+  assert.equal(costBasisMultiplier(snackMwst, ku), 1.07);
+  assert.equal(costBasisMultiplier(drinkMwst, ku), 1.19);
+  assert.equal(costBasisMultiplier(unknownMwst, ku), 1.19);
+});
+
+test('#176 Brutto-Kostenbasis: regelbesteuert bleibt netto (Faktor 1, unverändert)', () => {
+  const reg = { kleinunternehmer: false };
+  assert.equal(costBasisMultiplier(7, reg), 1);
+  assert.equal(costBasisMultiplier(19, reg), 1);
 });

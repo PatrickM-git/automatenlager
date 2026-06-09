@@ -1,19 +1,18 @@
 'use strict';
 
 /**
- * GuV-Tagesposten-Aggregator-Job (Issue #161, Stufe 6 Slice 1) — Ersatz für WF8.
- * SPEC: docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md §"Pro-Workflow-Disposition"
+ * GuV-Tagesposten-Aggregator-Job (Issue #161, Stufe 6 Slice 1) + Kostenbasis-
+ * Korrektur (Issue #176). Ersatz für WF8.
+ * SPEC: docs/specs/guv-kostenbasis-kleinunternehmer-restatement-v1.md
  *
- * Drei Ebenen:
- *  (1) REINE Aggregations-Parität: computeGuvRows ist faithful zu WF8 ("Code - GuV
- *      aggregieren" + "Prepare PGW - guv_daily"). Inkl. der bewussten Faithfulness-
- *      Befunde (snake_case-Konfig ⇒ kleinunternehmer effektiv FALSE; Zwischen-Rundung).
- *  (2) Factory/Verkabelung (createGuvAggregateJob über den tenant-runner).
- *  (3) LIVE im #94-Sandbox als automatenlager_app (RLS aktiv): acme/globex-Isolation
- *      + Idempotenz, NICHT-VAKUÖS (jeder Mandant bucht aus SEINER eigenen Charge).
- *
- * Die byte-genaue Gleichheit mit WF8 auf ECHTEN Produktionsdaten beweist zusätzlich
- * der read-only Paritäts-Harness tools/shadow-guv-parity.js (Cutover-Gate, Task #5).
+ * Ebenen:
+ *  (1) REINE Aggregation: computeGuvRows aggregiert je Tag/Automat/Produkt und
+ *      stempelt cost_basis. #176: Kleinunternehmer (camelCase kanonisch) ⇒ Brutto-
+ *      Kostenbasis aus dem Kategorie-MwSt-Satz + revenue_net = revenue_gross.
+ *  (2) Konsistenz-Anker Live == Nacht (ersetzt das alte Schatten-Paritäts-Gate).
+ *  (3) Factory/Verkabelung (createGuvAggregateJob über den tenant-runner).
+ *  (4) LIVE im #94-Sandbox als automatenlager_app (RLS aktiv): acme/globex-Isolation
+ *      + Idempotenz (nicht-vakuös) sowie ein KU-Mandant, der brutto bucht.
  */
 
 const assert = require('node:assert/strict');
@@ -23,19 +22,33 @@ const guv = require('../lib/jobs/guv-aggregate.js');
 const { inSandbox, applyMigration } = require('./helpers/migration-sandbox.js');
 const { createTenantDb } = require('../lib/tenant-db.js');
 const { seedAcmeGlobex, sandboxTxPool } = require('./helpers/tenant-fixtures.js');
+const { costBasisMultiplier } = require('../lib/guv-ek.js');
+const { buildEffectiveConfig, sanitizeOverride, resolveCategory } = require('../lib/category-config.js');
+
+// Live-Pfad-Replik (economics.js Z.874-876): Wareneinsatz = round2(Netto-FIFO ×
+// Kategorie-MwSt-Faktor). EXAKT dieselbe Ableitung wie der Nacht-Job — der Anker
+// unten beweist Deckungsgleichheit auf identischem Input.
+function liveCost(eff, kleinunternehmer, category, fifoNetCost) {
+  const catMwst = resolveCategory(eff, category).mwstPct;
+  const mult = costBasisMultiplier(catMwst, { kleinunternehmer });
+  return Math.round(fifoNetCost * mult * 100) / 100;
+}
 
 // ── (1) Reine Aggregations-Parität (kein PG) ─────────────────────────────────
 
-test('#161 parseConfig: liest snake_case (FAITHFUL) — camelCase wird wie in WF8 ignoriert', () => {
-  // Der reale __default__-Wert ist camelCase {kleinunternehmerAktiv:true}; WF8s SQL
-  // liest cfg->>"kleinunternehmer_aktiv" ⇒ sieht IMMER den Default 'FALSE'.
+test('#176 parseConfig: liest camelCase kanonisch (WF8-snake-only-Bug behoben)', () => {
+  // Der reale __default__-Wert ist camelCase {kleinunternehmerAktiv:true}; der
+  // Nacht-Job sieht ihn ab #176 (gemeinsame Lesefunktion), bucht also nicht mehr
+  // fälschlich netto.
   const c1 = guv.parseConfig({ kleinunternehmerAktiv: true });
-  assert.equal(c1.kleinunternehmerAktiv, false, 'camelCase-true wird (faithful) NICHT gesehen');
+  assert.equal(c1.kleinunternehmerAktiv, true, 'camelCase-true wird jetzt gesehen');
   assert.equal(c1.mwstSnack, 7);
   assert.equal(c1.mwstGetraenk, 19);
-  // snake_case wird gesehen:
+  // snake_case bleibt als Legacy-Fallback erhalten:
   assert.equal(guv.parseConfig({ kleinunternehmer_aktiv: 'TRUE' }).kleinunternehmerAktiv, true);
-  assert.equal(guv.parseConfig({ mwst_snack: '5', mwst_getraenk: '20' }).mwstSnack, 5);
+  // beide vorhanden ⇒ camelCase gewinnt:
+  assert.equal(guv.parseConfig({ kleinunternehmerAktiv: false, kleinunternehmer_aktiv: true }).kleinunternehmerAktiv, false);
+  assert.equal(guv.parseConfig({}).kleinunternehmerAktiv, false, 'leere Konfig ⇒ regelbesteuert (Default)');
   assert.equal(guv.parseConfig({}).mwstGetraenk, 19, 'leere Konfig ⇒ Defaults');
 });
 
@@ -64,6 +77,7 @@ test('#161 compute: Regelbesteuerung (snack) — Aggregat, Netto-Kosten, revenue
   assert.equal(r.cost_of_goods, 7.5, 'kleinunternehmer FALSE ⇒ qty*ekNetto (2.5)');
   assert.equal(r.gross_profit, 7.5, 'r2(Σumsatz − Σwarenein)');
   assert.equal(r.revenue_net, 14.02, 'snack ⇒ vat 7%: round(15/1.07*100)/100');
+  assert.equal(r.cost_basis, 'netto', 'regelbesteuert ⇒ cost_basis netto');
   assert.equal(r.source, 'wf8_guv_aggregator');
 });
 
@@ -75,11 +89,28 @@ test('#161 compute: getraenk ⇒ revenue_net @19%', () => {
   assert.equal(rows[0].revenue_net, 10, 'round(11.9/1.19*100)/100 = 10.00');
 });
 
-test('#161 compute: Kleinunternehmer (snake TRUE) ⇒ Brutto-Kostenbasis, revenue_net = revenue_gross', () => {
+test('#176 compute: Kleinunternehmer (camelCase) ⇒ Brutto-Kostenbasis, revenue_net = revenue_gross, cost_basis brutto', () => {
   const reg = guv.computeGuvRows({ transactions: [baseTx()], batches: batchesB1, products: productsP1, config: {}, existingKeys: [] }).rows[0];
-  const klein = guv.computeGuvRows({ transactions: [baseTx()], batches: batchesB1, products: productsP1, config: { kleinunternehmer_aktiv: 'TRUE' }, existingKeys: [] }).rows[0];
+  // camelCase (der reale __default__-Schlüssel) wird jetzt gesehen:
+  const klein = guv.computeGuvRows({ transactions: [baseTx()], batches: batchesB1, products: productsP1, config: { kleinunternehmerAktiv: true }, existingKeys: [] }).rows[0];
   assert.equal(klein.revenue_net, klein.revenue_gross, 'Kleinunternehmer ⇒ vatRate 0 ⇒ revenue_net == gross');
   assert.ok(klein.cost_of_goods > reg.cost_of_goods, 'Brutto-Kostenbasis > Netto-Kostenbasis');
+  // Snack 7 %: qty2 × ekNetto2.5 × 1,07 = 5.35
+  assert.equal(klein.cost_of_goods, 5.35, 'KU+Snack: 2 × 2,5 × 1,07');
+  assert.equal(klein.cost_basis, 'brutto', 'KU mit gültiger MwSt ⇒ cost_basis brutto');
+  assert.equal(reg.cost_basis, 'netto', 'Regelbesteuerung ⇒ cost_basis netto');
+});
+
+test('#176 compute: KU+Getränk nutzt Kategorie-MwSt 19 % (nicht Charge/Produkt-VAT)', () => {
+  // batch trägt mwst_satz 7, Produkt ist aber Getränk ⇒ Kategorie-Satz 19 % gewinnt.
+  const klein = guv.computeGuvRows({
+    transactions: [baseTx({ batch_id_abgebucht: 'B1' })],
+    batches: [{ batch_id: 'B1', unit_cost: '2.5', mwst_satz: '7' }],
+    products: [{ product_key: 'P1', produktart: 'getraenk', sale_price_eur: '5' }],
+    config: { kleinunternehmerAktiv: true }, existingKeys: [],
+  }).rows[0];
+  assert.equal(klein.cost_of_goods, 5.95, 'KU+Getränk: 2 × 2,5 × 1,19 (Kategorie-MwSt 19 %)');
+  assert.equal(klein.cost_basis, 'brutto');
 });
 
 test('#161 compute: status≠OK übersprungen; sentinel-Datum 2001- übersprungen; kein-Preis übersprungen', () => {
@@ -113,6 +144,27 @@ test('#161 compute: skipExisting überspringt vorhandene Keys (Produktion) — n
   assert.equal(prod.stats.skippedExisting, 1);
   const shadow = guv.computeGuvRows({ transactions: [baseTx()], batches: batchesB1, products: productsP1, config: {}, existingKeys, skipExisting: false });
   assert.equal(shadow.rows.length, 1, 'Schattenpfad rechnet ALLE Keys (für den Vergleich)');
+});
+
+// ── Konsistenz-Anker Live == Nacht (ersetzt das alte Schatten-Paritäts-Gate) ──
+
+test('#176 Anker Live == Nacht: identischer Input ⇒ identische Kostenbasis (brutto==brutto, netto==netto)', () => {
+  const eff = buildEffectiveConfig(sanitizeOverride({}));
+  // qty 2 × ekNetto 2,5 = 5,0 Netto-FIFO je Produkt.
+  for (const kleinunternehmer of [true, false]) {
+    for (const category of ['snack', 'getraenk', 'gibtsnicht']) {
+      const nacht = guv.computeGuvRows({
+        transactions: [baseTx({ batch_id_abgebucht: 'B1' })],
+        batches: [{ batch_id: 'B1', unit_cost: '2.5', mwst_satz: '7' }],
+        products: [{ product_key: 'P1', produktart: category, sale_price_eur: '5' }],
+        config: { kleinunternehmerAktiv: kleinunternehmer }, existingKeys: [],
+      }).rows[0];
+      const live = liveCost(eff, kleinunternehmer, category, 2 * 2.5);
+      assert.equal(nacht.cost_of_goods, live,
+        `Live==Nacht für KU=${kleinunternehmer}, Kategorie=${category}`);
+      assert.equal(nacht.cost_basis, kleinunternehmer ? 'brutto' : 'netto');
+    }
+  }
 });
 
 // ── (2) Factory / Verkabelung ────────────────────────────────────────────────
@@ -152,7 +204,15 @@ test('#161 GuV LIVE: pro Mandant durch die Tür isoliert + idempotent (RLS aktiv
     await freshSale('acme', acme.machineId, acme.productId, acme.productName, '2026-06-05', 20, 2);
     await freshSale('globex', globex.machineId, globex.productId, globex.productName, '2026-06-06', 45, 3);
 
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n); // RLS scharf
+    // #176: Config DETERMINISTISCH regelbesteuert setzen (sonst hinge der Test am
+    // realen __default__-Wert, den der Job ab #176 wirklich liest).
+    await client.query(
+      `INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
+         VALUES ('__default__', $1::jsonb, now())
+       ON CONFLICT (mandant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+      [JSON.stringify({ kleinunternehmerAktiv: false })]);
+
+    for (const n of [22, 23, 24, 25, 26, 28]) await applyMigration(client, n); // RLS scharf + cost_basis-Spalte
     await client.query('SET ROLE automatenlager_app');                     // eingeengte App-Rolle
     try {
       const db = createTenantDb({ pool: sandboxTxPool(client) });          // read + tx über SAVEPOINTs
@@ -165,7 +225,7 @@ test('#161 GuV LIVE: pro Mandant durch die Tür isoliert + idempotent (RLS aktiv
       // Je Mandant durch die Tür gegenlesen: jeder sieht NUR seinen neuen Key.
       const keysFor = async (tid) => (await db.read({
         tenant: tid, tables: ['guv_daily'],
-        text: `SELECT guv_key, cost_of_goods FROM automatenlager.guv_daily WHERE tenant_id = $1 AND source = 'wf8_guv_aggregator'`,
+        text: `SELECT guv_key, cost_of_goods, cost_basis FROM automatenlager.guv_daily WHERE tenant_id = $1 AND source = 'wf8_guv_aggregator'`,
       })).rows;
       const acmeKeys = await keysFor('acme');
       const globexKeys = await keysFor('globex');
@@ -183,11 +243,53 @@ test('#161 GuV LIVE: pro Mandant durch die Tür isoliert + idempotent (RLS aktiv
       const globexCost = Number(globexKeys.find((r) => r.guv_key === '2026-06-06|vm_globex|p_globex').cost_of_goods);
       assert.equal(acmeCost, 10, 'acme-Kosten aus acme-Charge');
       assert.equal(globexCost, 37.5, 'globex-Kosten aus globex-Charge');
+      // #176: regelbesteuert ⇒ netto-Basis gestempelt.
+      assert.equal(acmeKeys.find((r) => r.guv_key === '2026-06-05|vm_acme|p_acme').cost_basis, 'netto', 'regelbesteuert ⇒ cost_basis netto');
 
       // Idempotenz: erneuter acme-Lauf bucht 0 (existingKeys-Skip + ON CONFLICT).
       const acmeRerun = await guv.runGuvAggregateForTenant(db, 'acme');
       assert.equal(acmeRerun.inserted, 0, 'zweiter Lauf schreibt nichts (idempotent)');
       assert.equal((await keysFor('acme')).length, acmeKeys.length, 'guv_daily-Zeilenzahl unverändert');
+    } finally {
+      await client.query('RESET ROLE');
+    }
+  });
+});
+
+test('#176 GuV LIVE: Kleinunternehmer-Mandant bucht BRUTTO (cost_basis brutto, revenue_net=gross)', async (t) => {
+  await inSandbox(t, async (client) => {
+    const { acme } = await seedAcmeGlobex(client); // Produkt 'snack', unit_cost_net 5
+    await client.query(
+      `INSERT INTO automatenlager.sales_transactions
+         (nayax_transaction_id, machine_id, product_id, product_name_raw, quantity,
+          gross_amount, net_amount, vat_amount, settlement_at, processing_status, tenant_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'OK',$10)`,
+      ['fresh_ku_acme', acme.machineId, acme.productId, acme.productName, 2, 20, 20, 0, '2026-06-07T10:00:00Z', 'acme']);
+
+    // Kleinunternehmer-Konfig (camelCase, wie der reale __default__-Wert).
+    await client.query(
+      `INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
+         VALUES ('__default__', $1::jsonb, now())
+       ON CONFLICT (mandant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+      [JSON.stringify({ kleinunternehmerAktiv: true })]);
+
+    for (const n of [22, 23, 24, 25, 26, 28]) await applyMigration(client, n);
+    await client.query('SET ROLE automatenlager_app');
+    try {
+      const db = createTenantDb({ pool: sandboxTxPool(client) });
+      const run = await guv.runGuvAggregateForTenant(db, 'acme');
+      assert.equal(run.inserted, 1, 'KU-Mandant bucht seinen frischen Tagesposten');
+
+      const row = (await db.read({
+        tenant: 'acme', tables: ['guv_daily'],
+        text: `SELECT revenue_gross, revenue_net, cost_of_goods, cost_basis
+                 FROM automatenlager.guv_daily
+                WHERE tenant_id = $1 AND guv_key = '2026-06-07|vm_acme|p_acme'`,
+      })).rows[0];
+      assert.ok(row, 'Tagesposten vorhanden');
+      assert.equal(row.cost_basis, 'brutto', 'KU ⇒ cost_basis brutto');
+      assert.equal(Number(row.cost_of_goods), 10.7, 'KU+Snack: 2 × 5 × 1,07 (Brutto-Kostenbasis)');
+      assert.equal(Number(row.revenue_net), Number(row.revenue_gross), 'KU ⇒ revenue_net = revenue_gross');
     } finally {
       await client.query('RESET ROLE');
     }
