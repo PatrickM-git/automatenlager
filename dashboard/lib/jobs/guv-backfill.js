@@ -18,11 +18,28 @@
 //     ON CONFLICT (guv_key) DO NOTHING ⇒ „greift immer", beliebig wiederholbar.
 //   * source='guv_backfill' (NICHT 'historic_backfill', das vom Panel gefiltert wird)
 //     ⇒ die nachgepflegten Posten sind im GuV-Panel SICHTBAR.
+//
+// ZWEI Betriebsarten, EINE Logik (runGuvBackfillForTenant):
+//   * On-Demand-CLI tools/run-guv-backfill.js (Vorschau/Einmallauf).
+//   * Wiederkehrender Worker-Job createGuvBackfillJob (s. u.) — erkennt GuV-Lücken
+//     automatisch und füllt sie, wenn Nayax nichts/Unvollständiges lieferte. Quelle
+//     (Sheet-ID) via Env GUV_BACKFILL_SHEET_ID; perspektivisch pro Mandant (Stufe 6).
+//
+// KEINE Pflege-Tabelle (User-Vorgabe): unfüllbare Verkäufe (noMap/noEK) werden als
+// Lauf-Telemetrie/Warnung gemeldet, nicht in einer Tabelle geführt.
 // ─────────────────────────────────────────────────────────────────────────────
 
+const https = require('node:https');
 const { computeGuvRows, writeGuvRows } = require('./guv-aggregate.js');
 
 const BACKFILL_SOURCE = 'guv_backfill';
+const WORKFLOW_KEY = 'wf-guv-backfill';
+// Vom Betreiber freigegebenes Sheet mit den Roh-Umsätzen (öffentlicher CSV-Export,
+// kein Login). Heute global; Stufe 6: pro Mandant via injiziertem fetchSource/Config.
+const DEFAULT_SHEET_ID = '16RAC2iUmnSxVWJf-F3Bai2zPSGGs5BLF';
+// Der einzige produktive Automat heute (n8n war auf '457107528' hartkodiert); pro
+// Mandant konfigurierbar in Stufe 6. Env-Override GUV_BACKFILL_MACHINE_KEY.
+const DEFAULT_MACHINE_KEY = '457107528';
 // Format der Produktauswahl: "Name(MDB  PREIS)" oder "Name(MDB = PREIS)".
 const INFO_RE = /^(.+?)\((\d+)\s+(?:=\s+)?(\d+\.?\d*)\)$/;
 
@@ -198,7 +215,12 @@ async function runGuvBackfillForTenant(db, tenant, { csvText, config = null, dry
   };
   if (dryRun) return { ...summary, dryRun: true, rows: backfillRows };
   const writeRes = await writeGuvRows(db, tenant, backfillRows);
-  return { ...summary, ...writeRes };
+  // writeRes.unresolved ist eine ZAHL (write-seitige machine_key/product_key-Resolve-
+  // Fehler) und würde sonst das Mapping-Objekt summary.unresolved (noMap/noEK-Arrays)
+  // überschreiben. Getrennt führen: `unresolved` bleibt das Objekt (Samples für CLI +
+  // Worker-Telemetrie), die Write-Zahl wird `unresolvedWrites`.
+  const { unresolved: unresolvedWrites, ...writeCounts } = writeRes;
+  return { ...summary, ...writeCounts, unresolvedWrites };
 }
 
 async function loadConfig(db, tenant) {
@@ -209,8 +231,125 @@ async function loadConfig(db, tenant) {
   return (res.rows[0] && res.rows[0].config) || {};
 }
 
+// ── Quelle: freigegebener Google-Sheet-CSV-Export ────────────────────────────
+/** Sheet-ID aus der Env (GUV_BACKFILL_SHEET_ID) ODER der Default. Stufe 6: pro Mandant. */
+function resolveSheetId(env = process.env) {
+  const v = env && env.GUV_BACKFILL_SHEET_ID != null ? String(env.GUV_BACKFILL_SHEET_ID).trim() : '';
+  return v || DEFAULT_SHEET_ID;
+}
+
+/** Ziel-Automat aus der Env (GUV_BACKFILL_MACHINE_KEY) ODER der Default. */
+function resolveMachineKey(env = process.env) {
+  const v = env && env.GUV_BACKFILL_MACHINE_KEY != null ? String(env.GUV_BACKFILL_MACHINE_KEY).trim() : '';
+  return v || DEFAULT_MACHINE_KEY;
+}
+
+/**
+ * Holt den Nayax-Roh-Export als CSV aus dem freigegebenen Google-Sheet (öffentlicher
+ * CSV-Export, kein Login; folgt Redirects). `httpsImpl` injizierbar ⇒ Tests laufen
+ * offline. Kein rohes pg ⇒ #107-Wächter-rein. Auch von der On-Demand-CLI genutzt.
+ */
+function fetchBackfillCsv(sheetId, { httpsImpl = https, timeoutMs = 10000 } = {}) {
+  const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/export?format=csv`;
+  return new Promise((resolve, reject) => {
+    (function get(u, depth) {
+      if (depth > 6) return reject(new Error('guv-backfill: zu viele Redirects beim Sheet-Abruf'));
+      const req = httpsImpl.get(u, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: timeoutMs }, (r) => {
+        if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) { r.resume(); get(r.headers.location, depth + 1); return; }
+        if (r.statusCode !== 200) { r.resume(); return reject(new Error(`guv-backfill: Sheet-Abruf HTTP ${r.statusCode}`)); }
+        let d = ''; r.setEncoding('utf8'); r.on('data', (c) => { d += c; }); r.on('end', () => resolve(d));
+      });
+      req.on('timeout', () => { req.destroy(); reject(new Error('guv-backfill: Timeout beim Sheet-Abruf')); });
+      req.on('error', reject);
+    })(url, 0);
+  });
+}
+
+// ── Job-Factory für den Worker (analog createGuvAggregateJob) ─────────────────
+/**
+ * Wiederkehrender GuV-Backfill-Job: holt den Nayax-Roh-Export EINMAL pro Lauf und
+ * füllt je Mandant durch die Tür fehlende guv_daily-Posten (idempotent,
+ * source='guv_backfill'). Erkennt GuV-Lücken automatisch (Dedup gegen vorhandene
+ * Keys) und füllt sie, wenn Nayax keine/unvollständige Zahlen lieferte.
+ *
+ * Unfüllbare Verkäufe (noMap = kein Produkt-Mapping, noEK = kein Einkaufspreis)
+ * werden als kompakte Lauf-TELEMETRIE im Rückgabewert + als WARNUNG (logger)
+ * gemeldet — bewusst KEINE Pflege-Tabelle (User-Vorgabe). Die Lauf-Telemetrie
+ * (Start/Ende/Status) landet wie bei den anderen Jobs in audit.workflow_runs
+ * (der Worker umschließt run() mit dem Recorder).
+ *
+ * @param {object} deps
+ * @param {{runForAll:Function, listTenants?:Function}} deps.tenantRunner  Per-Mandant-Runner (#160).
+ * @param {() => Promise<string>} [deps.fetchSource]  Liefert den CSV-Text. Default:
+ *        Google-Sheet-CSV via resolveSheetId(env). Tests injizieren Fixture-CSV
+ *        (kein Netz). Stufe 6: pro-Mandant-Quelle (Credential-/Config-Vault).
+ * @param {object} [deps.env]
+ * @param {(...a:any[])=>void} [deps.logger]  Warnungs-Logger für unfüllbare Lücken.
+ * @returns {{key:string, run:()=>Promise<any>}}
+ */
+function createGuvBackfillJob({ tenantRunner, fetchSource, env = process.env, logger } = {}) {
+  if (!tenantRunner || typeof tenantRunner.runForAll !== 'function') {
+    throw new TypeError('guv-backfill: tenantRunner mit runForAll() erforderlich');
+  }
+  const log = typeof logger === 'function' ? logger : () => {};
+  const machineKey = resolveMachineKey(env);
+  const sheetId = resolveSheetId(env);
+  // Quelle injizierbar (Tests/Stufe-6-per-Mandant); Default = freigegebenes Sheet.
+  const source = typeof fetchSource === 'function' ? fetchSource : () => fetchBackfillCsv(sheetId);
+
+  return {
+    key: WORKFLOW_KEY,
+    run: async () => {
+      // Fail-closed + sparsam: ohne Mandanten in der Registry NICHTS tun (und nicht
+      // unnötig das externe Sheet abrufen).
+      const known = typeof tenantRunner.listTenants === 'function' ? tenantRunner.listTenants() : null;
+      if (Array.isArray(known) && known.length === 0) {
+        return { skipped: 'keine Mandanten in der Registry', tenants: 0, inserted: 0 };
+      }
+
+      // EINMAL holen, über alle Mandanten teilen (heute ein globaler Export; Stufe 6:
+      // pro-Mandant-Quelle ⇒ fetchSource bekommt dann den Mandanten).
+      const csvText = await source();
+
+      const res = await tenantRunner.runForAll(
+        (db, tenant) => runGuvBackfillForTenant(db, tenant, { csvText, machineKey }),
+        { continueOnError: true });
+
+      const perTenant = res.perTenant || {};
+      const sum = (field) => Object.values(perTenant).reduce((s, r) => s + ((r && r[field]) || 0), 0);
+      const inserted = sum('inserted');
+      const conflictSkipped = sum('conflictSkipped');
+      const noMap = sum('noMap');
+      const noEK = sum('noEK');
+
+      // Unfüllbares als TELEMETRIE/WARNUNG bündeln — beschränkte Stichprobe je Mandant
+      // (keine unbegrenzten Arrays in der Telemetrie). Die schweren `unresolved`/`rows`-
+      // Felder NICHT in perTenant zurückgeben (kompakte Lauf-Telemetrie).
+      const unfillable = [];
+      const perTenantSummary = {};
+      for (const [tenant, r] of Object.entries(perTenant)) {
+        if (!r) { perTenantSummary[tenant] = r; continue; }
+        const { unresolved, rows, ...rest } = r; // unresolved-Arrays + dryRun-rows abstreifen
+        perTenantSummary[tenant] = rest;
+        const u = unresolved || {};
+        const noMapSamples = (u.noMap || []).slice(0, 10).map((s) => ({ name: s.name, mdb: s.mdb, date: s.date }));
+        const noEKSamples = (u.noEK || []).slice(0, 10).map((s) => ({ product_key: s.product_key, date: s.date }));
+        if (noMapSamples.length || noEKSamples.length) {
+          unfillable.push({ tenant, noMap: (u.noMap || []).length, noEK: (u.noEK || []).length, noMapSamples, noEKSamples });
+        }
+      }
+      if (noMap + noEK > 0) {
+        log(`guv-backfill: ${noMap} unmappbare + ${noEK} ohne-EK Verkäufe (NICHT gefüllt) über ${res.tenants.length} Mandant(en) — siehe unfillable`);
+      }
+
+      return { tenants: res.tenants.length, inserted, conflictSkipped, noMap, noEK, unfillable, errors: res.errors, perTenant: perTenantSummary };
+    },
+  };
+}
+
 module.exports = {
   parseNayaxExportCsv, parseGermanDate, buildComputeInputs,
   loadBackfillMaps, loadExistingKeys, runGuvBackfillForTenant,
-  BACKFILL_SOURCE, INFO_RE,
+  createGuvBackfillJob, fetchBackfillCsv, resolveSheetId, resolveMachineKey,
+  BACKFILL_SOURCE, WORKFLOW_KEY, DEFAULT_SHEET_ID, DEFAULT_MACHINE_KEY, INFO_RE,
 };

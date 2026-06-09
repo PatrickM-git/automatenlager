@@ -29,6 +29,7 @@ const SUCCESS_STATES = new Set(['success', 'succeeded', 'ok']);
 const DEFAULT_EXPECTED_JOBS = Object.freeze([
   { key: 'worker-heartbeat', maxAgeMin: 20 },        // alle 5 min
   { key: 'wf-guv-aggregate', maxAgeMin: 60 },        // alle 15 min
+  { key: 'wf-guv-backfill', maxAgeMin: 60 * 14 },    // alle 6 h (Lücken-Fallback; toleriert 1 Aussetzer + Restart)
   { key: 'wf-matview-refresh', maxAgeMin: 60 * 26 }, // täglich 04:45
   { key: 'wf-db-validation', maxAgeMin: 60 * 26 },   // täglich 04:15
   { key: 'wf-nayax-devices-sync', maxAgeMin: 60 * 26 }, // täglich 04:20
