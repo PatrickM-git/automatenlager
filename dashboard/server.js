@@ -11,6 +11,7 @@ const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = re
 const { buildAlertDigest, queryAlertDigestPg } = require('./lib/alert-digest.js');
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
 const { applyRefill } = require('./lib/refill-apply.js'); // #162 (Stufe 6 Slice 2): WF7 in-process durch die Tür
+const { applyProductBatch } = require('./lib/jobs/invoice-intake.js'); // #163 (Stufe 6 Slice 3): WF2-Freigabe in-process durch die Tür
 const { availableBatchStatusSqlList } = require('./lib/stock-status.js');
 const { validateWriteOff, buildWriteOffAuditEntry, writeOffBatchPg } = require('./lib/write-off.js'); // #138: writeOffBatchPg geht durch die Tür
 const { validateInventoryCount, buildInventoryCountAuditEntry, setBatchCountPg } = require('./lib/inventory-count.js'); // #152: Inline-Inventur (Chargenrest setzen)
@@ -2413,6 +2414,55 @@ const server = http.createServer(async (req, res) => {
         message: wfResult.message,
         ...(wfResult.ok ? { summary: refill } : { error: { code: 'WF7_ERROR', message: wfResult.message } }),
       });
+      return;
+    }
+
+    // ── WF2-Freigabe (Mensch-im-Loop): Rechnungsvorschlag freigeben ────────────
+    // Stufe 6 Slice 3 (#163): WF2 in-process. Freigabe einer Position legt
+    // Produkt (optional) + Alias + Lagercharge an — atomar DURCH die Tür (db.tx,
+    // tenant_id=$1, faithful zu pgw_write product/product_alias/stock_batch).
+    if (parsed.pathname === '/api/v2/invoice-proposal/approve' && req.method === 'POST') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        auditDenied(viewer, 'invoice_proposal_approve_denied', {});
+        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer duerfen keine Rechnungsvorschlaege freigeben.' } });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await new Promise((resolve, reject) => {
+          let data = '';
+          req.on('data', (chunk) => { data += chunk; });
+          req.on('end', () => { resolve(data); });
+          req.on('error', reject);
+        }));
+      } catch {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON im Request-Body.' } });
+        return;
+      }
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
+      const { product_key, batch_id } = body || {};
+      if (!product_key || !batch_id) {
+        sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: 'product_key und batch_id erforderlich.' } });
+        return;
+      }
+      if (!tenantDb) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      let result; let ok = true; let message = '';
+      try {
+        result = await applyProductBatch(tenantDb, viewer.tenantId, { decision: body });
+        message = `Freigabe erfasst: ${result.products} Produkt(e), ${result.aliases} Alias(e), ${result.batches} Charge(n)`;
+      } catch (err) {
+        ok = false; message = `Freigabe fehlgeschlagen: ${err.message}`;
+      }
+      const auditPath = path.join(__dirname, 'logs', 'invoice-proposals.jsonl');
+      try {
+        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
+        fs.appendFileSync(auditPath, `${JSON.stringify({ at: new Date().toISOString(), login: viewer.login, tenant: viewer.tenantId, product_key, batch_id, ok, message })}\n`, 'utf8');
+      } catch { /* audit write failure must not block response */ }
+      sendJson(res, ok ? 200 : 502, ok ? { ok, message, summary: result } : { ok, error: { code: 'WF2_ERROR', message } });
       return;
     }
 

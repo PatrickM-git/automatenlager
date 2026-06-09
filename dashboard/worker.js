@@ -164,6 +164,8 @@ function buildWorker(env = process.env) {
   const { createClaudeProposalsJob } = require('./lib/jobs/claude-proposals.js');
   const { createWf5MonitorJob } = require('./lib/jobs/wf5-monitor.js');
   const { createPicklistPollJob } = require('./lib/jobs/picklist.js');
+  const { createNayaxSalesJob } = require('./lib/jobs/nayax-sales.js');
+  const { createInvoiceIntakeJob } = require('./lib/jobs/invoice-intake.js');
   const { buildMailerFromEnv } = require('./lib/jobs/mailer.js');
   const { buildAnthropicFromEnv } = require('./lib/anthropic-client.js');
   const { buildDriveFromEnv } = require('./lib/google-drive-client.js');
@@ -238,6 +240,9 @@ function buildWorker(env = process.env) {
   const dbValidationJob = tenantRunner ? createDbValidationJob({ tenantRunner, mailer, env: runtimeEnv }) : null;
   // Nayax-Devices-Sync: ein Token = ein Mandant (NAYAX_TENANT_ID oder einziger Registry-Mandant).
   const nayaxDevicesSyncJob = (tenantDb && directory) ? createNayaxDevicesSyncJob({ db: tenantDb, directory, env: runtimeEnv }) : null;
+  // WF3 Nayax-Verkäufe (#163, Slice 3): datenkritisch → DEFAULT Schattenbetrieb (rechnet +
+  // vergleicht, schreibt NICHT); Cutover erst per WF3_CUTOVER=1, nachdem die Diffs leer sind.
+  const nayaxSalesJob = (tenantDb && directory) ? createNayaxSalesJob({ db: tenantDb, directory, env: runtimeEnv }) : null;
   // WF-Claude-Proposals (#162, Slice 2): alte pending Proposals von Claude vorentscheiden.
   const claudeProposalsJob = tenantRunner ? createClaudeProposalsJob({ tenantRunner, anthropic, mailer, env: runtimeEnv }) : null;
   // WF5 (#162, Slice 2): MHD/Low-Stock-Warnungen synchronisieren + Digest-Mail (Resend).
@@ -249,6 +254,9 @@ function buildWorker(env = process.env) {
   const picklistJob = (tenantDb && driveClient && anthropic)
     ? createPicklistPollJob({ db: tenantDb, drive: driveClient, anthropic, env: runtimeEnv })
     : createPicklistPollJob({ drive: driveClient, anthropic });
+  // WF1 Rechnungseingang (#163, Slice 3): Drive→Claude→invoice+items. Datenkritisch →
+  // DEFAULT Schattenbetrieb (kein Schreiben); Cutover via WF1_CUTOVER=1. Ohne Drive disabled.
+  const invoiceIntakeJob = createInvoiceIntakeJob({ db: tenantDb, drive: driveClient, anthropic, env: runtimeEnv });
 
   // Heartbeat (Slice 0) + portierte idempotente Jobs (Slice 1). Nächtliche Jobs nutzen
   // dailyAt (drift-tolerant), nicht node-cron (auf dem WSL-Mini unzuverlässig).
@@ -287,6 +295,12 @@ function buildWorker(env = process.env) {
     schedules.push({ name: nayaxDevicesSyncJob.key, dailyAt: env.WORKER_NAYAX_AT || '04:20', kind: 'infra',
       run: () => nayaxDevicesSyncJob.run() });
   }
+  // WF3 Nayax-Verkäufe (n8n: täglich 01:00) → ein Token/Mandant, dailyAt. Default Schatten
+  // (kein Schreiben); erst nach bewiesener Deckungsgleichheit Cutover via WF3_CUTOVER=1.
+  if (nayaxSalesJob) {
+    schedules.push({ name: nayaxSalesJob.key, dailyAt: env.WORKER_WF3_AT || '01:00', kind: 'tenant',
+      run: () => nayaxSalesJob.run() });
+  }
   // WF-Claude-Proposals (n8n: cron 0 30 4 ⇒ täglich 04:30) → per Mandant, dailyAt.
   if (claudeProposalsJob) {
     schedules.push({ name: claudeProposalsJob.key, dailyAt: env.WORKER_PROPOSALS_AT || '04:30', kind: 'tenant',
@@ -302,6 +316,12 @@ function buildWorker(env = process.env) {
   if (picklistJob && !picklistJob.disabled) {
     schedules.push({ name: picklistJob.key, intervalMs: Number(env.WORKER_WF9_MS) || 5 * 60 * 1000, kind: 'tenant',
       run: () => picklistJob.run() });
+  }
+  // WF1 Rechnungseingang (n8n: Drive-Trigger) → Drive-Polling. Default Schatten
+  // (kein Schreiben); Cutover via WF1_CUTOVER=1. Ohne Drive-Client „disabled".
+  if (invoiceIntakeJob && !invoiceIntakeJob.disabled) {
+    schedules.push({ name: invoiceIntakeJob.key, intervalMs: Number(env.WORKER_WF1_MS) || 10 * 60 * 1000, kind: 'tenant',
+      run: () => invoiceIntakeJob.run() });
   }
   // Worker-Job-Health-Monitor (audit.workflow_runs) → intervalMs. KEIN runOnStart
   // (erst nach den ersten Job-Läufen prüfen, sonst NO_SUCCESS-Fehlalarm).

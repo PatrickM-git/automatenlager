@@ -1,72 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-09_slice2-cutover.md`.
-
-## Session 2026-06-09 (abends) — Stufe 6 Slice 3 (#163): **alle 3 Pfade portiert (Code), Schattenbetrieb**
-
-Issue **#163** (datenkritische Ingestion im Schattenbetrieb) via `start-issue`→`tdd`, **komplett**:
-WF3 (Nayax-Verkäufe) + WF1/WF2 (Rechnungseingang) + WF4 (Slot-Write). Alle Schreibpfade durch die
-Mandanten-Tür (`db.tx`, RLS-GUC, explizites `tenant_id`), faithful zur `pgw_write()`-Semantik
-(Pre-Flight-Dump gegen die echte Mini-DB, inkl. Trigger `apply_stock_movement`). **Noch nicht deployt**;
-Cutover ist bewusst deploy-/flag-gated (Schattenbetrieb Default).
-
-### ✅ WF3 Nayax-Verkäufe — fertig (Code + Tests + Worker + Doku)
-- **`dashboard/lib/jobs/nayax-sales.js`** (neu) — faithful aus Mini-WF3 portiert:
-  - reine Logik `normalizeSales`, `computeFifoPlan` (FIFO-Abbuchung nach MHD, Watermark-Filter,
-    Null-Wert-Filter, MDB-Kontrolle, unbekannte Produkte, Fehlmenge), `buildSaleEvents`,
-    `buildStockMovementEvents`, `buildWarningRows`.
-  - `applyNayaxSales(db, tenant)` durch `db.tx` (RLS-GUC, explizites `tenant_id`):
-    `sales_transactions` + `stock_movements` + Warnungen + Watermark. **`stock_batches.remaining_qty`
-    NICHT manuell** — der AFTER-INSERT-Trigger `apply_stock_movement` pflegt ihn (sonst Doppel-Dekrement).
-  - `runNayaxSalesShadow(...)` compute-only vs. n8n-Ist (über `shadow-harness.diffWrites`).
-  - `fetchNayaxLastSales(...)` (GET `/operational/v1/machines/{id}/lastSales`, httpHeaderAuth) +
-    `createNayaxSalesJob(...)` Worker-Factory, **DEFAULT Schattenbetrieb** (kein Schreiben), Cutover via `WF3_CUTOVER=1`.
-- **`dashboard/worker.js`**: WF3-Job registriert (`wf3-nayax-fifo`, täglich 01:00, `kind:'tenant'`).
-- **Tests** `dashboard/tests/dashboard-jobs-nayax-sales.test.js` (14, inkl. 2 live gegen Mini-DB im #94-Sandbox):
-  reine Logik + Live-Apply (acme/globex-Isolation, Trigger-Abbuchung 30→29) + Schatten-Diff (equal/ungleich)
-  + Fetch + Factory (Schatten schreibt NICHT). #107-Guard grün (Tür-sauber).
-- **Pre-Flight verifiziert (echte Mini-DB, read-only):** `pgw_write` `sale`→`sales_transactions`
-  (FK aus Keys, ON CONFLICT `nayax_transaction_id`), `stock_movement`→`stock_movements`
-  (ON CONFLICT `movement_key`, Trigger pflegt `remaining_qty`/Status `leer`).
-- **Doku** `docs/data-model/wf3-nayax-sales-cutover.md`: explizites **Cutover-Kriterium**
-  (≥7 deckungsgleiche Schattenläufe, nicht-vakuös, keine onlyIntended/onlyActual) + Rückweg + #111-Altlast (Watermark-PK).
-
-### ✅ WF1/WF2 Rechnungseingang — fertig (`lib/jobs/invoice-intake.js`)
-- Reine Builder: `buildInvoiceExtractionRequest` (Claude `claude-sonnet-4-6`), `parseInvoiceExtraction`,
-  `buildInvoiceEvents` (invoice+invoice_item), `buildProductBatchEvents` (product/alias/stock_batch).
-- `applyInvoiceEvents` (WF1: suppliers→invoices→invoice_items) + `applyProductBatch` (WF2-Freigabe:
-  product/alias/stock_batch **inkl. invoice_item-Verlinkung** `product_id`) durch die Tür.
-- `runInvoiceIntakeShadow` (compute invoice_items vs. Ist) + `createInvoiceIntakeJob` (Drive-Polling,
-  Default Schatten, `WF1_CUTOVER=1`).
-- **WF2-Freigabe als Dashboard-Endpunkt:** `POST /api/v2/invoice-proposal/approve` (admin-only,
-  `rejectBodyTenant`, durch die Tür, JSONL-Audit). Worker: `wf1-invoice-intake` (alle 10 min).
-- Tests `tests/dashboard-jobs-invoice-intake.test.js` (7, inkl. 3 live: invoice, product/batch+Verlinkung, shadow).
-
-### ✅ WF4 Slot-Write — fertig (`lib/jobs/wf4-slot-write.js`)
-- `buildSlotLifecycleEvents` (closeRows/newRows → slot_assignment-Events) + `applySlotAssignmentEvents`
-  (db.tx, INSERT ON CONFLICT `product_slot_key` DO UPDATE valid_to/active/notes) — **direkter Wechsel**.
-- Befund: `valid_from` NOT NULL wird beim „speculative insert" VOR der Konflikt-Auflösung geprüft →
-  Close-Events defaulten `valid_from` auf nowIso (sonst 23502 statt Update).
-- Tests `tests/dashboard-jobs-wf4-slot-write.test.js` (3, inkl. 2 live: close+open-Isolation, Warnungs-Idempotenz).
-
-### 🔧 Querschnitt
-- **`lib/warning-types.js`** (neu): einzige Quelle der erlaubten `warnings.warning_type` (DB-CHECK) +
-  Mapping (`MHD_WARNING`→`MHD_NEAR`, `MDB_PRODUCT_MAPPING_MISMATCH`→`MDB_CODE_CHANGED_FOR_PRODUCT`);
-  nicht-mappbare Typen werden übersprungen (sonst bräche der INSERT — Befund Slice 2). Genutzt von WF3+WF4.
-- Cutover-Kriterien aller drei Pfade: `docs/data-model/wf3-nayax-sales-cutover.md`.
-
-### ⏭️ Nächste Schritte (nächster Chat)
-1. **Mini-Deploy** (`git pull` + `docker restart`; Memory `mini-deploy-mechanismus`). Kein DDL nötig.
-   Worker startet die neuen Jobs im **Schattenbetrieb** (kein Schreiben) — Diffs in `audit.workflow_runs` beobachten.
-2. **Cutover** je Pfad nach Kriterium (s. Doku): WF3 `WF3_CUTOVER=1`, WF1 `WF1_CUTOVER=1`, WF4 Trigger umlegen
-   → dann n8n WF1/2/3/4 deaktivieren. Rückweg jederzeit (n8n-WF reaktivieren) bis Slice 4.
-3. **Slice 4** (#108/#111/`BYPASSRLS` entziehen + Negativ-Test „RLS systemweit").
-- **Offene Verfeinerung:** WF1 erzeugt in n8n auch `product_change_proposals` (Vorschläge für unbekannte
-  Produkte) — der Port schreibt invoice+items; die Proposal-Erzeugung kann als Folge-Refinement ergänzt
-  werden (WF-Claude-Proposals/Slice 2 verarbeitet bestehende Proposals bereits).
-- **Hinweis:** SSH-Tunnel zur Mini-DB (`127.0.0.1:15432`) = ECHTE Prod-DB. Live-Tests laufen im
-  #94-Sandbox-Harness (BEGIN…ROLLBACK) → keine echte Mutation. Suite seriell grün (Memory: Parallel-Flakiness).
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-08_slice1-resend-dbcheck.md`.
 
 ## Session 2026-06-09 — Stufe 6 Slice 2 (#162) Trigger-Umlegung: **VOLLSTÄNDIG DEPLOYT + CUTOVER (alle 4 Flows live, n8n aus)**
 
