@@ -4149,6 +4149,7 @@
         '<td><code>' + esc(key) + '</code></td>' +
         '<td><input class="v3-set-input v3-set-input--cat" data-cat-field="label" type="text" value="' + esc(c.label || key) + '"' + ro + '></td>' +
         '<td><input class="v3-set-input v3-set-input--cat v3-set-input--num" data-cat-field="marginPct" type="number" step="1" value="' + esc(c.marginPct) + '"' + ro + '></td>' +
+        '<td><input class="v3-set-input v3-set-input--cat v3-set-input--num" data-cat-field="mwstPct" type="number" step="1" value="' + esc(c.mwstPct) + '"' + ro + '></td>' +
         '<td class="v3-set-latte">Renner ≥ ' + esc(l.rennerThreshold) + ' € · Langsam ≤ ' + esc(l.langsamThreshold) + ' € /Woche</td>' +
       '</tr>';
     }).join('');
@@ -4158,6 +4159,7 @@
         '<input class="v3-set-input" id="v3-set-newcat-key" type="text" placeholder="schlüssel (z. B. spielzeug)">' +
         '<input class="v3-set-input" id="v3-set-newcat-label" type="text" placeholder="Anzeigename">' +
         '<input class="v3-set-input v3-set-input--num" id="v3-set-newcat-margin" type="number" step="1" placeholder="Marge %">' +
+        '<input class="v3-set-input v3-set-input--num" id="v3-set-newcat-mwst" type="number" step="1" placeholder="MwSt %">' +
         '<button type="button" class="v3-btn v3-btn--ghost" id="v3-set-addcat-btn">Kategorie hinzufügen</button>' +
       '</div>' : '';
 
@@ -4199,9 +4201,10 @@
           numField('Renner-Faktor', 'rennerFactor', cfg.rennerFactor, '0.05', 'Renner ab Erwartungswert × Faktor.') +
           numField('Langsam-Faktor', 'langsamFactor', cfg.langsamFactor, '0.05', 'Langsam unter Erwartungswert × Faktor.') +
           numField('Default-Marge unbek. Kategorie (%)', 'defaultMarginPct', cfg.defaultMarginPct, '1', 'Fallback für neue Kategorien.') +
+          numField('Default-MwSt unbek. Kategorie (%)', 'defaultMwstPct', cfg.defaultMwstPct, '1', 'MwSt-Satz für Produkte ohne auflösbare Kategorie (kanonische Quelle für Live, Nacht-GuV & Restatement).') +
         '</div>' +
         '<h3 class="v3-set-subtitle">Kategorie-Margen</h3>' +
-        '<table class="v3-set-cattable"><thead><tr><th>Schlüssel</th><th>Anzeigename</th><th>Marge %</th><th>Geld-Latte (abgeleitet)</th></tr></thead>' +
+        '<table class="v3-set-cattable"><thead><tr><th>Schlüssel</th><th>Anzeigename</th><th>Marge %</th><th>MwSt %</th><th>Geld-Latte (abgeleitet)</th></tr></thead>' +
           '<tbody>' + catRows + '</tbody></table>' +
         addCat +
         saveBar +
@@ -4325,8 +4328,10 @@
         var entry = {};
         var label = row.querySelector('[data-cat-field="label"]');
         var margin = row.querySelector('[data-cat-field="marginPct"]');
+        var mwst = row.querySelector('[data-cat-field="mwstPct"]');
         if (label && label.value.trim() !== '') { entry.label = label.value.trim(); }
         if (margin && margin.value.trim() !== '') { entry.marginPct = Number(margin.value); }
+        if (mwst && mwst.value.trim() !== '') { entry.mwstPct = Number(mwst.value); }
         override.categories[key] = entry;
       });
       return override;
@@ -4338,9 +4343,10 @@
         var key = (document.getElementById('v3-set-newcat-key').value || '').trim().toLowerCase();
         var label = (document.getElementById('v3-set-newcat-label').value || '').trim();
         var margin = (document.getElementById('v3-set-newcat-margin').value || '').trim();
+        var mwst = (document.getElementById('v3-set-newcat-mwst').value || '').trim();
         if (!key) { statusEl.textContent = 'Bitte einen Kategorie-Schlüssel angeben.'; return; }
         var override = collectOverride();
-        override.categories[key] = { label: label || key, marginPct: margin === '' ? undefined : Number(margin) };
+        override.categories[key] = { label: label || key, marginPct: margin === '' ? undefined : Number(margin), mwstPct: mwst === '' ? undefined : Number(mwst) };
         save(override);
       });
     }
