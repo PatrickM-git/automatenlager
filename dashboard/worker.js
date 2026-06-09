@@ -161,6 +161,7 @@ function buildWorker(env = process.env) {
   const { createDbValidationJob } = require('./lib/jobs/db-validation.js');
   const { createNayaxDevicesSyncJob } = require('./lib/jobs/nayax-devices-sync.js');
   const { createWorkerHealthMonitorJob } = require('./lib/jobs/monitor.js');
+  const { createAnomalyMonitorJob } = require('./lib/jobs/anomaly-monitor.js');
   const { createClaudeProposalsJob } = require('./lib/jobs/claude-proposals.js');
   const { createWf5MonitorJob } = require('./lib/jobs/wf5-monitor.js');
   const { createPicklistPollJob } = require('./lib/jobs/picklist.js');
@@ -233,6 +234,8 @@ function buildWorker(env = process.env) {
   const matViewRefreshJob = infraRunner ? createMatViewRefreshJob({ infraRunner }) : null;
   // Worker-Job-Health-Monitor (liest audit.workflow_runs über die Infra-Verbindung).
   const workerMonitorJob = infraRunner ? createWorkerHealthMonitorJob({ exec: infraRunner.exec, mailer, env: runtimeEnv }) : null;
+  // Sicherheits-/Anomalie-Monitor (#168): Auth-Fail-Häufung, Break-Glass, error-Run-Spike, Backup-Fehler.
+  const anomalyMonitorJob = infraRunner ? createAnomalyMonitorJob({ exec: infraRunner.exec, mailer, env: runtimeEnv }) : null;
   // Per-Mandant-Jobs (durch die Tür, GUC je Mandant). WF8 GuV + DB-Validierung (Slice 1).
   const guvAggregateJob = tenantRunner ? createGuvAggregateJob({ tenantRunner }) : null;
   // GuV-Backfill (Issue #172): füllt GuV-Lücken aus dem freigegebenen Nayax-Roh-Export
@@ -344,6 +347,10 @@ function buildWorker(env = process.env) {
   }
   // Worker-Job-Health-Monitor (audit.workflow_runs) → intervalMs. KEIN runOnStart
   // (erst nach den ersten Job-Läufen prüfen, sonst NO_SUCCESS-Fehlalarm).
+  if (anomalyMonitorJob) {
+    schedules.push({ name: anomalyMonitorJob.key, intervalMs: Number(env.WORKER_ANOMALY_MS) || 30 * 60 * 1000, kind: 'infra',
+      run: () => anomalyMonitorJob.run() });
+  }
   if (workerMonitorJob) {
     schedules.push({ name: workerMonitorJob.key, intervalMs: Number(env.WORKER_MONITOR_MS) || 10 * 60 * 1000, kind: 'infra',
       run: () => workerMonitorJob.run() });
