@@ -3,26 +3,26 @@
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 > Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-08_slice1-resend-dbcheck.md`.
 
-## Session 2026-06-09 — Stufe 6 Slice 2 (#162) Trigger-Umlegung: **WF7 + DROP fertig, 3 Flows offen**
+## Session 2026-06-09 — Stufe 6 Slice 2 (#162) Trigger-Umlegung: **CODE KOMPLETT, Deploy ausstehend**
 
-Branch `feat/n8n-abloesung-stufe-6-slice-2` (2 Commits, NICHT gepusht — Nutzer bestätigt Push/Merge am Ende). SPEC: `docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md`. Suite **1224/1224 grün**.
+Branch `feat/n8n-abloesung-stufe-6-slice-2`, PR **#191**. SPEC: `docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md`. Suite **1250/1250 grün**. Alle Code-ACs erfüllt (4 Flows portiert + DROP + Credentials-Doku); offen nur der **Deploy** (echte Credentials, n8n-Deaktivierung, externer Live-Smoke) + **#162 mergen/schließen** (entblockt #163).
 
-**Wichtigster Befund — lokale WF-JSONs sind NICHT die Wahrheit:** WF7-Lokalexport = alter `product_key`/Sheets-Stand **mit U+FFFD-Korruption** und Vertrags-Mismatch zum Dashboard-Endpunkt. Authoritative Mini-Definitionen read-only gezogen → `C:\tmp\mini-wf-snapshot\` (WF7/WF9/WF5/WF-Claude-Proposals/WF-PGW). Mini-API-Key in `homelab/.env.local` (`N8N_API_KEY`). **Für die 3 offenen Flows die Snapshots als Quelle nutzen, nicht die lokalen Exporte.**
+**Wichtigster Befund — lokale WF-JSONs sind NICHT die Wahrheit:** Lokalexporte = alter `product_key`/Sheets-Stand **mit U+FFFD-Korruption** + Vertrags-Mismatch. Authoritative Mini-Definitionen read-only gezogen → `C:\tmp\mini-wf-snapshot\`. Mini-API-Key in `homelab/.env.local` (`N8N_API_KEY`). **Durchgängiges Muster:** Mini-WF-Verhalten extrahieren → reine `compute…`-Logik (unit) → `apply…`/`run…ForTenant` via `db.tx`-Tür (live acme/globex) → Worker-/Endpunkt-Verkabelung; externe Clients (Anthropic/Drive/Mailer) als Parameter injiziert. `stock_movement`/`warning`-Schreibpfade **faithful zu `pgw_write`** (Pre-Flight-Dump verifiziert), aber als **direktes Tür-INSERT mit explizitem `tenant_id`** (RLS-sauber), NICHT via `pgw_write`-Funktion.
 
-### ✅ Fertig (committet, verifiziert)
-- **WF7 Nachfüllung in-process** (`lib/refill-apply.js`): `fetch(/webhook/nachfuellung)` in `server.js` ersetzt durch `applyRefill(tenantDb, viewer.tenantId, …)` — Slot-Update + Warnungen-resolve + `stock_movement` atomar durch die Tür (`db.tx`, `tenant_id=$1`). `stock_movement` **faithful zum `pgw_write`-Zweig** (per Pre-Flight-Dump verifiziert: batch_key→batch_id, product_slot_key→slot_assignment_id, `ON CONFLICT(movement_key)`), aber als **direktes Tür-INSERT mit explizitem `tenant_id`** (RLS-sauber, Slice-1-Muster `guv-aggregate`), NICHT via `pgw_write`-Funktion. Tests: 7 reine Logik + 2 Live durch die Tür (acme/globex nicht-vakuös, RLS-Isolation bewiesen).
-  - **Bewusste Abweichung:** kein `warnings`-Audit-INSERT — WF7s `'NACHFUELLUNG'` verletzt den aktuellen `warnings_warning_type_check` (Pre-Flight bestätigt: NACHFUELLUNG/EMPTY_BATCH **nicht** erlaubt) ⇒ der n8n-Audit-Node schlägt produktiv still fehl. Audit liegt korrekt im JSONL `refill-actions.jsonl` des Endpunkts.
-- **DROP dokumentiert** (`docs/specs/stufe-6-slice-2-drop-workflows.md` + ASCII-`_stillgelegt`-Marker in den 3 Exporten): WF0 (Mini bereits entfernt), WF-Update-Check (Mini inaktiv), WF-Drift-Check (DB-Konsistenz = `db-validation.js` Slice 1). Mini-Status je WF live per API verifiziert.
+### ✅ Fertig (committet, verifiziert, Suite grün)
+- **WF7 Nachfüllung** (`lib/refill-apply.js` + `server.js`): `fetch(/webhook/nachfuellung)` → `applyRefill` durch die Tür (Slot-Update + Warnungen-resolve + `stock_movement`). 9 Tests (inkl. 2 live).
+- **WF-Claude-Proposals** (`lib/jobs/claude-proposals.js` + `lib/anthropic-client.js`): Worker-Job (täglich 04:30), pending Proposals via Claude (haiku) approve/reject durch die Tür, escalate per Mailer. 7 Tests (inkl. live).
+- **WF5 MHD/Low-Stock** (`lib/jobs/wf5-monitor.js`): Worker-Job (täglich 07:00), MHD_EXPIRED/MHD_NEAR/LOW_BATCH-Warnungen INSERT + Auto-Resolve durch die Tür + Digest-Mail (alert-digest.js + Resend). Verwaltet NUR diese Typen. 6 Tests (inkl. live).
+- **WF9 Pickliste** (`lib/jobs/picklist.js`): OCR-Pickliste → Backstock-begrenzte Slot-Verteilung → `pick`-Movement (delta_total negativ) + Warnungen-resolve durch die Tür. Drive/Anthropic injiziert. 9 Tests (inkl. live). **Worker-Job ohne Drive-Client „disabled".**
+- **DROP** (`docs/specs/stufe-6-slice-2-drop-workflows.md` + `_stillgelegt`-Marker): WF0/WF-Update-Check/WF-Drift-Check.
+- **Credentials dokumentiert** (`dashboard/.env.example`): Anthropic/Drive/Resend/Schedule-Vars.
+- **Bewusste Abweichung (alle Flows):** kein `warnings`-Audit-INSERT mit `NACHFUELLUNG`/`PICKLISTE_*` — verletzt `warnings_warning_type_check` (schlägt in n8n still fehl). Audit via JSONL bzw. entfällt.
 
-### ⏳ Offen (für Folge-Chat) — je Flow Mini-Snapshot als Quelle, externe Clients als Parameter injizieren (test-first)
-- **WF-Claude-Proposals** (tractabelste): alte Proposals via Anthropic (`claude-haiku`) vorentscheiden → `product_change_proposals`-Update durch die Tür. Anthropic-Client injizieren/mocken.
-- **WF5-Versand-Abschluss:** Leseseite `alert-digest.js` existiert; neu: **Mailer-Modul** (Resend ist bereits live als Transport — Slice 1, Mini-`.env.local` `RESEND_API_KEY`) + Worker-Cron-Versand + Warnungen-resolve/-INSERT durch die Tür. **Achtung:** `warnings`-Constraint (s. o.) bei etwaigem INSERT beachten.
-- **WF9 Pickliste** (größter): Drive-Polling-Job + Claude-OCR → Slot-Verteilung → Warnungen → `stock_movement` durch die Tür. Braucht Google-Drive- + Anthropic-Client.
-- **Credentials** in Mini-`.env.local` dokumentieren/migrieren (Anthropic-Key; Drive-Token; Mail liegt via Resend schon).
-
-### ⚙️ Deploy-/Ops (Betreiber, am Ende des Slice)
-- **n8n-WF7 auf der Mini deaktivieren** (id `0oRIiVFr5Q7FF6ow`), erst NACH Deploy des Dashboards mit `applyRefill`. Rückweg: WF7 reaktivieren (`BYPASSRLS` besteht bis Slice 4 → reversibel).
-- WF9/WF5/WF-Claude-Proposals erst deaktivieren, wenn ihr Port deployt ist.
+### ⚙️ Deploy-/Ops (Betreiber — danach #162 schließen → #163 frei)
+1. **Mini-`.env.local`:** `ANTHROPIC_API_KEY` setzen (sonst Claude-Jobs „disabled"); `RESEND_*` liegt schon. WF9 braucht zusätzlich einen **Google-Drive-OAuth-Client** (nicht gebaut — `driveClient=null` in `worker.js`) → bis dahin WF9-Job „disabled".
+2. **Deploy** Dashboard + Worker (`git pull` + Container-Restart; Worker-Log: `Anthropic: live`, neue Schedules sichtbar).
+3. **n8n auf der Mini deaktivieren** (nach erfolgreichem Live-Smoke): WF7 (`0oRIiVFr5Q7FF6ow`), WF-Claude-Proposals (`hU7Aev7G4MaMv2yR`), WF5 (`3ceKeNWmdj455Tcr`), WF9 (`nh8Tmg7klwGVjKui` — erst wenn Drive-Client steht). Rückweg: reaktivieren (`BYPASSRLS` besteht bis Slice 4 → reversibel).
+4. **Live-Smoke:** Nachfüllung über das Dashboard, Worker-Läufe in `audit.workflow_runs`, MHD-Mail kommt an.
 
 ## Session 2026-06-09 — GuV-Kostenbasis Kleinunternehmer + Restatement **KOMPLETT (Code), Deploy ausstehend**
 
