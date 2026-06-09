@@ -22,7 +22,7 @@
  */
 
 const { isAvailableBatchStatus, availableBatchStatusSqlList } = require('../stock-status.js');
-const { diffWrites } = require('./shadow-harness.js');
+const { diffWrites, sampleDiff } = require('./shadow-harness.js');
 const { toAllowedWarningType } = require('../warning-types.js');
 
 const NAYAX_SALES_JOB_KEY = 'wf3-nayax-fifo';
@@ -792,8 +792,10 @@ function createNayaxSalesJob({ db, directory, env = process.env, fetchImpl } = {
         const shadow = await runNayaxSalesShadow(db, tenant, { sales, config });
         return {
           mode: 'shadow', tenant, fetched: sales.length, equal: shadow.equal,
-          salesDiff: { onlyIntended: shadow.salesDiff.onlyIntended.length, onlyActual: shadow.salesDiff.onlyActual.length, mismatched: shadow.salesDiff.mismatched.length },
-          movementsDiff: { onlyIntended: shadow.movementsDiff.onlyIntended.length, onlyActual: shadow.movementsDiff.onlyActual.length, mismatched: shadow.movementsDiff.mismatched.length },
+          diffSample: {
+            sales: sampleDiff(shadow.salesDiff, { keyOf: (r) => String(r.nayax_transaction_id) }),
+            movements: sampleDiff(shadow.movementsDiff, { keyOf: (r) => String(r.movement_key) }),
+          },
         };
       }
       const res = await applyNayaxSales(db, tenant, { sales, config });
