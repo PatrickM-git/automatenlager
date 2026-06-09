@@ -3,9 +3,20 @@
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 > Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-08_slice1-resend-dbcheck.md`.
 
-## Session 2026-06-09 — Stufe 6 Slice 2 (#162) Trigger-Umlegung: **CODE KOMPLETT, Deploy ausstehend**
+## Session 2026-06-09 — Stufe 6 Slice 2 (#162) Trigger-Umlegung: **DEPLOYT, WF7+WF5 cutover; Claude-Proposals/WF9 pending Key/Client**
 
-Branch `feat/n8n-abloesung-stufe-6-slice-2`, PR **#191**. SPEC: `docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md`. Suite **1250/1250 grün**. Alle Code-ACs erfüllt (4 Flows portiert + DROP + Credentials-Doku); offen nur der **Deploy** (echte Credentials, n8n-Deaktivierung, externer Live-Smoke) + **#162 mergen/schließen** (entblockt #163).
+Branch `feat/n8n-abloesung-stufe-6-slice-2`, PR **#191 gemergt** → **#162 CLOSED**, **#163 entblockt**. PR #192 (0028-Test robust). SPEC: `docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md`. Suite **1250/1250 grün**. `main` = `f3e5a47`, **auf Mini deployt** (`/mnt/c/homelab/projekte/automatenlager`, bind-mount `→/repo`; `git pull` + `docker restart homelab-dashboard homelab-worker`).
+
+**DEPLOY-STAND (LIVE auf Mini):**
+- ✅ **WF7** in-process (Dashboard) — n8n-WF7 (`0oRIiVFr5Q7FF6ow`) **deaktiviert**.
+- ✅ **WF5** Worker (`wf5-monitor`, täglich 07:00) — **live smoke** ok (t_faltrix: 6 inserted/20 resolved, Digest-Mail via Resend verschickt) — n8n-WF5 (`3ceKeNWmdj455Tcr`) **deaktiviert**.
+- ⏳ **WF-Claude-Proposals**: Worker-Job läuft (04:30), aber **`Anthropic: disabled`** (Key fehlt in Mini-`.env.local`) ⇒ no-op. **n8n-Claude-Proposals (`hU7Aev7G4MaMv2yR`) bleibt AKTIV.** Cutover sobald `ANTHROPIC_API_KEY` gesetzt + neugestartet, dann n8n deaktivieren.
+- ⏳ **WF9 Pickliste**: Worker-Job **disabled** (`driveClient=null`, kein Google-Drive-OAuth-Client gebaut). **n8n-WF9 (`nh8Tmg7klwGVjKui`) bleibt AKTIV.** Cutover braucht einen Drive-Client (+ ANTHROPIC_API_KEY für OCR).
+- **Restatement-Befund (B):** `DASHBOARD_V2_PG_URL` ist **die Mini-Prod-DB via SSH-Tunnel `127.0.0.1:15432`**. Das GuV-Restatement (577 Zeilen `cost_basis='brutto'`, 545 `audit.guv_restatement_log`) **lief bereits auf PROD** (vom Dev-PC durch den Tunnel) — laut Runbook der **vorgesehene, auditierte, je `run_id` umkehrbare** Schritt, **kein Versehen, kein Cleanup nötig**. Der `0028`-Test war dadurch fragil → in PR #192 robust gemacht (frische Sandbox-Zeile statt Live-Count).
+
+**Verbleibende Cutover-Schritte (Betreiber):** (1) `ANTHROPIC_API_KEY` in Mini-`dashboard/.env.local` → `docker restart homelab-worker` (Log: `Anthropic: live`) → n8n-Claude-Proposals deaktivieren. (2) Google-Drive-OAuth-Client bauen + in `worker.js` injizieren → n8n-WF9 deaktivieren. Rückweg jederzeit: n8n-WF reaktivieren (`BYPASSRLS` bis Slice 4).
+
+**Folge-Feature:** [#193](https://github.com/PatrickM-git/automatenlager/issues/193) — G&V-Tabelle VK/EK pro Stück anzeigen + editierbar (Datenqualität; Verdacht falscher EK bei „Lichtenauer Still"). SPEC vor Umsetzung.
 
 **Wichtigster Befund — lokale WF-JSONs sind NICHT die Wahrheit:** Lokalexporte = alter `product_key`/Sheets-Stand **mit U+FFFD-Korruption** + Vertrags-Mismatch. Authoritative Mini-Definitionen read-only gezogen → `C:\tmp\mini-wf-snapshot\`. Mini-API-Key in `homelab/.env.local` (`N8N_API_KEY`). **Durchgängiges Muster:** Mini-WF-Verhalten extrahieren → reine `compute…`-Logik (unit) → `apply…`/`run…ForTenant` via `db.tx`-Tür (live acme/globex) → Worker-/Endpunkt-Verkabelung; externe Clients (Anthropic/Drive/Mailer) als Parameter injiziert. `stock_movement`/`warning`-Schreibpfade **faithful zu `pgw_write`** (Pre-Flight-Dump verifiziert), aber als **direktes Tür-INSERT mit explizitem `tenant_id`** (RLS-sauber), NICHT via `pgw_write`-Funktion.
 
@@ -18,13 +29,7 @@ Branch `feat/n8n-abloesung-stufe-6-slice-2`, PR **#191**. SPEC: `docs/specs/mult
 - **Credentials dokumentiert** (`dashboard/.env.example`): Anthropic/Drive/Resend/Schedule-Vars.
 - **Bewusste Abweichung (alle Flows):** kein `warnings`-Audit-INSERT mit `NACHFUELLUNG`/`PICKLISTE_*` — verletzt `warnings_warning_type_check` (schlägt in n8n still fehl). Audit via JSONL bzw. entfällt.
 
-### ⚙️ Deploy-/Ops (Betreiber — danach #162 schließen → #163 frei)
-1. **Mini-`.env.local`:** `ANTHROPIC_API_KEY` setzen (sonst Claude-Jobs „disabled"); `RESEND_*` liegt schon. WF9 braucht zusätzlich einen **Google-Drive-OAuth-Client** (nicht gebaut — `driveClient=null` in `worker.js`) → bis dahin WF9-Job „disabled".
-2. **Deploy** Dashboard + Worker (`git pull` + Container-Restart; Worker-Log: `Anthropic: live`, neue Schedules sichtbar).
-3. **n8n auf der Mini deaktivieren** (nach erfolgreichem Live-Smoke): WF7 (`0oRIiVFr5Q7FF6ow`), WF-Claude-Proposals (`hU7Aev7G4MaMv2yR`), WF5 (`3ceKeNWmdj455Tcr`), WF9 (`nh8Tmg7klwGVjKui` — erst wenn Drive-Client steht). Rückweg: reaktivieren (`BYPASSRLS` besteht bis Slice 4 → reversibel).
-4. **Live-Smoke:** Nachfüllung über das Dashboard, Worker-Läufe in `audit.workflow_runs`, MHD-Mail kommt an.
-
-## Session 2026-06-09 — GuV-Kostenbasis Kleinunternehmer + Restatement **KOMPLETT (Code), Deploy ausstehend**
+## Session 2026-06-09 — GuV-Kostenbasis Kleinunternehmer + Restatement **KOMPLETT (Code), Restatement LIVE auf Prod**
 
 SPEC: `docs/specs/guv-kostenbasis-kleinunternehmer-restatement-v1.md`. Alle 7 Issues des Loops umgesetzt, gemergt, geschlossen; Suite **1215/1215 grün**. Gearbeitet im isolierten Git-Worktree (`feat/guv-restatement-loop`), damit eine Parallelsession auf `main` ungestört blieb.
 
