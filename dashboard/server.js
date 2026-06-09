@@ -10,6 +10,7 @@ const { buildAssortmentSlotsData, queryAssortmentSlotsPg } = require('./lib/asso
 const { buildOverviewData, buildMonitoringData, queryOverviewMonitoringPg } = require('./lib/overview-monitoring.js');
 const { buildAlertDigest, queryAlertDigestPg } = require('./lib/alert-digest.js');
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
+const { applyRefill } = require('./lib/refill-apply.js'); // #162 (Stufe 6 Slice 2): WF7 in-process durch die Tür
 const { availableBatchStatusSqlList } = require('./lib/stock-status.js');
 const { validateWriteOff, buildWriteOffAuditEntry, writeOffBatchPg } = require('./lib/write-off.js'); // #138: writeOffBatchPg geht durch die Tür
 const { validateInventoryCount, buildInventoryCountAuditEntry, setBatchCountPg } = require('./lib/inventory-count.js'); // #152: Inline-Inventur (Chargenrest setzen)
@@ -2365,31 +2366,40 @@ const server = http.createServer(async (req, res) => {
       // Nach der Pflichtfeld-Validierung (malformte Requests ⇒ 400, kein Lookup);
       // fremd/unbekannt ⇒ 404 + Audit, BEVOR der n8n-Webhook ausgelöst wird.
       if (!(await requireMachineAccess(viewer, machine_id, res, 'idor:refill'))) return;
-      const cfg = dashboardConfig();
-      const n8nBase = cfg.n8nBaseUrl;
-      const qs = new URLSearchParams({
-        source: 'automatenlager_dashboard_v2',
-        machine_id: String(machine_id),
-        mdb_code: String(Number(mdb_code)),
-        product_id: String(Number(product_id)),
-        product_name: String(product_name || ''),
-        qty: String(Number(qty)),
-        notes: String(notes || ''),
-        triggered_by: viewer.login,
-        triggered_at: new Date().toISOString(),
-      }).toString();
-      const webhookUrl = `${n8nBase}/webhook/nachfuellung?${qs}`;
+      if (!tenantDb) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      // Stufe 6 Slice 2 (#162): WF7 in-process. Schreibpfad (slot_assignments-Update,
+      // warnings-resolve, stock_movement) atomar DURCH die Tür (db.tx, tenant_id = $1) —
+      // kein fetch(n8n) mehr. n8n-WF7 wird deploy-seitig deaktiviert (HANDOVER).
       let wfResult = { ok: false, status_ref: null, message: '' };
+      let refill;
       try {
-        const wfResponse = await fetch(webhookUrl, { method: 'GET' });
-        const wfText = await wfResponse.text();
-        wfResult = {
-          ok: wfResponse.ok,
-          status_ref: `nachfuellung-${Date.now()}`,
-          message: wfResponse.ok ? 'WF7 gestartet.' : `WF7 antwortete mit ${wfResponse.status}: ${wfText.slice(0, 200)}`,
-        };
+        refill = await applyRefill(tenantDb, viewer.tenantId, {
+          machineKey: machine_id,
+          mdbCode: mdb_code,
+          productId: product_id,
+          qty,
+          notes,
+        });
       } catch (err) {
-        wfResult = { ok: false, status_ref: null, message: `Webhook nicht erreichbar: ${err.message}` };
+        refill = null;
+        wfResult = { ok: false, status_ref: null, message: `Nachfüllung fehlgeschlagen: ${err.message}` };
+      }
+      if (refill && refill.ok === false && refill.code === 'SLOT_NOT_FOUND') {
+        sendJson(res, 404, { ok: false, error: { code: 'SLOT_NOT_FOUND', message: 'Kein aktiver Slot für diese Maschine/MDB/Produkt-Kombination.' } });
+        return;
+      }
+      if (refill && refill.ok) {
+        wfResult = {
+          ok: true,
+          status_ref: `nachfuellung-${Date.now()}`,
+          message: `Nachfüllung erfasst: Slot ${refill.product_slot_key} = ${refill.new_qty}`
+            + (refill.hints_resolved ? `, ${refill.hints_resolved} Hinweis(e) aufgelöst` : '')
+            + (refill.stock_movement ? ', Umbuchung gebucht' : ''),
+          summary: refill,
+        };
       }
       const auditEntry = buildRefillAuditEntry(viewer, { machine_id, mdb_code, product_id, qty }, wfResult);
       const auditPath = path.join(__dirname, 'logs', 'refill-actions.jsonl');
@@ -2401,7 +2411,7 @@ const server = http.createServer(async (req, res) => {
         ok: wfResult.ok,
         status_ref: auditEntry.status_ref,
         message: wfResult.message,
-        ...(wfResult.ok ? {} : { error: { code: 'WF7_ERROR', message: wfResult.message } }),
+        ...(wfResult.ok ? { summary: refill } : { error: { code: 'WF7_ERROR', message: wfResult.message } }),
       });
       return;
     }
