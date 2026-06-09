@@ -212,24 +212,23 @@ async function processPicklistFile(db, tenant, { fileId, fileName, drive, anthro
  * Worker-Factory. WF9 ist Drive-getrieben; ohne Drive-Client (kein OAuth in .env.local)
  * ⇒ disabled (Job läuft nicht, bricht aber nichts). Mit Drive: pollt neue Dateien.
  */
-function createPicklistPollJob({ tenantRunner, drive, anthropic, env = process.env } = {}) {
+function createPicklistPollJob({ db, drive, anthropic, env = process.env } = {}) {
   if (!drive || !anthropic) {
-    return { key: PICKLIST_JOB_KEY, disabled: true, run: async () => ({ skipped: 'no_drive' }) };
+    return { key: PICKLIST_JOB_KEY, disabled: true, run: async () => ({ skipped: 'no_drive_or_anthropic' }) };
   }
+  // Mandanten-Auflösung (Drive-Ordner→Mandant) ist deploy-spezifisch; Default: WF9_TENANT_ID/NAYAX_TENANT_ID.
+  const tenant = clean((env && (env.WF9_TENANT_ID || env.NAYAX_TENANT_ID)) || '');
   return {
     key: PICKLIST_JOB_KEY,
     disabled: false,
     run: async () => {
+      if (!tenant) return { skipped: 'no_tenant' };
       const files = (typeof drive.listNew === 'function') ? await drive.listNew() : [];
-      let processed = 0;
+      const results = [];
       for (const f of files) {
-        // Mandanten-Auflösung (Drive-Ordner→Mandant) ist deploy-spezifisch; Default: NAYAX_TENANT_ID.
-        const tenant = clean(env.WF9_TENANT_ID || env.NAYAX_TENANT_ID);
-        if (!tenant) continue;
-        await processPicklistFile(tenantRunner ? tenantRunner.db : null, tenant, { fileId: f.id, fileName: f.name, drive, anthropic });
-        processed += 1;
+        results.push(await processPicklistFile(db, tenant, { fileId: f.id, fileName: f.name, drive, anthropic }));
       }
-      return { processed };
+      return { processed: results.length, results };
     },
   };
 }

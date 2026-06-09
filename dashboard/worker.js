@@ -166,6 +166,7 @@ function buildWorker(env = process.env) {
   const { createPicklistPollJob } = require('./lib/jobs/picklist.js');
   const { buildMailerFromEnv } = require('./lib/jobs/mailer.js');
   const { buildAnthropicFromEnv } = require('./lib/anthropic-client.js');
+  const { buildDriveFromEnv } = require('./lib/google-drive-client.js');
 
   function loadLocalEnv() {
     // Minimaler .env.local-Leser (Projekt- + dashboard-Ebene), wie server.js.
@@ -241,11 +242,13 @@ function buildWorker(env = process.env) {
   const claudeProposalsJob = tenantRunner ? createClaudeProposalsJob({ tenantRunner, anthropic, mailer, env: runtimeEnv }) : null;
   // WF5 (#162, Slice 2): MHD/Low-Stock-Warnungen synchronisieren + Digest-Mail (Resend).
   const wf5MonitorJob = tenantRunner ? createWf5MonitorJob({ tenantRunner, mailer, env: runtimeEnv }) : null;
-  // WF9 Pickliste (#162, Slice 2): Drive→OCR→Slot-Verteilung. Der Google-Drive-Client
-  // ist eine DEPLOY-Abhängigkeit (OAuth, nicht in .env.local) ⇒ hier null ⇒ Job „disabled".
-  // Sobald ein Drive-Client gebaut ist, hier injizieren und der Job registriert sich.
-  const driveClient = null;
-  const picklistJob = tenantRunner ? createPicklistPollJob({ tenantRunner, drive: driveClient, anthropic, env: runtimeEnv }) : null;
+  // WF9 Pickliste (#162, Slice 2): Drive→OCR→Slot-Verteilung. Drive-Client aus .env.local
+  // (GOOGLE_DRIVE_*). „disabled" ohne Credentials/Ordner. Braucht zusätzlich Anthropic (OCR).
+  const { drive: driveClient, kind: driveKind } = buildDriveFromEnv(runtimeEnv);
+  console.log(`[worker] Drive: ${driveKind}`);
+  const picklistJob = (tenantDb && driveClient && anthropic)
+    ? createPicklistPollJob({ db: tenantDb, drive: driveClient, anthropic, env: runtimeEnv })
+    : createPicklistPollJob({ drive: driveClient, anthropic });
 
   // Heartbeat (Slice 0) + portierte idempotente Jobs (Slice 1). Nächtliche Jobs nutzen
   // dailyAt (drift-tolerant), nicht node-cron (auf dem WSL-Mini unzuverlässig).
