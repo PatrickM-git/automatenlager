@@ -3,18 +3,19 @@
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 > Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-08_slice1-resend-dbcheck.md`.
 
-## Session 2026-06-09 — Stufe 6 Slice 2 (#162) Trigger-Umlegung: **DEPLOYT, WF7+WF5 cutover; Claude-Proposals/WF9 pending Key/Client**
+## Session 2026-06-09 — Stufe 6 Slice 2 (#162) Trigger-Umlegung: **VOLLSTÄNDIG DEPLOYT + CUTOVER (alle 4 Flows live, n8n aus)**
 
-Branch `feat/n8n-abloesung-stufe-6-slice-2`, PR **#191 gemergt** → **#162 CLOSED**, **#163 entblockt**. PR #192 (0028-Test robust). SPEC: `docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md`. Suite **1250/1250 grün**. `main` = `f3e5a47`, **auf Mini deployt** (`/mnt/c/homelab/projekte/automatenlager`, bind-mount `→/repo`; `git pull` + `docker restart homelab-dashboard homelab-worker`).
+PRs **#191/#192/#194/#195 gemergt** → **#162 CLOSED**, **#163 entblockt**. SPEC: `docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md`. Suite **1256/1256 grün**. `main` = `99382bf`, **auf Mini deployt** (`/mnt/c/homelab/projekte/automatenlager`, bind-mount `→/repo`; `git pull` + `docker restart`).
 
-**DEPLOY-STAND (LIVE auf Mini):**
-- ✅ **WF7** in-process (Dashboard) — n8n-WF7 (`0oRIiVFr5Q7FF6ow`) **deaktiviert**.
-- ✅ **WF5** Worker (`wf5-monitor`, täglich 07:00) — **live smoke** ok (t_faltrix: 6 inserted/20 resolved, Digest-Mail via Resend verschickt) — n8n-WF5 (`3ceKeNWmdj455Tcr`) **deaktiviert**.
-- ⏳ **WF-Claude-Proposals**: Worker-Job läuft (04:30), aber **`Anthropic: disabled`** (Key fehlt in Mini-`.env.local`) ⇒ no-op. **n8n-Claude-Proposals (`hU7Aev7G4MaMv2yR`) bleibt AKTIV.** Cutover sobald `ANTHROPIC_API_KEY` gesetzt + neugestartet, dann n8n deaktivieren.
-- ⏳ **WF9 Pickliste**: Worker-Job **disabled** (`driveClient=null`, kein Google-Drive-OAuth-Client gebaut). **n8n-WF9 (`nh8Tmg7klwGVjKui`) bleibt AKTIV.** Cutover braucht einen Drive-Client (+ ANTHROPIC_API_KEY für OCR).
-- **Restatement-Befund (B):** `DASHBOARD_V2_PG_URL` ist **die Mini-Prod-DB via SSH-Tunnel `127.0.0.1:15432`**. Das GuV-Restatement (577 Zeilen `cost_basis='brutto'`, 545 `audit.guv_restatement_log`) **lief bereits auf PROD** (vom Dev-PC durch den Tunnel) — laut Runbook der **vorgesehene, auditierte, je `run_id` umkehrbare** Schritt, **kein Versehen, kein Cleanup nötig**. Der `0028`-Test war dadurch fragil → in PR #192 robust gemacht (frische Sandbox-Zeile statt Live-Count).
+**CUTOVER LIVE (alle vier n8n-Workflows DEAKTIVIERT, in-process aktiv):**
+- ✅ **WF7** in-process (Dashboard `applyRefill`) — n8n-WF7 (`0oRIiVFr5Q7FF6ow`) aus.
+- ✅ **WF5** Worker `wf5-monitor` (07:00) — live smoke ok (Digest-Mail via Resend) — n8n-WF5 (`3ceKeNWmdj455Tcr`) aus.
+- ✅ **WF-Claude-Proposals** Worker (04:30) — `ANTHROPIC_API_KEY` aus n8n-Credential migriert → `Anthropic: live`; smoke ok (0 pending) — n8n (`hU7Aev7G4MaMv2yR`) aus.
+- ✅ **WF9 Pickliste** Worker (alle 5 min) — **Google-Drive-Client gebaut** (`lib/google-drive-client.js`, PR #195) + OAuth-Credential/Ordner-IDs migriert → `Drive: live`; read-only Auth-Smoke ok (Ordner leer, 0 PDFs) — n8n-WF9 (`nh8Tmg7klwGVjKui`) aus.
+- **Credentials migriert** (aus n8n via `export:credentials --decrypted`, serverseitig in Mini-`dashboard/.env.local`, nie geloggt): `ANTHROPIC_API_KEY`, `GOOGLE_DRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN` + Ordner-IDs + `WF9_TENANT_ID=t_faltrix`.
+- **Restatement-Befund (B):** `DASHBOARD_V2_PG_URL` = Mini-Prod-DB via SSH-Tunnel `127.0.0.1:15432`. Restatement (577 Zeilen brutto, 545 Audit-Logs) lief **gewollt** auf PROD (Runbook-Schritt, auditiert/umkehrbar) — kein Cleanup. `0028`-Test dadurch fragil → in PR #192 robust gemacht.
 
-**Verbleibende Cutover-Schritte (Betreiber):** (1) `ANTHROPIC_API_KEY` in Mini-`dashboard/.env.local` → `docker restart homelab-worker` (Log: `Anthropic: live`) → n8n-Claude-Proposals deaktivieren. (2) Google-Drive-OAuth-Client bauen + in `worker.js` injizieren → n8n-WF9 deaktivieren. Rückweg jederzeit: n8n-WF reaktivieren (`BYPASSRLS` bis Slice 4).
+**n8n läuft weiter NUR für Slice 3 (#163, datenkritisch):** WF1/WF2/WF3/WF4. Rückweg jederzeit: Slice-2-WF in n8n reaktivieren (`BYPASSRLS` bis Slice 4). **Verbleibend (Betreiber, optional):** echter WF9-Pickliste-Live-Test mit einer PDF im Quell-Ordner; Worker-Monitor wacht über Fehlläufe.
 
 **Folge-Feature:** [#193](https://github.com/PatrickM-git/automatenlager/issues/193) — G&V-Tabelle VK/EK pro Stück anzeigen + editierbar (Datenqualität; Verdacht falscher EK bei „Lichtenauer Still"). SPEC vor Umsetzung.
 
