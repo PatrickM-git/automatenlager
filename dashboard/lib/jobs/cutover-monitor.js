@@ -59,6 +59,28 @@ function buildDiffMail(label, diffSample) {
   return { subject, text, html: `<pre>${text.replace(/</g, '&lt;')}</pre>` };
 }
 
+function buildDiffIssueBody(label, diffSample) {
+  return [
+    `## Schatten-Diff: ${label} weicht von n8n ab (blockiert Cutover #198)`,
+    '',
+    'Der portierte Job rechnet andere Writes als n8n. Solange der Diff besteht, wird die',
+    'Deckungsgleichheits-Serie zurückgesetzt und das Cutover-Kriterium nie erreicht — der',
+    '**Port-Code muss angeglichen werden** (oder, falls n8n falsch ist, begründet verworfen).',
+    '',
+    '### Diff-Probe (bis zu 5 Schlüssel je Kategorie)',
+    '```json',
+    JSON.stringify(diffSample, null, 2),
+    '```',
+    '',
+    '### Vorgehen',
+    '- Port (`dashboard/lib/jobs/nayax-sales.js` bzw. `invoice-intake.js`) vs. n8n-Verhalten',
+    '  (WF3/WF1-JSONs + `docs/data-model/pgw-write-und-workflow-runs-preflight.md`) vergleichen.',
+    '- Port angleichen, Tests (`node --test tests/dashboard-jobs-*.test.js`), PR. **Kein** Auto-Merge/Deploy.',
+    '',
+    '_Automatisch vom Cutover-Wächter erstellt (Worker, 24/7)._',
+  ].join('\n');
+}
+
 function buildReadinessMail(label, streak, threshold) {
   const subject = `Cutover-Kriterium erfüllt: ${label} (${streak} deckungsgleiche Schattenläufe)`;
   const text = [
@@ -97,7 +119,7 @@ async function writeStreak(db, tenant, streakKey, state) {
  * Eine Pfad-Prüfung: Schatten-Ergebnis bewerten, Serie fortschreiben, ggf. mailen.
  * @param {object} opts.shadowResult  Rückgabe des Schatten-Job-run() ({equal, fetched|processed, salesDiff?})
  */
-async function runCutoverCheck(db, tenant, { streakKey, label, shadowResult, threshold = DEFAULT_THRESHOLD, mailer, env = process.env } = {}) {
+async function runCutoverCheck(db, tenant, { streakKey, label, shadowResult, threshold = DEFAULT_THRESHOLD, mailer, issues, env = process.env } = {}) {
   const equal = !!(shadowResult && shadowResult.equal);
   // Aktivität: der Schatten hat überhaupt Daten gesehen (sonst vakuös).
   const seen = shadowResult ? (Number(shadowResult.fetched || 0) + Number(shadowResult.processed || 0)) : 0;
@@ -105,13 +127,39 @@ async function runCutoverCheck(db, tenant, { streakKey, label, shadowResult, thr
   const prev = await readStreak(db, tenant, streakKey);
   const { state, shouldAlert } = updateStreak(prev, { equal, hadActivity }, threshold);
 
-  // Diff-Alarm (dedupliziert per Signatur): bei Abweichung MIT Aktivität feldgenau mailen,
+  // Diff-Alarm (dedupliziert per Signatur): bei Abweichung MIT Aktivität feldgenau melden,
   // damit ein dauerhafter Diff nicht still die Konvergenz verhindert.
   const sample = shadowResult && shadowResult.diffSample;
   const sig = (!equal && hadActivity) ? diffSignature(sample) : '';
   const diffIsNew = sig !== '' && sig !== (prev && prev.lastDiffSig);
   const canMail = mailer && typeof mailer.send === 'function';
-  const next = { ...state, lastDiffSig: sig || (equal ? '' : (prev && prev.lastDiffSig) || '') };
+  const canIssue = issues && typeof issues.createIssue === 'function';
+  let diffIssue = (prev && prev.diffIssue) || null;
+  let issueAction = null;
+
+  // GitHub-Issue (24/7, ohne Session): bei neuem Diff eröffnen ODER (wenn schon offen)
+  // kommentieren; bei Auflösung kommentieren + Marker löschen. Best-effort (Fehler ⇒ kein Crash).
+  if (canIssue) {
+    try {
+      if (diffIsNew && !diffIssue) {
+        diffIssue = await issues.createIssue({
+          title: `Cutover-Blocker: ${label} — Schatten-Diff zu n8n (auto)`,
+          body: buildDiffIssueBody(label, sample), labels: ['enhancement'],
+        });
+        issueAction = 'created';
+      } else if (diffIsNew && diffIssue) {
+        await issues.commentIssue(diffIssue, buildDiffIssueBody(label, sample));
+        issueAction = 'commented';
+      } else if (equal && hadActivity && diffIssue) {
+        await issues.commentIssue(diffIssue, `Diff aufgelöst — ${label} wieder deckungsgleich mit n8n; Serie läuft. (auto)`);
+        issueAction = 'resolved'; diffIssue = null;
+      }
+    } catch (err) {
+      issueAction = `error:${String((err && err.message) || err)}`;
+    }
+  }
+
+  const next = { ...state, lastDiffSig: sig || (equal ? '' : (prev && prev.lastDiffSig) || ''), diffIssue };
   await writeStreak(db, tenant, streakKey, next);
 
   if (shouldAlert && canMail) {
@@ -122,7 +170,7 @@ async function runCutoverCheck(db, tenant, { streakKey, label, shadowResult, thr
     const mail = buildDiffMail(label, sample);
     await mailer.send({ to: resolveTenantAlertEmail(env, tenant), subject: mail.subject, text: mail.text, html: mail.html });
   }
-  return { label, equal, hadActivity, streak: next.streak, alerted: next.alerted, mailedReady: shouldAlert, mailedDiff: diffIsNew, diffSample: sample || null };
+  return { label, equal, hadActivity, streak: next.streak, alerted: next.alerted, mailedReady: shouldAlert, mailedDiff: diffIsNew, issueAction, diffIssue, diffSample: sample || null };
 }
 
 /**
@@ -131,7 +179,7 @@ async function runCutoverCheck(db, tenant, { streakKey, label, shadowResult, thr
  * (job liefert mode='cutover') wird die Serie nicht ausgewertet (nichts zu prüfen).
  * @returns {{key:string, run:()=>Promise<any>}}
  */
-function createCutoverMonitorJob({ db, env = process.env, mailer, checks = [] } = {}) {
+function createCutoverMonitorJob({ db, env = process.env, mailer, issues, checks = [] } = {}) {
   if (!db) throw new TypeError('cutover-monitor: db (Mandanten-Tür) erforderlich');
   const threshold = Number(env.CUTOVER_STREAK_THRESHOLD) || DEFAULT_THRESHOLD;
   return {
@@ -146,7 +194,7 @@ function createCutoverMonitorJob({ db, env = process.env, mailer, checks = [] } 
           results.push({ label: c.label, skipped: shadowResult && (shadowResult.skipped || 'not_shadow') });
           continue;
         }
-        results.push(await runCutoverCheck(db, c.tenant, { streakKey: c.streakKey, label: c.label, shadowResult, threshold, mailer, env }));
+        results.push(await runCutoverCheck(db, c.tenant, { streakKey: c.streakKey, label: c.label, shadowResult, threshold, mailer, issues, env }));
       }
       return { checks: results.length, results };
     },
