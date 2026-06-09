@@ -203,18 +203,25 @@ test('AC-W3 LIVE: Admin-POST persistiert, GET spiegelt es (Snapshot/Restore)', a
 
   const post = await request(port, '/api/v2/settings/definitions', {
     method: 'POST',
-    body: { config: { graceDays: 21, categories: { snack: { marginPct: 58 } } } },
+    // #173: Admin konfiguriert auch MwSt-Sätze (je Kategorie + Default).
+    body: { config: { graceDays: 21, defaultMwstPct: 16, categories: { snack: { marginPct: 58, mwstPct: 12 } } } },
   });
   assert.equal(post.status, 200);
   const pj = post.json();
   assert.equal(pj.definitions.config.graceDays, 21);
   assert.equal(pj.definitions.config.categories.snack.marginPct, 58);
+  // #173: MwSt persistiert je Kategorie + als Default.
+  assert.equal(pj.definitions.config.categories.snack.mwstPct, 12, 'Kategorie-MwSt gespeichert');
+  assert.equal(pj.definitions.config.defaultMwstPct, 16, 'Default-MwSt gespeichert');
 
   // Teil-Speichern darf andere Kategorien nicht verwerfen.
   assert.equal(pj.definitions.config.categories.getraenk.marginPct, 43, 'getraenk bleibt erhalten');
 
   const get = await request(port, '/api/v2/settings/definitions');
-  assert.equal(get.json().definitions.config.graceDays, 21, 'GET spiegelt den persistierten Wert');
+  const gc = get.json().definitions.config;
+  assert.equal(gc.graceDays, 21, 'GET spiegelt den persistierten Wert');
+  assert.equal(gc.categories.snack.mwstPct, 12, 'GET spiegelt die Kategorie-MwSt');
+  assert.equal(gc.defaultMwstPct, 16, 'GET spiegelt die Default-MwSt');
 });
 
 // ── Frontend: editierbares Formular + Schreibpfad-Verdrahtung ─────────────────
@@ -226,4 +233,13 @@ test('AC-W4: v3.js rendert editierbares Settings-Formular + speichert über den 
   assert.match(js, /data-set-cat=/, 'editierbare Kategorie-Margen vorhanden');
   assert.match(js, /postJson\('\/api\/v2\/settings\/definitions'/, 'Speichern über den Schreibpfad');
   assert.match(js, /renderSettingsPage\(result\.settings,\s*result\.canEdit/, 'canEdit steuert die Editierbarkeit');
+});
+
+test('#173 AC-W5: v3.js rendert editierbare MwSt-Felder (Kategorie + Default + neue Kategorie)', () => {
+  const js = fs.readFileSync(path.join(process.cwd(), 'public', 'v3.js'), 'utf8');
+  assert.match(js, /data-cat-field="mwstPct"/, 'MwSt-Feld je Kategorie-Zeile');
+  assert.match(js, /'defaultMwstPct'/, 'Default-MwSt-Feld vorhanden');
+  assert.match(js, /v3-set-newcat-mwst/, 'MwSt-Feld beim Anlegen neuer Kategorien');
+  // Save-Pfad sammelt mwstPct ein (Bestandszeile + neue Kategorie).
+  assert.match(js, /entry\.mwstPct = Number\(mwst\.value\)/, 'collectOverride übernimmt mwstPct je Kategorie');
 });
