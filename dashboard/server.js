@@ -30,7 +30,7 @@ const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buil
 const { buildProductCatalog } = require('./lib/product-catalog.js');
 const { queryEconomicsScopePg } = require('./lib/automaten-view.js');
 const { queryEconomicsLivePg } = require('./lib/economics-live.js');
-const { resolveViewer, objectAccessAllowed, breakGlassDecision } = require('./lib/auth.js');
+const { resolveViewer, objectAccessAllowed, breakGlassDecision, crossTenantAccess } = require('./lib/auth.js');
 const { createTenantDirectory } = require('./lib/tenant-directory.js');
 const { createTenantDb } = require('./lib/tenant-db.js');
 const { rejectBodyTenant } = require('./lib/write-guards.js');
@@ -234,9 +234,14 @@ function getViewer(req) {
 // #118: Break-Glass-Audit-Pflichtfelder (an die bestehende Senke andocken). auditAction
 // ergänzt timestamp + login(=viewer) + outcome; hier die übrigen SPEC-Pflichtfelder.
 function breakGlassAuditFields(viewer, req, parsed) {
+  // #169: explizites Cross-Tenant-Audit-Schema (actingLogin, home/target, crossTenant-Marker).
+  const xt = crossTenantAccess(viewer);
   return {
-    homeTenant: (viewer && viewer.homeTenantId) || null,
-    targetTenant: (viewer && viewer.supportSession && viewer.supportSession.targetTenant) || null,
+    actingLogin: xt.actingLogin,
+    isPlatformAdmin: xt.isPlatformAdmin,
+    homeTenant: xt.homeTenant,
+    targetTenant: (viewer && viewer.supportSession && viewer.supportSession.targetTenant) || xt.targetTenant,
+    crossTenant: xt.crossTenant, // war_mandantenuebergreifend
     endpoint: parsed && parsed.pathname,
     method: req.method,
     sourceAddress: (req.socket && req.socket.remoteAddress) || null,

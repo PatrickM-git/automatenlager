@@ -15,7 +15,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const test = require('node:test');
 
-const { resolveViewer, breakGlassDecision } = require('../lib/auth.js');
+const { resolveViewer, breakGlassDecision, crossTenantAccess } = require('../lib/auth.js');
 
 const ADMIN = 'patrickmatthes2609@gmail.com';
 const FALTRIX = 't_faltrix';
@@ -47,6 +47,29 @@ test('#118 Admin + Override auf existierenden Mandanten -> aktiv, Ziel-Mandant, 
   assert.equal(v.can('nayax.schreiben'), false);
   assert.equal(v.can('system.verwalten'), false);
   assert.equal(v.canTriggerActions, false);
+});
+
+// ── #169: Cross-Tenant-Audit-Schema (crossTenantAccess) ───────────────────────
+test('#169 crossTenantAccess: aktives Break-Glass auf FREMDEN Mandanten ⇒ crossTenant=true, actingLogin + Ziel', () => {
+  const v = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env, directory: dir, supportTenant: 'acme' });
+  const xt = crossTenantAccess(v);
+  assert.equal(xt.crossTenant, true, 'war_mandantenuebergreifend');
+  assert.equal(xt.actingLogin, ADMIN, 'handelnder Login');
+  assert.equal(xt.homeTenant, FALTRIX);
+  assert.equal(xt.targetTenant, 'acme');
+  assert.equal(xt.isPlatformAdmin, true);
+});
+
+test('#169 crossTenantAccess: Admin ohne Override (eigener Mandant) ⇒ crossTenant=false', () => {
+  const v = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env, directory: dir });
+  const xt = crossTenantAccess(v);
+  assert.equal(xt.crossTenant, false);
+  assert.equal(xt.targetTenant, FALTRIX);
+});
+
+test('#169 crossTenantAccess: Break-Glass auf EIGENEN Mandanten ⇒ crossTenant=false (nicht übergreifend)', () => {
+  const v = resolveViewer({ login: ADMIN, remoteAddress: '127.0.0.1', env, directory: dir, supportTenant: FALTRIX });
+  assert.equal(crossTenantAccess(v).crossTenant, false);
 });
 
 test('#118 Admin + Override auf EIGENEN Mandanten -> trotzdem read-only', () => {

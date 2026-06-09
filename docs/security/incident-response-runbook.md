@@ -120,12 +120,12 @@ Bei **personenbezogenem** Datenabfluss/-leck:
 
 ## 8. Status der Bausteine & Folge-Arbeiten
 
-**Vorhanden (heute nutzbar):** Default-Deny-Auth + Audit-JSONL; Break-Glass read-only + auditiert (#118); `audit.workflow_runs`-Telemetrie; tägliches PG-Backup (Restore erprobt); RLS-Backstop (Stufe 5) + Rollback-Runbook; secret-guard-Hooks + Token-Leak-Prozedur (CLAUDE.md).
+**Vorhanden (heute nutzbar):** Default-Deny-Auth + Audit-JSONL; Break-Glass read-only + auditiert (#118); `audit.workflow_runs`-Telemetrie; tägliches PG-Backup (Restore erprobt); RLS-Backstop (Stufe 5) + Rollback-Runbook; secret-guard-Hooks + Token-Leak-Prozedur (CLAUDE.md); **Anomalie-Monitor + Alarmierung (#168, Worker `anomaly-monitor`)**; **Cross-Tenant-Audit-Schema (#169)**.
+
+**Cross-Tenant-Audit-Schema (#169, `crossTenantAccess` in `lib/auth.js`):** jeder mandantenübergreifende Zugriff (heute nur über aktives Break-Glass möglich) wird mit `actingLogin`, `isPlatformAdmin`, `homeTenant`, `targetTenant` und dem expliziten Marker **`crossTenant`** (war_mandantenuebergreifend) in `guest-access.jsonl` protokolliert — auf allen Pfaden (`allow`/`block`/`ignore`). Der Anomalie-Monitor (#168) alarmiert auf `BREAK_GLASS_USED`.
 
 **Noch zu automatisieren/härten (eigene Issues, NICHT Teil dieses Runbooks):**
-- **Audit-Log-Monitoring + Alarmierung** bei Anomalien (Auth-Häufung, Break-Glass, ungewöhnliche Datenmengen) → **ROADMAP A3** (Monitoring/Alerting/Sentry).
-- **`platform_admins` scharf + lückenlos auditiert** (handelnder Login, Ziel-`tenant_id`, `war_mandantenuebergreifend`) → Auth-Ausbau (knüpft an #118).
-- **Off-Site-Backup + Alarm bei Backup-Fehlern** → ROADMAP A3.
+- **Off-Site-Backup + Alarm bei Backup-Fehlern** → ROADMAP A3 (der Anomalie-Monitor #168 alarmiert bereits auf `BACKUP_FAIL`/`BACKUP_STALE`-Warnungen; Off-Site-Backup selbst bleibt offen).
 - **Credential-Vault** (pro-Mandant verschlüsselt, Nayax nicht mehr global) → **Stufe 7**.
 
 > **Gate vor erstem externen Kunden:** mindestens Punkte 1–4 + 6 (Phasen, Rotation, Kill-Switch, Restore-Drill, Break-Glass-Audit) müssen **stehen und geübt** sein.
