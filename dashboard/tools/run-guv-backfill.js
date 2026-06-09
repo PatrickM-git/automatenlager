@@ -16,16 +16,17 @@
 // Voraussetzung für den WRITE: Migration 0028 (cost_basis) ist angewendet.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const https = require('node:https');
 const { resolvePgUrl } = require('../tests/helpers/migration-sandbox.js');
 const { createTenantDb } = require('../lib/tenant-db.js');
-const { runGuvBackfillForTenant } = require('../lib/jobs/guv-backfill.js');
+// Fetcher + Default-Sheet-/Maschinen-Auflösung sind GETEILT mit dem Worker-Job
+// (eine Quelle der Wahrheit) — CLI und wiederkehrender Job laden identisch.
+const { runGuvBackfillForTenant, fetchBackfillCsv, resolveSheetId, resolveMachineKey } = require('../lib/jobs/guv-backfill.js');
 
 // Vom Betreiber freigegebenes Sheet mit den Roh-Umsätzen (überschreibbar via --sheet / Env).
-const DEFAULT_SHEET_ID = process.env.GUV_BACKFILL_SHEET_ID || '16RAC2iUmnSxVWJf-F3Bai2zPSGGs5BLF';
+const DEFAULT_SHEET_ID = resolveSheetId(process.env);
 
 function parseArgs(argv) {
-  const a = { dryRun: false, sheet: DEFAULT_SHEET_ID, tenant: null, machineKey: '457107528' };
+  const a = { dryRun: false, sheet: DEFAULT_SHEET_ID, tenant: null, machineKey: resolveMachineKey(process.env) };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--dry-run') a.dryRun = true;
     else if (argv[i] === '--sheet') a.sheet = argv[++i];
@@ -35,22 +36,6 @@ function parseArgs(argv) {
   return a;
 }
 
-function fetchSheetCsv(sheetId) {
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
-  return new Promise((res, rej) => {
-    (function get(u, depth) {
-      if (depth > 6) return rej(new Error('zu viele Redirects'));
-      const req = https.get(u, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000 }, (r) => {
-        if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) { get(r.headers.location, depth + 1); return; }
-        if (r.statusCode !== 200) return rej(new Error(`HTTP ${r.statusCode}`));
-        let d = ''; r.on('data', (c) => d += c); r.on('end', () => res(d));
-      });
-      req.on('timeout', () => { req.destroy(); rej(new Error('Timeout beim Sheet-Abruf')); });
-      req.on('error', rej);
-    })(url, 0);
-  });
-}
-
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const url = resolvePgUrl();
@@ -58,7 +43,7 @@ async function main() {
   let Pool; try { ({ Pool } = require('pg')); } catch { console.error('BACKFILL: pg nicht installiert.'); process.exit(2); }
 
   console.log(`Lade Roh-Export aus Sheet ${args.sheet} ...`);
-  const csvText = await fetchSheetCsv(args.sheet);
+  const csvText = await fetchBackfillCsv(args.sheet);
   console.log(`CSV geladen (${csvText.length} Bytes).`);
 
   const pool = new Pool({ connectionString: url, connectionTimeoutMillis: 8000, max: 4 });
