@@ -166,6 +166,7 @@ function buildWorker(env = process.env) {
   const { createPicklistPollJob } = require('./lib/jobs/picklist.js');
   const { createNayaxSalesJob } = require('./lib/jobs/nayax-sales.js');
   const { createInvoiceIntakeJob } = require('./lib/jobs/invoice-intake.js');
+  const { createCutoverMonitorJob } = require('./lib/jobs/cutover-monitor.js');
   const { buildMailerFromEnv } = require('./lib/jobs/mailer.js');
   const { buildAnthropicFromEnv } = require('./lib/anthropic-client.js');
   const { buildDriveFromEnv } = require('./lib/google-drive-client.js');
@@ -257,6 +258,16 @@ function buildWorker(env = process.env) {
   // WF1 Rechnungseingang (#163, Slice 3): Drive→Claude→invoice+items. Datenkritisch →
   // DEFAULT Schattenbetrieb (kein Schreiben); Cutover via WF1_CUTOVER=1. Ohne Drive disabled.
   const invoiceIntakeJob = createInvoiceIntakeJob({ db: tenantDb, drive: driveClient, anthropic, env: runtimeEnv });
+  // Cutover-Readiness-Wächter (#198): ruft die Schatten-Jobs read-only, zählt deckungsgleiche
+  // aktive Läufe in workflow_state und mailt, sobald das Cutover-Kriterium erfüllt ist.
+  const cutoverTenant = (runtimeEnv.NAYAX_TENANT_ID || runtimeEnv.WF1_TENANT_ID || runtimeEnv.WF9_TENANT_ID || '').trim();
+  const cutoverMonitorJob = (tenantDb && cutoverTenant) ? createCutoverMonitorJob({
+    db: tenantDb, env: runtimeEnv, mailer,
+    checks: [
+      { streakKey: 'CUTOVER_STREAK_WF3', label: 'WF3 Nayax-Verkäufe', tenant: cutoverTenant, job: nayaxSalesJob },
+      { streakKey: 'CUTOVER_STREAK_WF1', label: 'WF1 Rechnungseingang', tenant: cutoverTenant, job: invoiceIntakeJob },
+    ].filter((c) => c.job),
+  }) : null;
 
   // Heartbeat (Slice 0) + portierte idempotente Jobs (Slice 1). Nächtliche Jobs nutzen
   // dailyAt (drift-tolerant), nicht node-cron (auf dem WSL-Mini unzuverlässig).
@@ -322,6 +333,11 @@ function buildWorker(env = process.env) {
   if (invoiceIntakeJob && !invoiceIntakeJob.disabled) {
     schedules.push({ name: invoiceIntakeJob.key, intervalMs: Number(env.WORKER_WF1_MS) || 10 * 60 * 1000, kind: 'tenant',
       run: () => invoiceIntakeJob.run() });
+  }
+  // Cutover-Readiness-Wächter (#198) → täglich, nach den nächtlichen Schattenläufen.
+  if (cutoverMonitorJob) {
+    schedules.push({ name: cutoverMonitorJob.key, dailyAt: env.WORKER_CUTOVER_AT || '02:00', kind: 'tenant',
+      run: () => cutoverMonitorJob.run() });
   }
   // Worker-Job-Health-Monitor (audit.workflow_runs) → intervalMs. KEIN runOnStart
   // (erst nach den ersten Job-Läufen prüfen, sonst NO_SUCCESS-Fehlalarm).
