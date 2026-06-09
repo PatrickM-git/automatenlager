@@ -58,6 +58,16 @@ Mandanten-Tür (`db.tx`, RLS-GUC, explizites `tenant_id`), faithful zur `pgw_wri
   nicht-mappbare Typen werden übersprungen (sonst bräche der INSERT — Befund Slice 2). Genutzt von WF3+WF4.
 - Cutover-Kriterien aller drei Pfade: `docs/data-model/wf3-nayax-sales-cutover.md`.
 
+### 🤖 Cutover-Wächter (#198) — LIVE auf dem Mini
+- Worker-Job `cutover-readiness-monitor` (täglich 02:00, `lib/jobs/cutover-monitor.js`): ruft die
+  Schatten-Jobs WF3/WF1 read-only, zählt deckungsgleiche Läufe **mit Aktivität** in `workflow_state`.
+- **Bei Deckungsgleichheit ≥ Schwelle (7):** mailt „Cutover-Kriterium erfüllt" (Resend).
+- **Bei Diff:** mailt feldgenau (`diffSample`) UND eröffnet ein **GitHub-Issue** (`lib/jobs/github-issues.js`,
+  dedupliziert per Issue-Nummer im State) → Fix taucht im Backlog auf, `start-issue` greift ihn auf
+  (24/7, ohne Claude-Session). Auflösung ⇒ Kommentar. `GITHUB_TOKEN`/`GITHUB_REPO` in Mini-`.env.local` gesetzt.
+- **Grenze:** kein Auto-Code-Fix/-Merge/-Deploy — der Selbstheilungs-Fix läuft über den normalen
+  start-issue→tdd→PR-Pfad (Mensch reviewt, Finanzdaten).
+
 ### ⏭️ Nächste Schritte (nächster Chat)
 1. **Mini-Deploy** (`git pull` + `docker restart`; Memory `mini-deploy-mechanismus`). Kein DDL nötig.
    Worker startet die neuen Jobs im **Schattenbetrieb** (kein Schreiben) — Diffs in `audit.workflow_runs` beobachten.
