@@ -228,6 +228,25 @@ function breakGlassDecision(viewer, method) {
   return { kind: 'ignore', auditEvent: 'break_glass_ignored', outcome: 'denied' };
 }
 
+// Issue #169 (IR #109 §6/§8): Audit-Schema für mandantenübergreifenden Zugriff.
+// REIN. Liefert die Pflichtfelder, mit denen JEDER cross-tenant-Zugriff (heute nur
+// über aktives Break-Glass möglich, da der effektive Mandant sonst = Heimat ist)
+// lückenlos protokolliert wird: handelnder Login, Heimat- und Ziel-Mandant, und der
+// explizite Marker `crossTenant` (war_mandantenuebergreifend). Ein platform_admin,
+// der auf dem eigenen Heimat-Mandanten arbeitet, ist NICHT cross-tenant.
+function crossTenantAccess(viewer) {
+  const homeTenant = (viewer && viewer.homeTenantId) || null;
+  const targetTenant = (viewer && viewer.tenantId) || null;
+  const crossTenant = !!(targetTenant && homeTenant && targetTenant !== homeTenant);
+  return {
+    actingLogin: (viewer && viewer.login) || null,
+    isPlatformAdmin: !!(viewer && viewer.isPlatformAdmin),
+    homeTenant,
+    targetTenant,
+    crossTenant,
+  };
+}
+
 // Issue #28: zentrale Fähigkeits-Prüfung (rein). Der HTTP-403-Guard in server.js
 // (requireCapability mit res) baut darauf auf.
 function viewerCan(viewer, capability) {
@@ -252,6 +271,7 @@ function objectAccessAllowed(viewer, objectTenantId) {
 module.exports = {
   resolveViewer,
   breakGlassDecision,
+  crossTenantAccess,
   viewerCan,
   objectAccessAllowed,
   isTrustedIdentityPath,
