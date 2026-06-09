@@ -20,7 +20,7 @@
  * Externe Grenzen (Drive, Anthropic) injiziert. Trägt KEIN rohes pg (#107-rein).
  */
 
-const { diffWrites } = require('./shadow-harness.js');
+const { diffWrites, sampleDiff } = require('./shadow-harness.js');
 const { inferProductCategory } = require('../product-category.js');
 
 const INVOICE_EXTRACTION_MODEL = 'claude-sonnet-4-6';
@@ -319,6 +319,7 @@ function createInvoiceIntakeJob({ db, drive, anthropic, env = process.env } = {}
       const files = (typeof drive.listNew === 'function') ? await drive.listNew() : [];
       const cutover = isCutover(env);
       let processed = 0; const results = [];
+      let allEqual = true; let firstDiffSample = null; // Aggregat für den Cutover-Wächter
       for (const f of files) {
         const { base64, mimeType } = await drive.download(f.id);
         const resp = await anthropic.createMessage(buildInvoiceExtractionRequest(base64, mimeType));
@@ -330,11 +331,17 @@ function createInvoiceIntakeJob({ db, drive, anthropic, env = process.env } = {}
           results.push({ mode: 'cutover', file: f.name, ...r });
         } else {
           const shadow = await runInvoiceIntakeShadow(db, tenant, { invoice });
-          results.push({ mode: 'shadow', file: f.name, equal: shadow.equal, onlyIntended: shadow.itemsDiff.onlyIntended.length, onlyActual: shadow.itemsDiff.onlyActual.length });
+          if (!shadow.equal) {
+            allEqual = false;
+            if (!firstDiffSample) firstDiffSample = { file: f.name, items: sampleDiff(shadow.itemsDiff, { keyOf: (r) => `${r.invoice_key}#${r.line_number}` }) };
+          }
+          results.push({ mode: 'shadow', file: f.name, equal: shadow.equal });
         }
         processed += 1;
       }
-      return { tenant, processed, results };
+      if (cutover) return { mode: 'cutover', tenant, processed, results };
+      // Schatten-Aggregat: equal nur wenn ALLE Dateien deckungsgleich; processed=0 ⇒ keine Aktivität.
+      return { mode: 'shadow', tenant, processed, equal: allEqual, diffSample: firstDiffSample ? { items: firstDiffSample.items, file: firstDiffSample.file } : null, results };
     },
   };
 }

@@ -37,6 +37,28 @@ function updateStreak(prev, { equal, hadActivity } = {}, threshold = DEFAULT_THR
   return { state: { streak, alerted: cur.alerted || reached }, shouldAlert };
 }
 
+// Stabile Signatur der Diff-Probe (Schlüssel + Mismatch-Felder), um Tages-Spam zu
+// vermeiden: nur bei NEUEM/geändertem Diff mailen.
+function diffSignature(diffSample) {
+  if (!diffSample) return '';
+  try { return JSON.stringify(diffSample); } catch { return String(diffSample); }
+}
+
+function buildDiffMail(label, diffSample) {
+  const subject = `Schatten-Diff erkannt: ${label} — Port weicht von n8n ab (blockiert Cutover)`;
+  const text = [
+    `Der Schattenbetrieb für "${label}" ist NICHT deckungsgleich mit n8n — die Serie wurde zurückgesetzt.`,
+    'Solange der Diff besteht, wird das Cutover-Kriterium nie erreicht; der Port-Code muss angeglichen werden.',
+    '',
+    'Diff-Probe (bis zu 5 je Kategorie):',
+    JSON.stringify(diffSample, null, 2),
+    '',
+    'Nächster Schritt: Port-Logik (lib/jobs/*) gegen das n8n-Verhalten prüfen und angleichen,',
+    'dann Tests + Redeploy. Der Selbstheilungs-Agent öffnet dafür automatisch einen PR.',
+  ].join('\n');
+  return { subject, text, html: `<pre>${text.replace(/</g, '&lt;')}</pre>` };
+}
+
 function buildReadinessMail(label, streak, threshold) {
   const subject = `Cutover-Kriterium erfüllt: ${label} (${streak} deckungsgleiche Schattenläufe)`;
   const text = [
@@ -82,12 +104,25 @@ async function runCutoverCheck(db, tenant, { streakKey, label, shadowResult, thr
   const hadActivity = seen > 0;
   const prev = await readStreak(db, tenant, streakKey);
   const { state, shouldAlert } = updateStreak(prev, { equal, hadActivity }, threshold);
-  await writeStreak(db, tenant, streakKey, state);
-  if (shouldAlert && mailer && typeof mailer.send === 'function') {
+
+  // Diff-Alarm (dedupliziert per Signatur): bei Abweichung MIT Aktivität feldgenau mailen,
+  // damit ein dauerhafter Diff nicht still die Konvergenz verhindert.
+  const sample = shadowResult && shadowResult.diffSample;
+  const sig = (!equal && hadActivity) ? diffSignature(sample) : '';
+  const diffIsNew = sig !== '' && sig !== (prev && prev.lastDiffSig);
+  const canMail = mailer && typeof mailer.send === 'function';
+  const next = { ...state, lastDiffSig: sig || (equal ? '' : (prev && prev.lastDiffSig) || '') };
+  await writeStreak(db, tenant, streakKey, next);
+
+  if (shouldAlert && canMail) {
     const mail = buildReadinessMail(label, state.streak, threshold);
     await mailer.send({ to: resolveTenantAlertEmail(env, tenant), subject: mail.subject, text: mail.text, html: mail.html });
   }
-  return { label, equal, hadActivity, streak: state.streak, alerted: state.alerted, mailed: shouldAlert };
+  if (diffIsNew && canMail) {
+    const mail = buildDiffMail(label, sample);
+    await mailer.send({ to: resolveTenantAlertEmail(env, tenant), subject: mail.subject, text: mail.text, html: mail.html });
+  }
+  return { label, equal, hadActivity, streak: next.streak, alerted: next.alerted, mailedReady: shouldAlert, mailedDiff: diffIsNew, diffSample: sample || null };
 }
 
 /**

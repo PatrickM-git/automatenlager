@@ -104,4 +104,24 @@ async function runShadowComparison({ workflowKey, computeIntended, readActual, k
   };
 }
 
-module.exports = { diffWrites, runShadowComparison };
+/**
+ * Kompakte, e-mail-/log-taugliche Probe eines diffWrites-Ergebnisses: bis zu
+ * `limit` Schlüssel je Bucket + Mismatch-Felder + Gesamtzähler. Für den Cutover-
+ * Wächter (#198), damit ein Diff feldgenau gemeldet wird statt nur „ungleich".
+ */
+function sampleDiff(diff, { keyOf, limit = 5 } = {}) {
+  const k = typeof keyOf === 'function' ? keyOf : () => '';
+  const d = diff || {};
+  return {
+    counts: {
+      onlyIntended: asArray(d.onlyIntended).length,
+      onlyActual: asArray(d.onlyActual).length,
+      mismatched: asArray(d.mismatched).length,
+    },
+    onlyIntended: asArray(d.onlyIntended).slice(0, limit).map(k),
+    onlyActual: asArray(d.onlyActual).slice(0, limit).map(k),
+    mismatched: asArray(d.mismatched).slice(0, limit).map((m) => ({ key: m.key, fields: m.diffFields })),
+  };
+}
+
+module.exports = { diffWrites, runShadowComparison, sampleDiff };

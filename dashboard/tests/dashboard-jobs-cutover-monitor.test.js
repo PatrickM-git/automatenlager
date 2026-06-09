@@ -72,6 +72,20 @@ test('#198 createCutoverMonitorJob: 7 deckungsgleiche aktive Läufe ⇒ genau ei
   assert.equal(sent.length, 1, 'genau eine Mail beim Erreichen der Schwelle');
 });
 
+test('#198 createCutoverMonitorJob: Diff ⇒ feldgenaue Diff-Mail genau einmal (dedupe), Serie resettet', async () => {
+  const db = inMemoryDb();
+  const sent = [];
+  const mailer = { send: async (m) => { sent.push(m); } };
+  const sample = { sales: { counts: { onlyIntended: 1, onlyActual: 0, mismatched: 0 }, onlyIntended: ['T9'], onlyActual: [], mismatched: [] } };
+  const job = { run: async () => ({ mode: 'shadow', equal: false, fetched: 2, diffSample: sample }) };
+  const monitor = cm.createCutoverMonitorJob({ db, env: { DASHBOARD_ALERT_EMAIL: 'x@y.z' }, mailer, checks: [{ streakKey: 'K', label: 'WF3', tenant: 'acme', job }] });
+  await monitor.run();
+  await monitor.run(); // identischer Diff ⇒ keine zweite Mail
+  assert.equal(sent.length, 1, 'Diff-Mail nur bei neuem/geändertem Diff');
+  assert.match(sent[0].subject, /Schatten-Diff/);
+  assert.equal((db._store.get('acme#K') || {}).streak, 0, 'Serie bei Diff zurückgesetzt');
+});
+
 test('#198 createCutoverMonitorJob: Cutover-/skip-Ergebnis wird nicht als Streak gewertet', async () => {
   const db = inMemoryDb();
   const mailer = { send: async () => {} };
