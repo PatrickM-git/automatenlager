@@ -12,10 +12,21 @@
 //   5. classification_settings __default__ (GuV-Konfig der Realität)
 //   6. Beispiel-Zeilenzahl/letzte posting_date je source (Sanity, kein PII-Dump)
 //
+// #177 ERWEITERUNG — finanzieller Trockenlauf des GuV-Restatements (read-only):
+//   8. Bestand je source/cost_basis, KU-netto-Kandidaten, Anomalien, Σ alter/neuer
+//      COGS (simuliert, gleicher costBasisMultiplier-Pfad wie der Nacht-Job),
+//      Gross-Profit-Differenz, Top-20 Einzel-Differenzen, historic_backfill ohne
+//      Kategorie, Reconciliation vat_rate_pct vs. Kategorie-Satz.
+//   EXIT-CODE-GATE: 0 freigabefähig · 1 harte Anomalie (Restatement blockiert) ·
+//      2 Warnung/manuelle Prüfung.
+//
 // AUSSCHLIESSLICH SELECT/Katalog — keine Mutation. Nutzung: node tools/preflight-guv-daily.js
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { resolvePgUrl } = require('../tests/helpers/migration-sandbox.js');
+const { buildRestatementPreflightReport, decideExitCode } = require('../lib/guv-restatement-preflight.js');
+const { buildEffectiveConfig, sanitizeOverride } = require('../lib/category-config.js');
+const { readKleinunternehmer } = require('../lib/guv-ek.js');
 
 async function main() {
   const url = resolvePgUrl();
@@ -24,6 +35,7 @@ async function main() {
   try { ({ Client } = require('pg')); } catch { console.error('PREFLIGHT: pg nicht installiert.'); process.exit(2); }
   const client = new Client({ connectionString: url, connectionTimeoutMillis: 6000 });
   await client.connect();
+  let exitCode = 0;
   try {
     const who = await client.query('SELECT current_user, current_database()');
     console.log('PREFLIGHT current_user/db:', JSON.stringify(who.rows[0]));
@@ -93,9 +105,65 @@ async function main() {
       `SELECT polname, pg_get_expr(polqual, polrelid) AS using_expr, pg_get_expr(polwithcheck, polrelid) AS check_expr
          FROM pg_policy WHERE polrelid = 'automatenlager.guv_daily'::regclass`);
     console.log(JSON.stringify(pol.rows, null, 2));
+
+    console.log('\n=== 8) FINANZIELLER TROCKENLAUF — GuV-Restatement (read-only) ===');
+    const hasCostBasis = await client.query(
+      `SELECT 1 FROM information_schema.columns
+        WHERE table_schema='automatenlager' AND table_name='guv_daily' AND column_name='cost_basis'`);
+    if (!hasCostBasis.rows.length) {
+      console.log('cost_basis-Spalte fehlt — Migration 0028 zuerst anwenden. (Trockenlauf übersprungen)');
+      exitCode = 2;
+    } else {
+      const rows = (await client.query(
+        `SELECT gd.guv_key, gd.source, gd.cost_basis,
+                gd.cost_of_goods, gd.revenue_gross, gd.revenue_net,
+                p.category AS category
+           FROM automatenlager.guv_daily gd
+           LEFT JOIN automatenlager.products p
+             ON p.product_id = gd.product_id AND p.tenant_id = gd.tenant_id`)).rows;
+      const products = (await client.query(
+        `SELECT product_key, category, vat_rate_pct FROM automatenlager.products`)).rows;
+      const cfgRow = (await client.query(
+        `SELECT config FROM automatenlager.classification_settings WHERE mandant_id='__default__'`)).rows[0];
+      const config = (cfgRow && cfgRow.config) || {};
+      const kleinunternehmer = readKleinunternehmer(config);
+
+      const report = buildRestatementPreflightReport({
+        rows,
+        kleinunternehmer,
+        effConfig: buildEffectiveConfig(sanitizeOverride(config)),
+        products,
+      });
+
+      console.log('Besteuerungsmodell (effektiv): kleinunternehmer =', kleinunternehmer);
+      console.log('Zeilen je source:', JSON.stringify(report.bySource));
+      console.log('Zeilen je cost_basis:', JSON.stringify(report.byCostBasis), '| NULL:', report.nullCostBasisCount);
+      console.log('Sicher als netto klassifizierbar:', report.safeNettoKeys.length,
+        '| unklar/brutto-implizierend:', report.unclearKeys.length);
+      console.log('KU-Zeilen mit netto (Restatement-Kandidaten):', report.kuNettoCandidateCount);
+      console.log('ANOMALIE Nicht-KU-Zeilen mit brutto (erwartet 0):', report.nonKuBruttoCount);
+      console.log('ANOMALIE brutto-implizierende NULL-Zeilen (erwartet 0):', report.bruttoImplyingNullCount);
+      console.log('Σ alter Wareneinsatz (COGS):', report.sumOldCogs);
+      console.log('Σ simulierter neuer COGS:', report.simSumNewCogs);
+      console.log('Simulierte Gross-Profit-Differenz (negativ = Gewinn sinkt):', report.simGrossProfitDelta);
+      console.log('historic_backfill ohne auflösbare Kategorie (Default 19 %):', report.historicBackfillNoCategoryCount);
+      console.log('Top-20 größte Einzel-Differenzen je guv_key:');
+      console.log(JSON.stringify(report.topDiffs, null, 2));
+      console.log('Reconciliation-Abweichungen (vat_rate_pct ≠ Kategorie-Satz):', report.reconciliationMismatches.length);
+      if (report.reconciliationMismatches.length) {
+        console.log(JSON.stringify(report.reconciliationMismatches, null, 2));
+      }
+
+      exitCode = decideExitCode(report);
+      const label = exitCode === 0 ? 'FREIGABEFÄHIG'
+        : exitCode === 1 ? 'HARTE ANOMALIE — Restatement BLOCKIERT'
+          : 'WARNUNG — manuelle Prüfung nötig';
+      console.log(`\nPREFLIGHT-GATE: exit ${exitCode} (${label})`);
+    }
   } finally {
     await client.end();
   }
+  process.exit(exitCode);
 }
 
 main().catch((e) => { console.error('PREFLIGHT Fehler:', e.message); process.exit(1); });
