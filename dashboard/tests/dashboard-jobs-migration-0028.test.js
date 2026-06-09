@@ -33,9 +33,28 @@ test('#175 0028 LIVE: cost_basis-Spalte nullable, KEIN Default, alle Bestandszei
     assert.equal(col.rows[0].is_nullable, 'YES', 'cost_basis ist nullable');
     assert.equal(col.rows[0].column_default, null, 'cost_basis hat KEIN Default');
 
-    const nonNull = await client.query(
-      `SELECT count(*)::int AS n FROM automatenlager.guv_daily WHERE cost_basis IS NOT NULL`);
-    assert.equal(nonNull.rows[0].n, 0, 'alle Bestandszeilen sind NULL (kein stilles Auffüllen)');
+    // „Kein stilles Auffüllen" robust geprüft: 0028 fügt eine NULLBARE Spalte OHNE
+    // Default hinzu ⇒ eine frisch eingefügte Zeile OHNE cost_basis MUSS NULL bleiben.
+    // (NICHT mehr „count über alle Live-Zeilen == 0" — nach dem produktiven Restatement
+    // tragen Bestandszeilen legitim cost_basis='brutto'; das ist Datenstand, kein DDL-Defekt.)
+    const ref = await client.query(
+      `SELECT machine_id, product_id, tenant_id FROM automatenlager.guv_daily LIMIT 1`);
+    if (ref.rows.length === 1) {
+      const r = ref.rows[0];
+      const ins = await client.query(
+        `INSERT INTO automatenlager.guv_daily
+           (guv_key, posting_date, machine_id, product_id, quantity_sold,
+            revenue_gross, revenue_net, cost_of_goods, gross_profit, source, tenant_id)
+         VALUES ('0028-test-' || gen_random_uuid(), CURRENT_DATE, $1, $2, 1,
+                 1.00, 1.00, 0.50, 0.50, 'test_0028', $3)
+         RETURNING cost_basis`,
+        [r.machine_id, r.product_id, r.tenant_id]);
+      assert.equal(ins.rows[0].cost_basis, null,
+        'frische Zeile ohne cost_basis bleibt NULL (kein Default, kein stilles Auffüllen)');
+    } else {
+      // Leere Tabelle (z. B. frische CI-DB): no-default (oben geprüft) genügt als Garantie.
+      assert.equal(col.rows[0].column_default, null);
+    }
   });
 });
 
