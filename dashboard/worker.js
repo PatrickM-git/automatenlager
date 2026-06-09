@@ -162,6 +162,7 @@ function buildWorker(env = process.env) {
   const { createNayaxDevicesSyncJob } = require('./lib/jobs/nayax-devices-sync.js');
   const { createWorkerHealthMonitorJob } = require('./lib/jobs/monitor.js');
   const { createClaudeProposalsJob } = require('./lib/jobs/claude-proposals.js');
+  const { createWf5MonitorJob } = require('./lib/jobs/wf5-monitor.js');
   const { buildMailerFromEnv } = require('./lib/jobs/mailer.js');
   const { buildAnthropicFromEnv } = require('./lib/anthropic-client.js');
 
@@ -237,6 +238,8 @@ function buildWorker(env = process.env) {
   const nayaxDevicesSyncJob = (tenantDb && directory) ? createNayaxDevicesSyncJob({ db: tenantDb, directory, env: runtimeEnv }) : null;
   // WF-Claude-Proposals (#162, Slice 2): alte pending Proposals von Claude vorentscheiden.
   const claudeProposalsJob = tenantRunner ? createClaudeProposalsJob({ tenantRunner, anthropic, mailer, env: runtimeEnv }) : null;
+  // WF5 (#162, Slice 2): MHD/Low-Stock-Warnungen synchronisieren + Digest-Mail (Resend).
+  const wf5MonitorJob = tenantRunner ? createWf5MonitorJob({ tenantRunner, mailer, env: runtimeEnv }) : null;
 
   // Heartbeat (Slice 0) + portierte idempotente Jobs (Slice 1). Nächtliche Jobs nutzen
   // dailyAt (drift-tolerant), nicht node-cron (auf dem WSL-Mini unzuverlässig).
@@ -279,6 +282,11 @@ function buildWorker(env = process.env) {
   if (claudeProposalsJob) {
     schedules.push({ name: claudeProposalsJob.key, dailyAt: env.WORKER_PROPOSALS_AT || '04:30', kind: 'tenant',
       run: () => claudeProposalsJob.run() });
+  }
+  // WF5 MHD/Low-Stock (n8n: scheduleTrigger 0 7 * * * ⇒ täglich 07:00) → per Mandant, dailyAt.
+  if (wf5MonitorJob) {
+    schedules.push({ name: wf5MonitorJob.key, dailyAt: env.WORKER_WF5_AT || '07:00', kind: 'tenant',
+      run: () => wf5MonitorJob.run() });
   }
   // Worker-Job-Health-Monitor (audit.workflow_runs) → intervalMs. KEIN runOnStart
   // (erst nach den ersten Job-Läufen prüfen, sonst NO_SUCCESS-Fehlalarm).
