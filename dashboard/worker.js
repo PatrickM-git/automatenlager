@@ -157,10 +157,13 @@ function buildWorker(env = process.env) {
   const { createWorkflowRunRecorder } = require('./lib/workflow-runs.js');
   const { createMatViewRefreshJob } = require('./lib/jobs/matview-refresh.js');
   const { createGuvAggregateJob } = require('./lib/jobs/guv-aggregate.js');
+  const { createGuvBackfillJob } = require('./lib/jobs/guv-backfill.js');
   const { createDbValidationJob } = require('./lib/jobs/db-validation.js');
   const { createNayaxDevicesSyncJob } = require('./lib/jobs/nayax-devices-sync.js');
   const { createWorkerHealthMonitorJob } = require('./lib/jobs/monitor.js');
+  const { createClaudeProposalsJob } = require('./lib/jobs/claude-proposals.js');
   const { buildMailerFromEnv } = require('./lib/jobs/mailer.js');
+  const { buildAnthropicFromEnv } = require('./lib/anthropic-client.js');
 
   function loadLocalEnv() {
     // Minimaler .env.local-Leser (Projekt- + dashboard-Ebene), wie server.js.
@@ -213,6 +216,11 @@ function buildWorker(env = process.env) {
   // Jobs laufen, mailen aber nicht — kein fehlender Key bricht etwas).
   const { mailer, kind: mailerKind } = buildMailerFromEnv(runtimeEnv);
   console.log(`[worker] Mailer: ${mailerKind}`);
+  // Anthropic-Client (#162): Key aus .env.local (ANTHROPIC_API_KEY). „disabled" ohne Key
+  // ⇒ Claude-Jobs laufen, rufen die API aber nicht (kein fehlender Key bricht den Worker).
+  const { createMessage: anthropicCreateMessage, kind: anthropicKind } = buildAnthropicFromEnv(runtimeEnv);
+  console.log(`[worker] Anthropic: ${anthropicKind}`);
+  const anthropic = anthropicCreateMessage ? { createMessage: anthropicCreateMessage } : null;
 
   // Infra-Jobs (mandantenübergreifend, über die BYPASSRLS-Verbindung).
   const matViewRefreshJob = infraRunner ? createMatViewRefreshJob({ infraRunner }) : null;
@@ -220,9 +228,15 @@ function buildWorker(env = process.env) {
   const workerMonitorJob = infraRunner ? createWorkerHealthMonitorJob({ exec: infraRunner.exec, mailer, env: runtimeEnv }) : null;
   // Per-Mandant-Jobs (durch die Tür, GUC je Mandant). WF8 GuV + DB-Validierung (Slice 1).
   const guvAggregateJob = tenantRunner ? createGuvAggregateJob({ tenantRunner }) : null;
+  // GuV-Backfill (Issue #172): füllt GuV-Lücken aus dem freigegebenen Nayax-Roh-Export
+  // automatisch, wenn Nayax keine/unvollständige Zahlen lieferte. Quelle (Sheet-ID) via
+  // GUV_BACKFILL_SHEET_ID; Default-Fetcher in der Factory. Warnungen über den Logger.
+  const guvBackfillJob = tenantRunner ? createGuvBackfillJob({ tenantRunner, env: runtimeEnv, logger: (...a) => console.warn('[guv-backfill]', ...a) }) : null;
   const dbValidationJob = tenantRunner ? createDbValidationJob({ tenantRunner, mailer, env: runtimeEnv }) : null;
   // Nayax-Devices-Sync: ein Token = ein Mandant (NAYAX_TENANT_ID oder einziger Registry-Mandant).
   const nayaxDevicesSyncJob = (tenantDb && directory) ? createNayaxDevicesSyncJob({ db: tenantDb, directory, env: runtimeEnv }) : null;
+  // WF-Claude-Proposals (#162, Slice 2): alte pending Proposals von Claude vorentscheiden.
+  const claudeProposalsJob = tenantRunner ? createClaudeProposalsJob({ tenantRunner, anthropic, mailer, env: runtimeEnv }) : null;
 
   // Heartbeat (Slice 0) + portierte idempotente Jobs (Slice 1). Nächtliche Jobs nutzen
   // dailyAt (drift-tolerant), nicht node-cron (auf dem WSL-Mini unzuverlässig).
@@ -243,6 +257,14 @@ function buildWorker(env = process.env) {
     schedules.push({ name: guvAggregateJob.key, intervalMs: Number(env.WORKER_GUV_MS) || 15 * 60 * 1000, kind: 'tenant',
       run: () => guvAggregateJob.run() });
   }
+  // GuV-Backfill (Issue #172): Lücken-Fallback aus dem Roh-Export → per Mandant durch
+  // die Tür, intervalMs (drift-immun; node-cron auf dem WSL-Mini unzuverlässig).
+  // Idempotent (Dedup + ON CONFLICT guv_key) ⇒ häufige Läufe unschädlich. Default alle
+  // 6 h — selten genug, das externe Sheet nicht zu hämmern, oft genug für zeitnahe Lücken.
+  if (guvBackfillJob) {
+    schedules.push({ name: guvBackfillJob.key, intervalMs: Number(env.WORKER_GUV_BACKFILL_MS) || 6 * 60 * 60 * 1000, kind: 'tenant',
+      run: () => guvBackfillJob.run() });
+  }
   // WF-Val DB-Konsistenz-Checks (n8n: cron 0 15 4 ⇒ täglich 04:15) → per Mandant, dailyAt.
   if (dbValidationJob) {
     schedules.push({ name: dbValidationJob.key, dailyAt: env.WORKER_DBVAL_AT || '04:15', kind: 'tenant',
@@ -252,6 +274,11 @@ function buildWorker(env = process.env) {
   if (nayaxDevicesSyncJob) {
     schedules.push({ name: nayaxDevicesSyncJob.key, dailyAt: env.WORKER_NAYAX_AT || '04:20', kind: 'infra',
       run: () => nayaxDevicesSyncJob.run() });
+  }
+  // WF-Claude-Proposals (n8n: cron 0 30 4 ⇒ täglich 04:30) → per Mandant, dailyAt.
+  if (claudeProposalsJob) {
+    schedules.push({ name: claudeProposalsJob.key, dailyAt: env.WORKER_PROPOSALS_AT || '04:30', kind: 'tenant',
+      run: () => claudeProposalsJob.run() });
   }
   // Worker-Job-Health-Monitor (audit.workflow_runs) → intervalMs. KEIN runOnStart
   // (erst nach den ersten Job-Läufen prüfen, sonst NO_SUCCESS-Fehlalarm).
