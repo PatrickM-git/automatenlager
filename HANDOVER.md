@@ -8,8 +8,10 @@
 Issue **#163** (datenkritische Ingestion im Schattenbetrieb) via `start-issue`→`tdd`, **komplett**:
 WF3 (Nayax-Verkäufe) + WF1/WF2 (Rechnungseingang) + WF4 (Slot-Write). Alle Schreibpfade durch die
 Mandanten-Tür (`db.tx`, RLS-GUC, explizites `tenant_id`), faithful zur `pgw_write()`-Semantik
-(Pre-Flight-Dump gegen die echte Mini-DB, inkl. Trigger `apply_stock_movement`). **Noch nicht deployt**;
-Cutover ist bewusst deploy-/flag-gated (Schattenbetrieb Default).
+(Pre-Flight-Dump gegen die echte Mini-DB, inkl. Trigger `apply_stock_movement`). PR #197 gemergt → **#163 CLOSED**.
+**DEPLOYT auf den Mini** (`d673c96`, Worker+Dashboard restartet, `/health` ok): `wf3-nayax-fifo` (01:00) +
+`wf1-invoice-intake` (10 min) laufen im **Schattenbetrieb** (kein Schreiben). **Cutover = getracktes Issue #198**
+(zeit-gegatet: ≥7 deckungsgleiche Schattenläufe; Flag `WF3_CUTOVER`/`WF1_CUTOVER` + n8n deaktivieren).
 
 ### ✅ WF3 Nayax-Verkäufe — fertig (Code + Tests + Worker + Doku)
 - **`dashboard/lib/jobs/nayax-sales.js`** (neu) — faithful aus Mini-WF3 portiert:
