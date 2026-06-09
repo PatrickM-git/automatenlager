@@ -163,6 +163,7 @@ function buildWorker(env = process.env) {
   const { createWorkerHealthMonitorJob } = require('./lib/jobs/monitor.js');
   const { createClaudeProposalsJob } = require('./lib/jobs/claude-proposals.js');
   const { createWf5MonitorJob } = require('./lib/jobs/wf5-monitor.js');
+  const { createPicklistPollJob } = require('./lib/jobs/picklist.js');
   const { buildMailerFromEnv } = require('./lib/jobs/mailer.js');
   const { buildAnthropicFromEnv } = require('./lib/anthropic-client.js');
 
@@ -240,6 +241,11 @@ function buildWorker(env = process.env) {
   const claudeProposalsJob = tenantRunner ? createClaudeProposalsJob({ tenantRunner, anthropic, mailer, env: runtimeEnv }) : null;
   // WF5 (#162, Slice 2): MHD/Low-Stock-Warnungen synchronisieren + Digest-Mail (Resend).
   const wf5MonitorJob = tenantRunner ? createWf5MonitorJob({ tenantRunner, mailer, env: runtimeEnv }) : null;
+  // WF9 Pickliste (#162, Slice 2): Drive→OCR→Slot-Verteilung. Der Google-Drive-Client
+  // ist eine DEPLOY-Abhängigkeit (OAuth, nicht in .env.local) ⇒ hier null ⇒ Job „disabled".
+  // Sobald ein Drive-Client gebaut ist, hier injizieren und der Job registriert sich.
+  const driveClient = null;
+  const picklistJob = tenantRunner ? createPicklistPollJob({ tenantRunner, drive: driveClient, anthropic, env: runtimeEnv }) : null;
 
   // Heartbeat (Slice 0) + portierte idempotente Jobs (Slice 1). Nächtliche Jobs nutzen
   // dailyAt (drift-tolerant), nicht node-cron (auf dem WSL-Mini unzuverlässig).
@@ -287,6 +293,12 @@ function buildWorker(env = process.env) {
   if (wf5MonitorJob) {
     schedules.push({ name: wf5MonitorJob.key, dailyAt: env.WORKER_WF5_AT || '07:00', kind: 'tenant',
       run: () => wf5MonitorJob.run() });
+  }
+  // WF9 Pickliste → Drive-Polling (intervalMs). Nur registrieren, wenn ein Drive-Client
+  // vorhanden ist (sonst disabled — kein Schedule, kein Fehler).
+  if (picklistJob && !picklistJob.disabled) {
+    schedules.push({ name: picklistJob.key, intervalMs: Number(env.WORKER_WF9_MS) || 5 * 60 * 1000, kind: 'tenant',
+      run: () => picklistJob.run() });
   }
   // Worker-Job-Health-Monitor (audit.workflow_runs) → intervalMs. KEIN runOnStart
   // (erst nach den ersten Job-Läufen prüfen, sonst NO_SUCCESS-Fehlalarm).
