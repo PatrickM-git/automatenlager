@@ -451,18 +451,30 @@ test('POST /api/v2/onboarding/start is idempotent (same action_key for same prod
   assert.equal(res1.json().action_key, res2.json().action_key);
 });
 
-test('GET /api/v2/correction-cases annotates started product_key as onboarding_started', async (t) => {
+test('GET /api/v2/onboarding/started-keys returns a freshly started product_key', async (t) => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
   const port = await getFreePort();
+  // Eigenes, leeres Audit-Log pro Lauf: der Test darf NICHT von akkumuliertem
+  // lokalem logs/onboarding-starts.jsonl abhängen (sonst grün im Dev-Checkout,
+  // rot im frischen Worktree). Pfad via DASHBOARD_ONBOARDING_AUDIT_LOG isoliert.
+  const auditLog = path.join(os.tmpdir(), `onboarding-starts-test-${process.pid}-${port}.jsonl`);
+  fs.rmSync(auditLog, { force: true });
+
+  // Kein PG konfiguriert ⇒ requireCaseAccess-Tor inaktiv (Dev/Test), der POST
+  // hängt real an das Audit-Log an — so testet der Flow POST→GUI wirklich.
   const child = await startDashboardFull(port, {
     DASHBOARD_ADMIN_LOGIN: 'admin@example.test',
-    DASHBOARD_V2_PG_URL: 'postgresql://fake:fake@127.0.0.1:5999/fake',
+    DASHBOARD_ONBOARDING_AUDIT_LOG: auditLog,
   });
-  t.after(() => child.kill());
+  t.after(() => { child.kill(); fs.rmSync(auditLog, { force: true }); });
 
-  await postRequest(port, '/api/v2/onboarding/start', {
+  const post = await postRequest(port, '/api/v2/onboarding/start', {
     product_key: 'RESOLVED_PRODUCT',
     case_id: 'unknown_RESOLVED_PRODUCT',
   });
+  assert.equal(post.status, 200);
 
   const res = await request(port, '/api/v2/onboarding/started-keys');
   assert.equal(res.status, 200);
