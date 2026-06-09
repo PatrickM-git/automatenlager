@@ -75,7 +75,43 @@ function wareneinsatzCostBasis(qty, unitCostNet, mwstSatz, opts = {}) {
   return round2(q * net * costBasisMultiplier(mwstSatz, opts));
 }
 
+// Boolean aus bool ODER String 'true'/'false' (case-insensitiv); sonst null
+// (= „nicht interpretierbar / abwesend"), konsistent zu sanitizeOverride.
+function coerceBoolOrNull(v) {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase();
+    if (s === 'true') return true;
+    if (s === 'false') return false;
+  }
+  return null;
+}
+
+// Issue #176: EINE gemeinsame Lesefunktion für das Besteuerungsmodell aus der rohen
+// classification_settings-JSONB. Beseitigt die Live/Nacht-Divergenz, bei der der
+// Nacht-Job nur snake_case las und deshalb für den Kleinunternehmer fälschlich netto
+// buchte.
+//   - camelCase `kleinunternehmerAktiv` ist KANONISCH (wie Live/economics.js).
+//   - snake_case `kleinunternehmer_aktiv` ist Legacy-Fallback.
+//   - sind BEIDE vorhanden, GEWINNT camelCase und es wird ein Warning geloggt.
+//   - akzeptiert bool und 'true'/'false' (case-insensitiv); fehlt/unlesbar ⇒ false.
+function readKleinunternehmer(rawConfig, opts = {}) {
+  const cfg = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
+  const warn = (opts.logger && typeof opts.logger.warn === 'function')
+    ? (m) => opts.logger.warn(m)
+    : (m) => console.warn(m);
+  const camel = coerceBoolOrNull(cfg.kleinunternehmerAktiv);
+  const snake = coerceBoolOrNull(cfg.kleinunternehmer_aktiv);
+  if (camel !== null && snake !== null) {
+    warn('Config contains both kleinunternehmerAktiv and kleinunternehmer_aktiv; using camelCase.');
+  }
+  if (camel !== null) return camel;
+  if (snake !== null) return snake;
+  return false;
+}
+
 module.exports = {
   ekFromNet, wareneinsatzNet, wareneinsatzCostBasis, costBasisMultiplier,
+  readKleinunternehmer, coerceBoolOrNull,
   toNum, round2, round4,
 };
