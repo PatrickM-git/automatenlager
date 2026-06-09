@@ -319,6 +319,14 @@ function auditGuestAccess(viewer, event, details = {}) {
   auditAction(viewer, event, details, 'guest_view');
 }
 
+// Onboarding-Start-Audit-Log: Schreib- (POST /onboarding/start) und Lesepfad
+// (GET /onboarding/started-keys) müssen identisch sein. Via
+// DASHBOARD_ONBOARDING_AUDIT_LOG überschreibbar (Test-Isolation, sonst hängt der
+// started-keys-Test von akkumuliertem lokalem JSONL ab).
+function onboardingAuditPath() {
+  return process.env.DASHBOARD_ONBOARDING_AUDIT_LOG || path.join(__dirname, 'logs', 'onboarding-starts.jsonl');
+}
+
 function clean(value) {
   return String(value ?? '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -4060,7 +4068,7 @@ const server = http.createServer(async (req, res) => {
         }
       }
       const auditEntry = buildOnboardingStartAuditEntry(viewer, payload, wfResult);
-      const auditPath = path.join(__dirname, 'logs', 'onboarding-starts.jsonl');
+      const auditPath = onboardingAuditPath();
       try {
         fs.mkdirSync(path.dirname(auditPath), { recursive: true });
         fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
@@ -4076,7 +4084,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (parsed.pathname === '/api/v2/onboarding/started-keys' && req.method === 'GET') {
-      const auditPath = path.join(__dirname, 'logs', 'onboarding-starts.jsonl');
+      const auditPath = onboardingAuditPath();
       const started_keys = [];
       try {
         const lines = fs.readFileSync(auditPath, 'utf8').split('\n').filter(Boolean);
