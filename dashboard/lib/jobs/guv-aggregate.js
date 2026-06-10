@@ -231,7 +231,8 @@ async function readGuvInputs(db, tenant) {
            SELECT sb.batch_key FROM automatenlager.stock_batches sb
            WHERE sb.product_id = st.product_id AND sb.tenant_id = st.tenant_id
              AND sb.received_at <= st.settlement_at::date
-             AND sb.status IN ('aktiv','active','reserve','leer')
+             AND sb.status IN ('aktiv','active','reserve')
+             AND sb.remaining_qty > 0
            ORDER BY sb.received_at ASC, sb.batch_id ASC LIMIT 1
          ) ek ON TRUE
          WHERE st.tenant_id = $1

@@ -295,3 +295,45 @@ test('#176 GuV LIVE: Kleinunternehmer-Mandant bucht BRUTTO (cost_basis brutto, r
     }
   });
 });
+
+test('B1-fix LIVE: leere Charge (remaining_qty=0) wird ignoriert — neuere Charge mit Bestand liefert den EK', async (t) => {
+  await inSandbox(t, async (client) => {
+    const { acme } = await seedAcmeGlobex(client);
+    // Alte, bereits leere Charge (received früher, unit_cost absichtlich viel höher → sichtbarer Unterschied).
+    await client.query(
+      `INSERT INTO automatenlager.stock_batches
+         (batch_key, product_id, initial_qty, remaining_qty, unit_cost_net, status, received_at, tenant_id)
+       VALUES ('b_acme_old_depleted', $1, 30, 0, 9.00, 'aktiv', '2026-04-01', 'acme')`,
+      [acme.productId]);
+    // Die bestehende Charge aus seedAcmeGlobex (unit_cost=5, remaining=30, received '2026-05-01') bleibt.
+    await client.query(
+      `INSERT INTO automatenlager.sales_transactions
+         (nayax_transaction_id, machine_id, product_id, product_name_raw, quantity,
+          gross_amount, net_amount, vat_amount, settlement_at, processing_status, tenant_id)
+       VALUES ('tx_b1fix', $1, $2, $3, 2, 20, 20, 0, '2026-06-05T10:00:00Z', 'OK', 'acme')`,
+      [acme.machineId, acme.productId, acme.productName]);
+    await client.query(
+      `INSERT INTO automatenlager.classification_settings (tenant_id, config, updated_at)
+         VALUES ('__default__', $1::jsonb, now())
+       ON CONFLICT (tenant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+      [JSON.stringify({ kleinunternehmerAktiv: false })]);
+
+    for (const n of [22, 23, 24, 25, 26, 28, 32]) await applyMigration(client, n);
+    await client.query('SET ROLE automatenlager_app');
+    try {
+      const db = createTenantDb({ pool: sandboxTxPool(client) });
+      const run = await guv.runGuvAggregateForTenant(db, 'acme');
+      assert.equal(run.inserted, 1, 'ein Tagesposten eingefügt');
+      const rows = (await db.read({
+        tenant: 'acme', tables: ['guv_daily'],
+        text: `SELECT cost_of_goods FROM automatenlager.guv_daily WHERE tenant_id = $1 AND guv_key LIKE '2026-06-05|%'`,
+      })).rows;
+      assert.equal(rows.length, 1, 'genau ein Tagesposten');
+      // Neue nicht-leere Charge (unit_cost=5): qty2 × 5 = 10.
+      // Ohne Fix würde die alte leere Charge (unit_cost=9) ausgewählt → cost=18.
+      assert.equal(Number(rows[0].cost_of_goods), 10, 'Wareneinsatz aus der nicht-leeren Charge (5€), NICHT der leeren (9€)');
+    } finally {
+      await client.query('RESET ROLE');
+    }
+  });
+});
