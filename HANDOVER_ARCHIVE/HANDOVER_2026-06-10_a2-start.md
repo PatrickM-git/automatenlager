@@ -1,42 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-10_a2-start.md`.
-
-## Session 2026-06-10 (nachmittags) — A2 Abschluss: #108 + #206 + BYPASSRLS-Test + EK-Issues (#209/#210)
-
-**Commit `87ecb21`** auf `main` gepusht. Suite 25/25 live-Tests grün (inkl. alle vorher fehlgeschlagenen).
-
-### #108 classification_settings.mandant_id → tenant_id — KOMPLETT (Code + Migration + Tests)
-- **Migration `0032`** (`0032-classification-settings-tenant-id.sql`): idempotentes RENAME + RLS-Policy-Neuerstellung (DROP/CREATE mit `tenant_id`). **Bereits auf Mini-DB angewendet** (via node-pg direkt, SSH-Tunnel aktiv).
-- **`category-config.js`**: `tenantColumn()`-Bridge-Funktion komplett entfernt; `readOverride()`/`writeOverride()` hardkodiert auf `tenant_id`.
-- **`guv-aggregate.js`** + **`guv-backfill.js`**: je eine `mandant_id`→`tenant_id` in SQL-Abfragen.
-- **`db-schema.js`**: `classification_settings` in `TENANT_REQUIRED_TABLES` aufgenommen.
-- Tests: alle `mandant_id`→`tenant_id` aktualisiert; Migrations-Listen um 32 erweitert.
-
-### #206 Shadow-Diff: Datum-Normalisierung — KOMPLETT (Code + Tests)
-- **`nayax-sales.js`**: `movementBaseKey()` strippt `_wf3_YYYY-MM-DD`-Suffix; `equal`-Definition erlaubt `onlyIntended > 0` (neue Tx seit n8n-Lauf legitim). 2 neue Tests.
-- **Shadow-Status** (`workflow_state.CUTOVER_STREAK_WF3`): `streak=0`, letzter Diff 2026-06-09 **vor** dem Fix (deploy-gated). Nächster Lauf nach Mini-Deploy sollte `equal=true` → Cutover-Mail.
-
-### Migration 0033 + Sicherheitsnachweis — KOMPLETT (Code), deploy-gated
-- **Migration `0033`** (`0033-revoke-n8n-bypassrls.sql`): `ALTER ROLE n8n_app NOBYPASSRLS` — DEPLOY-GATED auf #198.
-- **`dashboard-bypassrls-security.test.js`**: SKIPpt wenn n8n_app noch BYPASSRLS=true.
-
-### Migrationen 0010/0026 sandbox-idempotent gegen post-0032-DB gepatcht
-- **0010**: dynamische Spalterkennung (`mandant_id` vs `tenant_id`) via `SELECT INTO cs_col`.
-- **0026**: `DO`-Block mit `EXECUTE format('%I', col)` — keine hartkodierten `mandant_id`-Referenzen mehr.
-
-### EK-Preis-Issues geöffnet
-- **[#210](https://github.com/PatrickM-git/automatenlager/issues/210)** — Verdacht MwSt-Doppelzählung: `unit_cost_net` könnte Brutto-Werte enthalten. Suspektes Muster: Red Bull Spring `1.7612 = 1.48 × 1.19`. **Klärung gegen echte Rechnung nötig, bevor Code geändert wird.**
-- **[#209](https://github.com/PatrickM-git/automatenlager/issues/209)** — Admin-UI für EK-Korrektur + historisches Restatement (wie 0030, aber für `unit_cost_net`).
-
-## Nächste Schritte
-
-1. **Mini-Deploy** (`git pull --ff-only` + Container-Restart) — damit #206-Fix aktiv wird.
-2. **Cutover beobachten**: Nächste Nacht 01:00 WF3-Shadow → wenn `equal=true` → Cutover-Mail. Dann `WF3_CUTOVER=1` setzen + n8n WF3 deaktivieren.
-3. **EK-Klärung** (#210): eine Originalrechnung holen und `unit_cost_net` mit Netto-Stückpreis vergleichen. Falls Brutto → Korrektur-Issue implementieren.
-4. **#209 Admin-EK-Korrektur** (nach #210-Klärung).
-5. **Nach Cutover**: Migration 0031 (deploy-gated) + 0033 (BYPASSRLS) anwenden.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-09_slice2-cutover.md`.
 
 ## Session 2026-06-10 (früh) — Stufe 6 Slice 4 (#164) gestartet: **Unit 1 = #111 fertig (Code, deploy-gated)** + Cutover-Fenster auf 1 Tag
 
