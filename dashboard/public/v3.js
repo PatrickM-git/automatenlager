@@ -1045,12 +1045,14 @@
       return Promise.all([
         fetchJson('/api/v2/assortment-slots'),
         fetchJson('/api/v2/products/catalog?q='),
-        fetchJson('/api/v2/viewer').catch(function () { return {}; }),
+        fetchJson('/api/v2/batches').catch(function () { return {}; }), // EK-Chargen für Admin-Korrektur
       ]).then(function (results) {
         var slots   = (results[0] && results[0].data && results[0].data.slots) || [];
         var lagerOhneSlot = (results[0] && results[0].data && results[0].data.lagerOhneSlot) || [];
         var search  = (results[1] && results[1].results) || [];
-        var viewer  = (results[2] && results[2].viewer) || {};
+        var batchEk = results[2]; // { ok, is_admin, canTriggerActions, batches }
+        _lagerCanEdit = !!(batchEk && batchEk.canTriggerActions);
+        var ekBatches = (batchEk && batchEk.ok && batchEk.batches) || [];
         if (slots.length === 0) { return { status: 'empty' }; }
         return {
           status: 'ok',
@@ -1058,7 +1060,8 @@
             machines: groupSlotsByMachine(slots),
             palette:  slotBuildPalette(search),
             lagerOhneSlot: lagerOhneSlot,
-            canEdit:  !!viewer.canTriggerActions,
+            canEdit:  !!(batchEk && batchEk.canTriggerActions),
+            ekBatches: ekBatches,
           },
         };
       }).catch(function () { return { status: 'error' }; });
@@ -3393,6 +3396,8 @@
         }).join('') +
       '</div>';
 
+    var ekBatches = (data && data.ekBatches) || [];
+
     return '' +
       machineChips +
       turnoverFilter +
@@ -3403,6 +3408,7 @@
         palettePanel +
       '</div>' +
       renderLagerOhneSlot(lagerOhneSlot, canEdit) +
+      renderEkChargenSection(ekBatches) +
       '<div class="v3-slots-fillpanel" data-slots-fillpanel hidden></div>';
     // Dialog + Toast werden auf document.body portiert (mountSlotDialog/showSlotToast),
     // damit position:fixed am Viewport haftet (Vorfahren der View tragen ein transform).
@@ -4626,6 +4632,7 @@
       } else if (route.path === '/slots' && result.slots) {
         viewEl.innerHTML = pageHead(route) + renderSlotsPage(result.slots);
         bindSlotEditor(result.slots);
+        bindEkChargenEdit();
         slotsApplyFocus();
       } else if (route.path === '/automaten' && result.automaten) {
         viewEl.innerHTML = pageHead(route) + renderAutomatenPage(result.automaten);
