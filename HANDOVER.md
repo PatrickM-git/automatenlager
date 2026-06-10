@@ -12,13 +12,13 @@
 - **Status n8n-Ablösung:** Fundament + nicht-kritische Jobs LIVE. WF3/WF1 = Schatten. Nach 1 deckungsgleicher Nacht → Cutover-Mail → n8n WF3/WF1 deaktivieren, dann WF2/WF4 + Migration 0033 (BYPASSRLS-Entzug).
 
 ### EK/Pfand-Kostenbasis — Reconciliation gegen Metro-Rechnungen (Steuerberater-Bericht)
-**Entscheidung des Nutzers:** Pfand gehört in die Warenkosten (Automatengeschäft: Kunde nimmt Flasche mit → Pfand nicht rückholbar). Kanonisch: `unit_cost_net` = **Netto + Pfand**; GuV = `× MwSt` = brutto. Memory `ek-pfand-kostenbasis`.
-- **Aktive Charge korrigiert:** Lichtenauer still 0,35 (letzte Session fälschlich = Pfand entfernt) → **0,7364** (0,350 + 0,386 Kistenpfand 4,25÷11).
+**Entscheidung des Nutzers:** Nur **Flaschen-/Dosenpfand 0,25 €/Stück** gehört in die Warenkosten (Kunde nimmt Flasche → verloren); **Kistenpfand NICHT** (leere Kiste wird abgegeben → rückholbar). Kanonisch: `unit_cost_net` = **Netto + 0,25 Pfand**; GuV = `× MwSt` = brutto. Memory `ek-pfand-kostenbasis`.
+- **Aktive Lichtenauer-Chargen korrigiert:** still → **0,600** (0,350+0,25), medium → **0,761** (0,511+0,25). (Zwischenschritt 0,7364 mit Kistenpfand 0,386 war falsch — 4,25 €/Kiste = 11×0,25 + 1,50 Kistenpfand.)
 - **Sheet-Befund:** Spalte `unit_cost` mischt Basen — Rechnungs-Import-Zeilen = netto+Pfand (OHNE MwSt), 02.05-Bestandsaufnahme-Zeilen = brutto (MIT MwSt, ×1,19). Daher GuV teils Doppel-MwSt (z.B. Red Bull Spring 2,09 = 1,7612×1,19).
 - **guv_daily restated** (reversibel, Backup `automatenlager.guv_daily_bak_20260610`), je Produkt EINHEITLICH netto+Pfand × MwSt:
-  - Lichtenauer still → **0,88** (war wild: 1,05/0,85/0,42), medium → **1,07** (zwei 0,00-Bug-Zeilen gefixt)
-  - Red Bull → **1,29** (netto+Pfand 1,08), Red Bull Spring → **1,76** (netto+Pfand 1,48; KEIN Verlust mehr, VK 2,00 > 1,76)
-  - Coca Cola Zero → **0,99** (netto 0,58 + 0,25)
+  - Lichtenauer still → **0,71** (war wild: 1,05/0,85/0,42), medium → **0,91** (zwei 0,00-Bug-Zeilen gefixt) — = Sheet-Spalte G
+  - Red Bull → **1,29** (netto 0,83+0,25 DPG), Red Bull Spring → **1,76** (netto 1,23+0,25; KEIN Verlust mehr, VK 2,00 > 1,76)
+  - Coca Cola Zero → **0,99** (netto 0,58 + 0,25 DPG)
 - **Gesamt-Audit:** Rest aller Produkte im Rundungsbereich (≤0,03) korrekt.
 
 ### NOCH OFFEN (EK)
