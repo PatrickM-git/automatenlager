@@ -1,204 +1,141 @@
 # Architektur
 
+> Stand 2026-06-10. Detailtiefe und Historie: `HANDOVER.md`, `docs/ROADMAP.md`,
+> `docs/specs/*`. Begriffe: `docs/UBIQUITOUS_LANGUAGE.md`.
+
 ## Systemueberblick
+
+Das System ist ein mandantenfaehiges Automatenlager auf PostgreSQL (Schema
+`automatenlager`) mit einem Node.js-Dashboard als Leitstand und einem
+Worker-Dienst, der die frueheren n8n-Workflows als Backend-Jobs abloest
+(Stufe 6). Google Sheets ist als Datenschicht **abgeloest** (SQL-only); die
+Sheets-Schreibknoten in den Workflow-Exporten sind bewusst deaktiviert. n8n
+laeuft als Alt-System auf dem HP Mini weiter, bis der Cutover (#198) die
+letzten Schatten-Jobs (WF1/WF3) abloest.
 
 ```mermaid
 flowchart LR
-  Nayax["Nayax / Lynx API"] --> WF3["WF3 Verkaeufe + FIFO"]
-  Moma["Moma App"] --> WF4["WF4 MDB-/Slot-Zuordnung"]
-  Invoice["Rechnung / Einkauf"] --> WF1["WF1 Rechnungseingang"]
-  WF1 --> WF2["WF2 Produkt-/Lagerfreigabe"]
-  WF2 -->|optional Slot einsetzen| WF4
-  WF3 -->|MDB-Abweichung optional| WF4
-  WF3 --> Sheets["Google Sheets"]
-  WF2 --> Sheets
-  WF4 --> Sheets
-  WF5["WF5 MHD + Lagercheck"] --> Sheets
-  WF8["WF8 GuV Aggregator"] --> Sheets
-  Sheets --> Dashboard["Lokales Dashboard"]
-  N8N["n8n API"] --> Dashboard
-  Dashboard -->|Webhook/Form| N8N
-  WF5 --> Mail["Mail-Zusammenfassung"]
+  Nayax["Nayax / Lynx API"] --> Worker["Worker: dashboard/worker.js
+Jobs in dashboard/lib/jobs/*"]
+  Drive["Google Drive (Picklisten-PDF)"] --> Worker
+  Claude["Claude API (OCR, Proposals)"] --> Worker
+  Worker --> PG[("PostgreSQL
+Schema automatenlager
+RLS je Mandant (Stufe 5)")]
+  N8N["n8n auf HP Mini (Alt-System)
+WF1/WF3 im Schattenvergleich"] --> PG
+  PG --> Server["dashboard/server.js (API v2)
+Mandanten-Tuer lib/tenant-db.js"]
+  Server --> UI["Dashboard v3 (public/v3.html)"]
+  TS["Tailscale Serve
+(Identity-Header, Default-Deny)"] --> Server
+  Worker --> Mail["Resend (Mail-Digest)"]
+  Worker --> GH["GitHub Issues (Cutover-/Anomalie-Meldungen)"]
 ```
 
-Das System besteht aus n8n-Workflows, Google Sheets als Arbeits- und Logschicht, Nayax/Moma als operative Datenquelle und einem lokalen Dashboard als Leitstand. Das Dashboard liest lokale Workflow-JSONs, Live-n8n-Metadaten und Google-Sheets-/XLSX-Daten und bietet Buttons fuer die wichtigsten Anwendungsfaelle.
+## Schichten
 
-## Workflow-Rollen
-
-| Workflow | Rolle | Wichtigste Verantwortung |
+| Schicht | Komponente | Verantwortung |
 |---|---|---|
-| WF0 | Reparatur | Einmaliger Backfill fehlender `product_slot_id` fuer aktive Slotzeilen |
-| WF1 | Rechnungseingang | Rechnung einlesen, strukturieren, gegen Stammdaten pruefen, WF2 starten |
-| WF2 | Freigabe / Produktstamm | Produktstamm, Alias, Lagercharge und Rechnungsvorschlaege pflegen |
-| WF3 | Verkauf / FIFO | Nayax-Verkaeufe verarbeiten, FIFO abbuchen, Transaktionen loggen |
-| WF4 | Slot-Historie | Aktive MDB-/Slot-Zuordnungen setzen, schliessen und historisieren |
-| WF5 | Monitoring | MHD und niedrige Lagerbestaende pruefen, Hinweise loggen, Mail senden |
-| WF8 | GuV | Verkaufstransaktionen zu GuV-Tagesposten aggregieren |
+| Daten | PostgreSQL `automatenlager` | Einzige Wahrheit; 33+ idempotente Migrationen in `dashboard/db-migrations/`; RLS-Backstop ueber Rolle `automatenlager_app` (fail-closed, GUC `automatenlager.current_tenant`) |
+| Zugriff | `dashboard/lib/tenant-db.js` (Mandanten-Tuer) | EINZIGE Lese-/Schreibschicht der App; fail-closed; `read`/`write`/`tx`; strukturell erzwungen durch `lib/query-filter-guard.js` (build-blockierend ueber die Testsuite) |
+| Auth | `dashboard/lib/auth.js` + `lib/tenant-directory.js` | Default-Deny, exakte Allowlist (`DASHBOARD_ADMIN_LOGIN`), Tailscale-Header nur von vertrauenswuerdiger Quelle, Break-Glass read-only |
+| API/UI | `dashboard/server.js` + `public/v3.*` | API v2 (`/api/v2/...`), Dashboard v3 Multipage, Gast = read-only |
+| Jobs | `dashboard/worker.js` + `lib/jobs/*` | n8n-Abloesung (Stufe 6): Intervall-Scheduler (setInterval — node-cron ist auf dem WSL2-Mini unzuverlaessig), Telemetrie in `audit.workflow_runs`, externe HTTP-Calls mit hartem Timeout (`lib/fetch-timeout.js`) |
+| Alt-System | n8n (HP Mini) + `WF*.json`-Exporte im Repo-Root | Laeuft bis Cutover #198; WF1/WF3 werden im Schatten verglichen (`lib/jobs/shadow-harness.js`, `cutover-monitor.js`) |
 
-## Zentrale Datenfluesse
+## Workflow-Rollen und Stufe-6-Status
 
-### Rechnung zu Produkt/Lager
+| Workflow | Rolle | Stufe-6-Status |
+|---|---|---|
+| WF0 | Einmaliger product_slot_id-Backfill (Sheets-Aera) | obsolet, stillgelegt |
+| WF1 | Rechnungseingang (PDF -> Claude-OCR -> Vorschlag) | Backend-Port `lib/jobs/invoice-intake.js`, Schattenbetrieb |
+| WF2 | Produktstamm, Aliase, Lagerchargen, Rechnungsvorschlaege | n8n aktiv (Forms); Sheets-Knoten deaktiviert, schreibt SQL via WF-PGW |
+| WF3 | Nayax-Verkaeufe + FIFO-Abbuchung | Backend-Port `lib/jobs/nayax-sales.js`, Schattenbetrieb, Cutover gated (#198) |
+| WF4 | Aktive MDB-/Slot-Zuordnung + Historisierung | Leseseite/Trigger im Dashboard; Schreibport `lib/jobs/wf4-slot-write.js` |
+| WF5 | MHD-/Bestands-Monitoring + Mail | Backend-Port `lib/jobs/wf5-monitor.js` |
+| WF7 | Nachfuellung melden | Dashboard-Endpunkt (`lib/refill-apply.js`), n8n-Webhook abgeloest |
+| WF8 | GuV-Tagesposten-Aggregation | Backend-Port `lib/jobs/guv-aggregate.js` (laeuft produktiv) |
+| WF9 | Pickliste verarbeiten (Drive-PDF) | Backend-Port `lib/jobs/picklist.js` |
+| WF-PGW / WF-Monitor / WF-Val / WF-Drift-Check / WF-Update-Check / WF-Claude-Proposals / WF-MatView-Refresh / WF-Nayax-Devices-Sync | Infrastruktur-/Hilfsworkflows | portiert (`monitor.js`, `db-validation.js`, `claude-proposals.js`, `matview-refresh.js`, `nayax-devices-sync.js`) bzw. obsolet (Drift-/Update-Check) |
 
-1. WF1 verarbeitet Rechnungsdaten.
-2. WF1 startet WF2 mit einem Rechnungsvorschlag.
-3. WF2 prueft und schreibt Produktstamm, Produktalias und Lagercharge.
-4. Wenn das Produkt direkt in einen Automaten eingesetzt werden soll, startet WF2 WF4.
-5. WF4 setzt erst nach Pruefung/Freigabe die aktive Slotbelegung.
+## Mandantenfaehigkeit (Stufen)
 
-### Verkauf zu FIFO-Abbuchung
+- **Stufe 2 (Auth, live):** Mandanten-Registry statt Hartcodes; `resolveViewer`
+  default-deny; Break-Glass `X-Support-Tenant` read-only + auditiert.
+- **Stufe 3 (Lese-Isolation, live):** alle Lesepfade durch die Mandanten-Tuer
+  mit `tenant_id`-Filter; Guard #107 build-blockierend.
+- **Stufe 4 (Schreib-Isolation, live):** Schreibpfade durch `db.tx`
+  (Parent-Pruefung + Write atomar); `tenant_id` im Request-Body => 400 + Audit.
+- **Stufe 5 (RLS-Backstop, live):** Policies (USING + WITH CHECK, einarmiges
+  `current_setting` => fail-closed) auf allen operativen Tabellen; App-Rolle
+  `automatenlager_app` ohne BYPASSRLS; Infra-/App-Verbindungs-Split.
+- **Stufe 6 (n8n-Abloesung, in Arbeit):** Jobs portiert, WF1/WF3 im Schatten;
+  nach Cutover #198 verliert `n8n_app` BYPASSRLS (Migration 0033, deploy-gated).
 
-1. WF3 liest Nayax-Verkaeufe.
-2. Bereits verarbeitete `TransactionID`s werden ueber `Verarbeitete_Transaktionen` erkannt.
-3. Matching erfolgt vorerst ueber `MachineID + ProductName`.
-4. FIFO bucht aktive Lagerchargen ab.
-5. MDB-Code wird als Kontrollsignal genutzt.
-6. Bei MDB-Abweichung wird eine Warnung geschrieben und optional WF4 vorbereitet.
-
-### Verkauf zu GuV
-
-1. WF3 schreibt Verkaufsergebnisse inkl. `umsatz_brutto`, `batch_id_abgebucht` und MDB-Code nach `Verarbeitete_Transaktionen`.
-2. WF8 aggregiert daraus `GuV_Tagesposten` nach Tag, Maschine, MDB-Slot und Produkt.
-3. Das Dashboard liefert ueber `GET /api/guv` Zeitraum-/Maschinenfilter, KPI-Summen und Produkttabellen aus `GuV_Tagesposten`.
-
-### Produkt-/MDB-Wechsel
-
-1. Operative Aenderung erfolgt zuerst in Moma.
-2. WF4 synchronisiert Google Sheets historisiert nach.
-3. Alte aktive Zeile wird geschlossen:
-   - `active = FALSE`
-   - `valid_to_datetime` gesetzt
-4. Neue oder vorhandene passende WF2-Basiszeile wird zur aktiven Slotzeile:
-   - `machine_id`
-   - `mdb_code`
-   - `product_slot_id`
-   - `valid_from_datetime`
-   - `active = TRUE`
-
-## Wichtige Designentscheidungen
+## Fachliche Invarianten (unveraendert gueltig)
 
 ### WF2 und WF4 haben getrennte Eigentuemerschaft
 
-WF2 ist nur fuer Produktstamm, Alias, Lagercharge und Rechnungsvorschlaege zustaendig. WF2 darf nicht blind `active = TRUE`, `machine_id`, `mdb_code`, `product_slot_id`, `valid_from_datetime` oder `valid_to_datetime` setzen.
+WF2 (bzw. der Produktstamm-Pfad) pflegt Produktstamm, Alias, Lagercharge und
+Rechnungsvorschlaege — und darf **nie** aktive Slotbelegungen (`active`,
+`machine_id`, `mdb_code`, `product_slot_id`, `valid_*`) als Nebenwirkung
+setzen. Sonst entstehen doppelte aktive Zeilen und falsche Slot-Historien.
 
-Der Grund: Eine Produktzeile ist nicht automatisch eine Automatenbelegung. Sonst entstehen doppelte aktive Produktzeilen und falsche Slot-Historien.
+### WF4-Pfad ist die einzige Wahrheit fuer aktive Slotbelegung
 
-### WF4 ist die einzige Wahrheit fuer aktive Slotbelegung
+Aktive MDB-/Slot-Zuordnungen, `product_slot_id`, `active = TRUE/FALSE`,
+`valid_from_datetime`/`valid_to_datetime`, Produkt-/MDB-Wechsel und
+Produkttausch laufen ausschliesslich ueber den WF4-Pfad (heute:
+`lib/jobs/wf4-slot-write.js` + Slot-Editor im Dashboard).
 
-WF4 verantwortet:
-
-- aktive MDB-/Slot-Zuordnungen
-- `product_slot_id`
-- `active = TRUE/FALSE`
-- `valid_from_datetime`
-- `valid_to_datetime`
-- Produktwechsel im Automaten
-- MDB-Wechsel
-- Produkttausch im Slot
-
-Damit bleibt die Slot-Historie nachvollziehbar.
-
-### `active = TRUE` bedeutet Slotbelegung
-
-`active = TRUE` bedeutet nicht, dass ein Produkt im Sortiment existiert. Es bedeutet:
+### `active = TRUE` bedeutet Slotbelegung, nicht Produkt-Existenz
 
 ```text
 Dieses Produkt ist aktuell in einer Maschine auf einem MDB-Slot aktiv.
 ```
 
-Globale Produktstammdaten koennen deshalb ohne Maschinen-/Slotdaten existieren.
+Globale Produktstammdaten existieren unabhaengig von Maschinen-/Slotdaten.
 
 ### `product_slot_id` ist historische Belegungs-ID
-
-Format:
 
 ```text
 PS_[machine_id]_[mdb_code]_[product_key]_[valid_from]
 ```
 
-Beispiel:
-
-```text
-PS_457107528_67_SKU_MUNDM_CHOCO_20260506T140000Z
-```
-
 Die ID gehoert zur Slotbelegung, nicht zum globalen Produkt.
 
-### ProductName bleibt vorerst fuehrend
+### Matching: ProductName fuehrend, MDB-Code Kontrollsignal
 
-WF3 stellt noch nicht hart auf MDB-Matching um. Der aktuelle Uebergang:
+Verkaufs-Matching laeuft ueber `MachineID + ProductName`; der MDB-Code ist
+Warn-/Kontrollsignal (`MDB_CODE_CHANGED_FOR_PRODUCT`), blockiert aber keinen
+Verkauf. Zielbild bleibt `machine_id + mdb_code + valid_from/valid_to`.
 
-- Hauptmatching: `MachineID + ProductName`
-- MDB-Code: Kontrollsignal und Warn-/WF4-Ausloeser
-- Verkauf laeuft weiter, wenn ProductName passt und MDB abweicht
+### Keine produktive Nayax-/Moma-Aenderung
 
-Warnungstyp:
+Nayax/Moma werden gelesen, nicht automatisiert beschrieben.
 
-```text
-MDB_CODE_CHANGED_FOR_PRODUCT
-```
+### Kostenbasis GuV (Kleinunternehmer)
 
-Spaeteres Zielmatching:
-
-```text
-machine_id + mdb_code + valid_from/valid_to + SettlementDateTimeGMT
-```
-
-### Keine produktive Nayax-/Moma-Aenderung aus den Workflows
-
-Die Workflows lesen Nayax/Moma und schreiben Google Sheets. Produktive Aenderungen in Nayax/Moma sind aktuell nicht automatisiert. Damit bleibt das Risiko in der Uebergangsphase niedrig.
-
-### Google Sheets bleibt Arbeits- und Logsystem
-
-Google Sheets enthaelt unter anderem:
-
-- `Produkte`
-- `Lagerchargen`
-- `Produkt_Aliase`
-- `Produktwechsel_Log`
-- `Fehler_und_Hinweise`
-- `Verarbeitete_Transaktionen`
-- `Produkt_Aenderungsvorschlaege`
-- spaeter `Bestandskorrektur_Vorschlaege`
-- spaeter `Bestandskorrekturen_Log`
-
-Manuelle Pflege in Google Sheets ist nicht vorgesehen. Aenderungen laufen ueber n8n Forms oder automatische Workflows.
+EK = Netto-Warenwert + nicht rueckholbarer Pfand; GuV bucht bei
+Kleinunternehmer-Modell **brutto** (`cost_basis`-Marker, Migrationen
+0028–0030, Restatement-Runbook in `docs/specs/guv-kostenbasis-kleinunternehmer-restatement-v1.md`).
 
 ## Dashboard-Architektur
 
-Das Dashboard liegt in `dashboard/` und besteht aus:
-
-- Node.js-Server: `dashboard/server.js`
-- Frontend: `dashboard/public/index.html`, `dashboard/public/app.js`, `dashboard/public/styles.css`
-- lokale Konfiguration: `dashboard/.env.local`
-
-Der Server liefert:
-
-- `GET /api/dashboard`: Projekt-, Workflow-, n8n- und Datenqualitaetsstatus
-- `GET /api/guv`: GuV-KPIs und Produkttabelle aus `GuV_Tagesposten`, filterbar ueber `range`, `start`, `end` und `machine_id`
-- `POST /api/actions/:id/trigger`: Startet einen Webhook-Workflow oder oeffnet ein n8n Form
-
-Die Live-n8n-Verbindung nutzt:
-
-```text
-N8N_BASE_URL
-N8N_API_KEY
-```
-
-Wenn Google Sheets live nicht lesbar ist, nutzt das Dashboard die lokale XLSX-Datei als Fallback.
+- Server: `dashboard/server.js` (Node-Bordmittel + `pg`), API v2 unter `/api/v2/...`
+- Frontend: `dashboard/public/v3.html|v3.js|v3.css` (Multipage v3);
+  `index.html`/`app.js` ist die Alt-Oberflaeche
+- Worker: `dashboard/worker.js` (eigener Prozess/Container, `restart: always`)
+- Konfiguration: `dashboard/.env.local` (nie in Git); vollstaendige
+  Variablenreferenz in `dashboard/.env.example` (DB-URLs, Resend, Anthropic,
+  Google Drive, Cutover-Flags, Job-Zeitplaene, Anomalie-Monitor)
+- Auth: Tailscale-Serve-Header `Tailscale-User-Login`, Default-Deny,
+  Gaeste read-only, Audit als JSONL unter `dashboard/logs/`
 
 ## Offen und geplant
 
-- WF5 in n8n testen und produktiv uebernehmen:
-  - Tagesverkaeufe sind in der lokalen JSON in die Mail aufgenommen
-  - `Bestand gesamt` wird aus aktiven Lagerchargen gerechnet, ohne Automatenbestand doppelt zu zaehlen
-  - E-Mail-Anzeige zeigt `Bestand im Automat` und `Bestand gesamt`
-- WF1/WF2/WF4 End-to-End-Test mit neuem Produkt und optionalem Slot-Einsatz.
-- WF3 End-to-End-Test mit Nayax-Verkauf, FIFO-Abbuchung und MDB-Abweichung.
-- Live-n8n-Workflows regelmaessig mit den lokalen JSON-Dateien synchron halten.
-- Bestandskorrekturworkflow planen:
-  - Moma-/Nayax-Slotbestand abrufen
-  - erwarteten Google-Bestand vergleichen
-  - Differenzen loggen
-  - Vorschlaege erzeugen
-  - Korrekturen nur nach Freigabe buchen
-- Langfristig Produktstamm und Slot-Historie eventuell in getrennte Tabellen aufteilen.
+Die geordnete Gesamtplanung liegt in `docs/ROADMAP.md` (Nordstern:
+Cloudflare/Render/Supabase, n8n vollstaendig abloesen). Unmittelbar:
+Cutover #198 (Schatten-Deckungsgleichheit), danach n8n-Abschaltung +
+Migration 0033; anschliessend Monitoring/Off-Site-Backup und Self-Service.

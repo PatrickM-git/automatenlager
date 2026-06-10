@@ -24,6 +24,7 @@
 const { isAvailableBatchStatus, availableBatchStatusSqlList } = require('../stock-status.js');
 const { diffWrites, sampleDiff } = require('./shadow-harness.js');
 const { toAllowedWarningType } = require('../warning-types.js');
+const { withTimeout } = require('../fetch-timeout.js');
 
 const NAYAX_SALES_JOB_KEY = 'wf3-nayax-fifo';
 const WORKFLOW_STATE_KEY = 'WF3_NAYAX_FIFO';
@@ -773,7 +774,7 @@ async function fetchNayaxLastSales({ token, headerName = 'Authorization', baseUr
   if (!doFetch) throw new TypeError('nayax-sales: kein fetch verfügbar — fetchImpl injizieren');
   if (!machineId) throw new TypeError('nayax-sales: machineId erforderlich');
   const url = `${baseUrl}/operational/v1/machines/${encodeURIComponent(machineId)}/lastSales`;
-  const res = await doFetch(url, { method: 'GET', headers: { [headerName]: token, accept: 'application/json' } });
+  const res = await doFetch(url, withTimeout({ method: 'GET', headers: { [headerName]: token, accept: 'application/json' } }));
   if (!res.ok) throw new Error(`nayax-sales: Nayax HTTP ${res.status}`);
   return normalizeSales([await res.json()]);
 }

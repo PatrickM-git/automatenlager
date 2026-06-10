@@ -20,6 +20,8 @@
 // Admin-UI (Stufe 8). Der #107-Wächter scannt lib/jobs/* — kein rohes pg hier.
 // ─────────────────────────────────────────────────────────────────────────────
 
+const { withTimeout } = require('../fetch-timeout.js');
+
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 // Resend erlaubt OHNE verifizierte Domain nur diesen Absender (Test-Modus: Versand
 // an die eigene Account-Mail). Für echten Versand an beliebige Empfänger eine eigene
@@ -45,11 +47,11 @@ function createResendTransport({ apiKey, from, fetchImpl } = {}) {
     };
     if (text != null) payload.text = text;
     if (html != null) payload.html = html;
-    const res = await doFetch(RESEND_ENDPOINT, {
+    const res = await doFetch(RESEND_ENDPOINT, withTimeout({
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    });
+    }));
     if (!res.ok) {
       let detail = ''; try { detail = await res.text(); } catch { /* */ }
       throw new Error(`mailer: Resend HTTP ${res.status} — ${String(detail).slice(0, 300)}`);

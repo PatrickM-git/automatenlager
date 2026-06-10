@@ -28,35 +28,44 @@ Start by reading:
 - WF3 still matches sales primarily by `MachineID + ProductName`.
 - MDB code is currently a control/warning signal, not a hard requirement.
 - Nayax/Moma are not changed productively by the workflows at this stage.
-- Google Sheets is a working and logging layer. Manual sheet maintenance should be avoided.
+- Google Sheets ist als Datenschicht **abgelöst** (SQL-only): PostgreSQL-Schema `automatenlager` ist die einzige Wahrheit; die Sheets-Schreibknoten in den WF-Exporten sind bewusst deaktiviert. Sheets/XLSX dienen nur noch als historische Quelle (z. B. GuV-Backfill 2025).
 
 ## Repository Structure
 
 ```text
 mein-erstes-Projekt/
-|-- README.md
-|-- ARCHITECTURE.md
-|-- CLAUDE.md
-|-- HANDOVER.md
-|-- HANDOVER_ARCHIVE/
-|-- WF0 - product_slot_id Backfill.json
+|-- README.md / ARCHITECTURE.md / CLAUDE.md / HANDOVER.md
+|-- HANDOVER_ARCHIVE/                  # datierte alte Handover-Staende
+|-- WF0 - product_slot_id Backfill.json          # stillgelegt (obsolet)
 |-- WF1 - Rechnungseingang automatisch mit Claude.json
 |-- WF2 - Smart Product Selection - Rechnungsvorschlaege freigeben.json
-|-- WF3 Nayax Lynx FIFO Lagerbestand - manueller Abruf - mit WF4 Integration.json
+|-- WF3 Nayax Lynx FIFO Lagerbestand - ... .json
 |-- WF4 - MDB Produktzuordnung bearbeiten.json
 |-- WF5 - MHD und niedrige Lagercharge ueberwachen.json
+|-- WF7 - Nachfuellung melden.json
 |-- WF8 - GuV Tagesposten Aggregator.json
-|-- nayax_lager_google_sheets_import_aktualisiert_v3_kitkat_2026-05-02.xlsx
+|-- WF9 - Pickliste verarbeiten.json
+|-- WF-PGW - PostgreSQL Writer.json    # Schreib-Durchreicher (pgw_write)
+|-- WF-Monitor / WF-Val / WF-Drift-Check / WF-Update-Check /
+|   WF-Claude-Proposals / WF-MatView-Refresh / WF-Nayax-Devices-Sync .json
+|-- docs/                              # ROADMAP, UBIQUITOUS_LANGUAGE, specs/, security/, data-model/, audit/
+|-- infra/                             # Deploy-/Compose-Artefakte
+|-- nayax_lager_google_sheets_import_aktualisiert_v3_kitkat_2026-05-02.xlsx  # historischer Snapshot
 `-- dashboard/
     |-- package.json
-    |-- server.js
-    |-- .env.example
-    |-- public/
-    |   |-- index.html
-    |   |-- app.js
-    |   `-- styles.css
-    |-- start-dashboard.ps1
-    |-- start-dashboard-hidden.vbs
+    |-- server.js                      # API v2 + Frontend-Auslieferung
+    |-- worker.js                      # Job-Scheduler (Stufe 6, n8n-Abloesung)
+    |-- lib/                           # ~50 Module: tenant-db.js (Mandanten-Tuer), auth.js,
+    |   |                              #   query-filter-guard.js, economics*, guv-*, fetch-timeout.js, ...
+    |   `-- jobs/                      # portierte Workflows: guv-aggregate, nayax-sales (WF3),
+    |                                  #   invoice-intake (WF1), wf5-monitor, picklist (WF9),
+    |                                  #   wf4-slot-write, cutover-monitor, shadow-harness, ...
+    |-- db-migrations/                 # 0001-0034, idempotent, Reihenfolge = Praefix
+    |-- tests/                         # node --test Suite (Unit + LIVE-Sandbox mit ROLLBACK)
+    |-- public/                        # v3.html/v3.js/v3.css (aktuell); index.html/app.js (alt)
+    |-- .env.example                   # kommentierte Referenz ALLER Env-Variablen
+    |-- scripts/ tools/ deploy/ docs/ logs/
+    |-- start-dashboard.ps1 / start-pg-tunnel.ps1
     |-- register-dashboard-autostart.ps1
     `-- create-dashboard-startup-shortcut.ps1
 ```
@@ -76,11 +85,18 @@ Open:
 http://127.0.0.1:8787/
 ```
 
-Local secrets belong in `dashboard/.env.local`, never in Git:
+Local secrets belong in `dashboard/.env.local`, never in Git. **Die
+vollstaendige, kommentierte Variablenreferenz ist `dashboard/.env.example`** —
+dort stehen auch die fuer Worker/Stufe 6 noetigen Variablen
+(`DASHBOARD_V2_PG_URL`/`DASHBOARD_V2_APP_PG_URL`, `ANTHROPIC_API_KEY`,
+`RESEND_API_KEY`, `GOOGLE_DRIVE_*`, `WF1_CUTOVER`/`WF3_CUTOVER`,
+`CUTOVER_STREAK_THRESHOLD`, `GITHUB_TOKEN`, `WORKER_*`, `ANOMALY_*`,
+`EXTERNAL_FETCH_TIMEOUT_MS`). Minimalbeispiel:
 
 ```text
 N8N_BASE_URL=http://127.0.0.1:5678
 N8N_API_KEY=...
+DASHBOARD_V2_PG_URL=postgres://...
 DASHBOARD_ADMIN_LOGIN=patrick@example.com
 DASHBOARD_AUDIT_LOG=dashboard/logs/guest-access.jsonl
 ```
@@ -120,6 +136,27 @@ Read-Only guest access (Default-Deny seit #27, `dashboard/lib/auth.js` → `reso
 - Test workflow changes in n8n before replacing active production versions.
 - WF8 must not use Google Sheets `appendOrUpdate` with multiple matching columns. Use append + Existing-Key-Skip, or a future single technical key such as `guv_key`.
 - **Encoding: keep workflow JSON UTF-8, never round-trip through Latin-1.** A Latin-1/UTF-8 mismatch during an earlier import/export irreversibly replaced every German umlaut with `U+FFFD` (bytes `0xEFBFBD`) in WF4/5/7/9 — in node names **and** `jsCode`. Most damaging: WF4's `normalize()` regexes had become `.replace(/�/g, 'ae')` and matched the replacement char instead of real umlauts, so the umlaut was stripped by the final `[^a-z0-9]` filter (`"Müller"` → `"mller"`) and product matching silently broke. Prevention: read/write exports as UTF-8 (use node `https`, not tools that may re-encode); after any export grep for `U+FFFD`; the regression guard `dashboard/tests/encoding-umlaut-fix.test.js` fails if any `WF*.json` reintroduces it or if `normalize()` stops mapping umlauts.
+
+## Worker (Stufe 6, n8n-Ablösung)
+
+- `dashboard/worker.js` ist der Job-Scheduler der n8n-Ablösung; er läuft in
+  Produktion als eigener Compose-Service (`restart: always`) neben dem
+  Dashboard-Container.
+- Scheduling über **setInterval** (drift-immun) — node-cron v4 verwirft auf dem
+  WSL2-Mini jeden Tick als "missed execution"; feste Uhrzeiten daher nur über
+  `WORKER_*_AT`-Variablen mit Vorsicht (siehe `.env.example`).
+- Jobs liegen in `dashboard/lib/jobs/*` und laufen durch die Mandanten-Tür
+  (`lib/tenant-db.js`), tenant-gescoped über `lib/jobs/tenant-runner.js`.
+  Telemetrie je Lauf in `audit.workflow_runs` (`lib/workflow-runs.js`); ein
+  werfender Job killt den Worker nicht (tick fängt ab).
+- Externe HTTP-Calls (Nayax, Claude, Drive, Resend, GitHub) haben einen harten
+  Timeout über `lib/fetch-timeout.js` (Default 30 s, Claude 120 s; Override
+  `EXTERNAL_FETCH_TIMEOUT_MS`).
+- **Schattenbetrieb:** WF1 (`invoice-intake.js`) und WF3 (`nayax-sales.js`)
+  rechnen parallel zu n8n und vergleichen (`shadow-harness.js`), schreiben aber
+  erst nach Cutover (`WF1_CUTOVER`/`WF3_CUTOVER`). Der `cutover-monitor.js`
+  zählt deckungsgleiche Tage gegen `CUTOVER_STREAK_THRESHOLD` (#198) — erst
+  danach n8n abschalten und Migration 0033 (BYPASSRLS-Entzug) anwenden.
 
 ## Handover Convention
 
@@ -180,8 +217,14 @@ Read-Only guest access (Default-Deny seit #27, `dashboard/lib/auth.js` → `reso
 2. WF2-Änderung (`category:'snack'`) auf die Mini-Instanz bringen (n8n) — bis dahin schreibt die Prod-WF2 weiter `'Snack'` (read-side durch lowercase-Normalisierung abgesichert).
 3. Separates Issue: „Vollständigkeits-Audit Sheets→DB vor Cutover" (knüpft an `docs/specs/sql-only-migration.md` + Issue #9).
 
-## WF7 Nachfuellung Webhook
+## WF7 Nachfuellung
 
+Die Nachfüllung läuft heute über den Dashboard-Endpunkt
+(`dashboard/lib/refill-apply.js`, alle Schreibzugriffe in EINER Transaktion
+durch die Mandanten-Tür) — der frühere n8n-Webhook ist abgelöst.
+
+Historischer n8n-Webhook (nur noch Referenz für den WF7-Export; localhost =
+Dev-Instanz, Produktion war der HP Mini, siehe „n8n Workflow Notes"):
 URL: `http://127.0.0.1:5678/webhook/nachfuellung`
 Params: `product_key` (Pflicht), `qty` (Optional), `notes` (Optional)
 Aktionen: Slot-Update + Warning-Resolve + Audit-Eintrag

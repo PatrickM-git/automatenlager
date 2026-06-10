@@ -12,6 +12,8 @@
  *   - move(id)       → addParents=verarbeitet, removeParents=quelle (Idempotenz)
  */
 
+const { withTimeout } = require('./fetch-timeout.js');
+
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 
@@ -35,11 +37,11 @@ function createGoogleDriveClient({ clientId, clientSecret, refreshToken, sourceF
     const nowMs = Date.now();
     if (cachedToken && nowMs < tokenExpiresAt - 60_000) return cachedToken;
     const { url, body } = buildTokenRequest({ clientId, clientSecret, refreshToken });
-    const resp = await doFetch(url, {
+    const resp = await doFetch(url, withTimeout({
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body,
-    });
+    }));
     const text = await resp.text();
     if (!resp.ok) throw new Error(`google-oauth ${resp.status}: ${text.slice(0, 200)}`);
     const json = JSON.parse(text);
@@ -51,7 +53,7 @@ function createGoogleDriveClient({ clientId, clientSecret, refreshToken, sourceF
 
   async function authedFetch(url, init = {}) {
     const token = await getAccessToken();
-    return doFetch(url, { ...init, headers: { ...(init.headers || {}), authorization: `Bearer ${token}` } });
+    return doFetch(url, withTimeout({ ...init, headers: { ...(init.headers || {}), authorization: `Bearer ${token}` } }));
   }
 
   async function listNew() {

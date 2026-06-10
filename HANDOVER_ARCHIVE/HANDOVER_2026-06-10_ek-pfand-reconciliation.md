@@ -1,31 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-10_ek-pfand-reconciliation.md`.
-
-## Session 2026-06-10 (Abend) — Projekt-Vollaudit + Sofortfixes
-
-**Vollaudit über 5 parallele Prüfungen** (Workflows WF0–WF9 + WF-*, Dashboard-Backend, Migrationen 0001–0033, Doku-Konsistenz, Security). Gesamtbild: Kern solide — kein U+FFFD, keine Secrets, keine Tür-Umgehungen, alle Migrationen idempotent, RLS vollständig. Drei echte Befunde, alle in dieser Session gefixt:
-
-### Fixes
-1. **Suite war rot auf main:** `dashboard-v3-write-off.test.js` AC-WO1 prüfte das alte `/lager`-Gating (`viewer.canTriggerActions` via `/api/dashboard`); Code nutzt seit `5e11545`/`b8437ce` bewusst `batchEk.canTriggerActions` aus `/api/v2/batches`. Test an die gewollte Realität angepasst (Code unverändert).
-2. **RLS-fail-closed-Regression (Migration 0034 NEU):** 0032 hatte die `classification_settings`-Policies versehentlich mit `current_setting(..., true)` (missing_ok) neu angelegt — fehlender GUC lieferte still `__default__`-Zeilen statt Fehler 42704. **Entscheidung (gegen Code/Historie verifiziert):** kein Anwendungsfall — alle Leser gehen durch die Tür (GUC immer gesetzt), Migrationen/Refresh laufen über die Infra-Rolle; im selben Commit blieb 0026 einarmig ⇒ Versehen, keine Designentscheidung. `0034-classification-settings-fail-closed.sql` stellt die 0026-Form wieder her; Test `dashboard-mt-0034-classification-fail-closed.test.js` beweist LIVE (Sandbox): ohne GUC ⇒ 42704, mit GUC ⇒ nur eigener Mandant + `__default__`. **⚠️ DEPLOY AUSSTEHEND: 0034 auf dem Mini anwenden** (idempotent, reine Policy-Neuanlage, kein Risiko).
-3. **Fetch-Timeouts (NEU `lib/fetch-timeout.js`):** alle 6 externen HTTP-Call-Sites (anthropic-client 120 s, google-drive-client, mailer/Resend, github-issues, nayax-devices-sync, nayax-sales je 30 s; Override `EXTERNAL_FETCH_TIMEOUT_MS`) bekommen `AbortSignal.timeout` — vorher konnte ein hängender Dienst einen Worker-Job bis zu den undici-Defaults (~300 s) blockieren. Aufrufer-Signal hat Vorrang; Timeout landet als normaler Job-Fehler in der Telemetrie.
-
-### Doku-Sync (war ~8 Wochen hinter dem Code)
-- **README.md + ARCHITECTURE.md neu geschrieben:** SQL-only, Mandanten-Stufen 2–5 live, Stufe-6-Schattenbetrieb, Worker, Schichten-Tabelle, WF-Status-Tabelle. Fachliche Invarianten (WF2/WF4-Eigentümerschaft, `active`-Semantik, `product_slot_id`) unverändert übernommen.
-- **CLAUDE.md:** Repository-Structure-Block auf Ist-Stand (17 WF-JSONs, worker.js, db-migrations 0001–0034, lib/, docs/, infra/), neue Sektion „Worker (Stufe 6)", Env-Verweis auf `.env.example`, WF7-Abschnitt klargestellt (Dashboard-Endpunkt, n8n-Webhook historisch), Sheets-Regel in Core Domain Rules korrigiert.
-- **`guv_check_tmp/` aus dem Git-Index entfernt** (stand in `.gitignore`, 8 Dateien waren aber noch getrackt; bleiben lokal liegen).
-
-### Audit-Befunde OHNE Code-Änderung (bewusst)
-- **#78 / `DASHBOARD_INTERNAL_PEER_CIDR`:** weiterhin nicht enforced — Tailnet-Peer könnte Identity-Header spoofen. Empfehlung: vor zweitem Kunden auf dem Mini setzen (Ops-Task, kein Code).
-- **Fehlalarme geprüft und verworfen:** worker.js `runOnStart` (tick fängt intern), „disabled Sheets-Nodes" (= dokumentierter Sollzustand Stufe 6), `workflow-actions-view.js` (existiert), 0029-Kommentar (Kopfblock ist präzise).
-- 0031-PK-Vergleich via `string_agg` funktional korrekt, nur kosmetisch fragil — nicht angefasst (deployte Migration).
-
-### Nächste Schritte
-1. **Mini-Deploy:** `git pull --ff-only` + Migration **0034** anwenden + Container-Restart (Dashboard + Worker).
-2. WF3-Constraint-Fix aus der Vorsession weiterhin offen (Mini war offline) — siehe unten.
-3. Cutover #198 beobachten (`cutover-monitor`), danach n8n WF3/WF1 deaktivieren → WF2/WF4 → Migration 0033.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-10_lager-fix-wf3-constraint.md`.
 
 ## Session 2026-06-10 (Nachmittag) — Cutover-Guard-Fix + EK/Pfand-Kostenbasis-Reconciliation
 

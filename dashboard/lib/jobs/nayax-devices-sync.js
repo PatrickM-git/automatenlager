@@ -22,6 +22,8 @@
 // HTTP-Client injizierbar (Tests laufen ohne Netz). KEIN rohes pg (#107-rein).
 // ─────────────────────────────────────────────────────────────────────────────
 
+const { withTimeout } = require('../fetch-timeout.js');
+
 const WORKFLOW_KEY = 'wf-nayax-devices-sync';
 const NAYAX_MACHINES_URL = 'https://lynx.nayax.com/operational/v1/machines';
 const DEFAULT_RESULTS_LIMIT = 500;
@@ -69,7 +71,7 @@ async function fetchNayaxMachines({ token, headerName = 'Authorization', baseUrl
   const doFetch = typeof fetchImpl === 'function' ? fetchImpl : (typeof fetch === 'function' ? fetch : null);
   if (!doFetch) throw new TypeError('nayax-devices-sync: kein fetch verfügbar — fetchImpl injizieren');
   const url = `${baseUrl}?ResultsLimit=${encodeURIComponent(resultsLimit)}`;
-  const res = await doFetch(url, { method: 'GET', headers: { [headerName]: token, accept: 'application/json' } });
+  const res = await doFetch(url, withTimeout({ method: 'GET', headers: { [headerName]: token, accept: 'application/json' } }));
   if (!res.ok) throw new Error(`nayax-devices-sync: Nayax HTTP ${res.status}`);
   const data = await res.json();
   if (Array.isArray(data)) return data;

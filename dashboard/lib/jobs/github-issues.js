@@ -13,6 +13,8 @@
 // Ohne Token/Repo ⇒ null (Feature deaktiviert, bricht nichts).
 // ─────────────────────────────────────────────────────────────────────────────
 
+const { withTimeout } = require('../fetch-timeout.js');
+
 const GITHUB_API = 'https://api.github.com';
 
 /**
@@ -32,17 +34,17 @@ function createGithubIssueClient({ token, repo, fetchImpl, apiBase = GITHUB_API 
     'User-Agent': 'automatenlager-worker',
   };
   async function createIssue({ title, body, labels = [] } = {}) {
-    const res = await doFetch(`${apiBase}/repos/${repo}/issues`, {
+    const res = await doFetch(`${apiBase}/repos/${repo}/issues`, withTimeout({
       method: 'POST', headers, body: JSON.stringify({ title, body, labels }),
-    });
+    }));
     if (!res || !res.ok) throw new Error(`github-issues: create HTTP ${res && res.status}`);
     const data = await res.json();
     return data && data.number;
   }
   async function commentIssue(number, body) {
-    const res = await doFetch(`${apiBase}/repos/${repo}/issues/${number}/comments`, {
+    const res = await doFetch(`${apiBase}/repos/${repo}/issues/${number}/comments`, withTimeout({
       method: 'POST', headers, body: JSON.stringify({ body }),
-    });
+    }));
     if (!res || !res.ok) throw new Error(`github-issues: comment HTTP ${res && res.status}`);
     return true;
   }

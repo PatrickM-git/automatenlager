@@ -8,9 +8,10 @@ const test = require('node:test');
 const v3js = fs.readFileSync(path.join(__dirname, '..', 'public', 'v3.js'), 'utf8');
 const v3css = fs.readFileSync(path.join(__dirname, '..', 'public', 'v3.css'), 'utf8');
 
-test('AC-WO1: /lager-Loader lädt den Viewer (Admin-Gating)', () => {
-  // Im Lager-Zweig wird /api/dashboard mitgeladen und canTriggerActions gesetzt.
-  assert.ok(/_lagerCanEdit\s*=\s*!!viewer\.canTriggerActions/.test(v3js));
+test('AC-WO1: /lager-Loader setzt das Admin-Gating aus /api/v2/batches', () => {
+  // Gating-Quelle ist die /api/v2/batches-Antwort (canTriggerActions) — /lager
+  // lädt bewusst NICHT mehr /api/dashboard (4s-n8n-Timeout, #209).
+  assert.ok(/_lagerCanEdit\s*=\s*!!\(batchEk\s*&&\s*batchEk\.canTriggerActions\)/.test(v3js));
 });
 
 test('AC-WO2: Tabellen-Zeile reicht batch_key als data-Attribut durch', () => {
