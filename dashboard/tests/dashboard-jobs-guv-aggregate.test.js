@@ -207,12 +207,12 @@ test('#161 GuV LIVE: pro Mandant durch die Tür isoliert + idempotent (RLS aktiv
     // #176: Config DETERMINISTISCH regelbesteuert setzen (sonst hinge der Test am
     // realen __default__-Wert, den der Job ab #176 wirklich liest).
     await client.query(
-      `INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
+      `INSERT INTO automatenlager.classification_settings (tenant_id, config, updated_at)
          VALUES ('__default__', $1::jsonb, now())
-       ON CONFLICT (mandant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+       ON CONFLICT (tenant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
       [JSON.stringify({ kleinunternehmerAktiv: false })]);
 
-    for (const n of [22, 23, 24, 25, 26, 28]) await applyMigration(client, n); // RLS scharf + cost_basis-Spalte
+    for (const n of [22, 23, 24, 25, 26, 28, 32]) await applyMigration(client, n); // RLS + cost_basis + mandant_id→tenant_id
     await client.query('SET ROLE automatenlager_app');                     // eingeengte App-Rolle
     try {
       const db = createTenantDb({ pool: sandboxTxPool(client) });          // read + tx über SAVEPOINTs
@@ -268,9 +268,9 @@ test('#176 GuV LIVE: Kleinunternehmer-Mandant bucht BRUTTO (cost_basis brutto, r
 
     // Kleinunternehmer-Konfig (camelCase, wie der reale __default__-Wert).
     await client.query(
-      `INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
+      `INSERT INTO automatenlager.classification_settings (tenant_id, config, updated_at)
          VALUES ('__default__', $1::jsonb, now())
-       ON CONFLICT (mandant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+       ON CONFLICT (tenant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
       [JSON.stringify({ kleinunternehmerAktiv: true })]);
 
     for (const n of [22, 23, 24, 25, 26, 28]) await applyMigration(client, n);

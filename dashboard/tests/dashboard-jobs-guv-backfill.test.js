@@ -77,12 +77,12 @@ test('#172 LIVE: Backfill füllt fehlende Posten (brutto, cost_basis, source guv
       [acme.machineId, acme.productId]);
 
     await client.query(
-      `INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
+      `INSERT INTO automatenlager.classification_settings (tenant_id, config, updated_at)
          VALUES ('__default__', $1::jsonb, now())
-       ON CONFLICT (mandant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+       ON CONFLICT (tenant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
       [JSON.stringify({ kleinunternehmerAktiv: true })]);
 
-    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]) await applyMigration(client, n);
     await client.query('SET ROLE automatenlager_app');
     try {
       const db = createTenantDb({ pool: sandboxTxPool(client) });
@@ -118,11 +118,11 @@ test('#172 LIVE: dryRun rechnet, schreibt NICHT', async (t) => {
     await client.query(`DELETE FROM automatenlager.guv_daily WHERE tenant_id IN ('acme','globex')`);
     await applyMigration(client, 28);
     await client.query(
-      `INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
+      `INSERT INTO automatenlager.classification_settings (tenant_id, config, updated_at)
          VALUES ('__default__', $1::jsonb, now())
-       ON CONFLICT (mandant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+       ON CONFLICT (tenant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
       [JSON.stringify({ kleinunternehmerAktiv: true })]);
-    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]) await applyMigration(client, n);
     await client.query('SET ROLE automatenlager_app');
     try {
       const db = createTenantDb({ pool: sandboxTxPool(client) });
@@ -208,12 +208,12 @@ test('#172 LIVE: createGuvBackfillJob füllt Lücken über den tenant-runner dur
     await client.query(`DELETE FROM automatenlager.guv_daily WHERE tenant_id IN ('acme','globex')`);
     // KU-Konfig (camelCase, wie der reale __default__-Wert) ⇒ brutto wie der Nacht-Job.
     await client.query(
-      `INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
+      `INSERT INTO automatenlager.classification_settings (tenant_id, config, updated_at)
          VALUES ('__default__', $1::jsonb, now())
-       ON CONFLICT (mandant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+       ON CONFLICT (tenant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
       [JSON.stringify({ kleinunternehmerAktiv: true })]);
 
-    for (const n of [22, 23, 24, 25, 26, 28]) await applyMigration(client, n); // RLS scharf + cost_basis
+    for (const n of [22, 23, 24, 25, 26, 28, 32]) await applyMigration(client, n); // RLS scharf + cost_basis + tenant_id
     await client.query('SET ROLE automatenlager_app');
     try {
       const db = createTenantDb({ pool: sandboxTxPool(client) });

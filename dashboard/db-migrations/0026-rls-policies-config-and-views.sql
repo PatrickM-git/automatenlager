@@ -3,7 +3,7 @@
 --
 -- 1) Uniforme tenant_isolation-Policy auf der Config/Rest-Gruppe.
 -- 2) Vereinigungs-Policy fuer die geteilte Config classification_settings
---    (Spalte mandant_id!): LESEN = eigener Mandant ODER '__default__'; SCHREIBEN/
+--    (Spalte mandant_id / tenant_id nach 0032): LESEN = eigener Mandant ODER '__default__'; SCHREIBEN/
 --    LOESCHEN strikt nur eigener Mandant (die __default__-Vorlage ist nur ueber
 --    Infra/Migration pflegbar). settings_thresholds traegt aktuell KEINE
 --    __default__-Zeile (Defaults stehen im Code) ⇒ uniforme Policy genuegt.
@@ -39,21 +39,35 @@ BEGIN
 END
 $$;
 
--- ── 2) Vereinigungs-Policy: classification_settings (Spalte mandant_id) ───────
-ALTER TABLE automatenlager.classification_settings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE automatenlager.classification_settings FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS tenant_default_read ON automatenlager.classification_settings;
-DROP POLICY IF EXISTS tenant_isolation   ON automatenlager.classification_settings;
--- Lesen: eigener Mandant ODER die geteilte __default__-Vorlage.
-CREATE POLICY tenant_default_read ON automatenlager.classification_settings
-  FOR SELECT
-  USING (mandant_id = current_setting('automatenlager.current_tenant') OR mandant_id = '__default__');
--- Schreiben/Aendern/Loeschen: strikt nur eigener Mandant (USING schuetzt __default__
--- vor UPDATE/DELETE; WITH CHECK verhindert Schreiben fremder/__default__-Zeilen).
-CREATE POLICY tenant_isolation ON automatenlager.classification_settings
-  FOR ALL
-  USING (mandant_id = current_setting('automatenlager.current_tenant'))
-  WITH CHECK (mandant_id = current_setting('automatenlager.current_tenant'));
+-- ── 2) Vereinigungs-Policy: classification_settings (mandant_id oder tenant_id) ──
+-- Dynamisch: nach Migration 0032 heißt die Spalte tenant_id; davor mandant_id.
+-- Die DO-Block-Erkennung macht 0026 re-entrant auf einem DB-Stand nach 0032.
+DO $$
+DECLARE col TEXT;
+BEGIN
+  SELECT column_name INTO col
+    FROM information_schema.columns
+   WHERE table_schema = 'automatenlager'
+     AND table_name   = 'classification_settings'
+     AND column_name IN ('mandant_id', 'tenant_id')
+   LIMIT 1;
+  col := COALESCE(col, 'tenant_id');
+
+  ALTER TABLE automatenlager.classification_settings ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE automatenlager.classification_settings FORCE ROW LEVEL SECURITY;
+  EXECUTE 'DROP POLICY IF EXISTS tenant_default_read ON automatenlager.classification_settings';
+  EXECUTE 'DROP POLICY IF EXISTS tenant_isolation    ON automatenlager.classification_settings';
+
+  EXECUTE format(
+    'CREATE POLICY tenant_default_read ON automatenlager.classification_settings'
+    ' FOR SELECT USING (%I = current_setting(''automatenlager.current_tenant'') OR %I = ''__default__'')',
+    col, col);
+  EXECUTE format(
+    'CREATE POLICY tenant_isolation ON automatenlager.classification_settings'
+    ' FOR ALL USING (%I = current_setting(''automatenlager.current_tenant''))'
+    ' WITH CHECK (%I = current_setting(''automatenlager.current_tenant''))',
+    col, col);
+END $$;
 
 -- HINWEIS: Die (Mat)View-Sicherung (security_invoker auf v_warnings_open/
 -- v_slot_turnover, die security_barrier-View v_inventory_value_daily + MatView-

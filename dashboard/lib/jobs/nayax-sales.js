@@ -423,6 +423,12 @@ function batchRunIdFor(nowIso) {
   return `wf3_${(nowIso || new Date().toISOString()).slice(0, 10)}`;
 }
 
+// Bewegungsschlüssel ohne Run-Datum-Suffix (für Shadow-Vergleich: Port läuft heute,
+// n8n schrieb gestern — gleicher fachlicher Schlüssel, unterschiedliches Datum).
+function movementBaseKey(r) {
+  return String(r.movement_key || '').replace(/_wf3_\d{4}-\d{2}-\d{2}$/, '');
+}
+
 // transactionLogs → sale-Events (WF3 "Prepare PGW - sale"): verlangt tx + machine.
 function buildSaleEvents(transactionLogs) {
   return (transactionLogs || [])
@@ -720,10 +726,16 @@ async function runNayaxSalesShadow(db, tenant, { sales = [], config = {}, nowIso
     fields: ['quantity'],
   });
   const movementsDiff = diffWrites(plan.stockMovements, actualMovements.rows, {
-    keyOf: (r) => String(r.movement_key),
+    // movement_key enthält das Run-Datum (_wf3_YYYY-MM-DD) → fachlichen Prefix
+    // vergleichen, damit Port-Lauf von heute gegen n8n-Schrieb von gestern passt.
+    keyOf: movementBaseKey,
     fields: ['quantity_delta_total'],
   });
-  return { equal: salesDiff.equal && movementsDiff.equal, salesDiff, movementsDiff, plan };
+  // onlyIntended=OK: neue Transaktionen seit n8ns letztem Lauf (Port sieht frischere
+  // Daten). Cutover ist sicher solange n8n nichts schreibt, was der Port vermissen würde.
+  const equal = salesDiff.onlyActual.length === 0 && salesDiff.mismatched.length === 0
+             && movementsDiff.onlyActual.length === 0 && movementsDiff.mismatched.length === 0;
+  return { equal, salesDiff, movementsDiff, plan };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -793,7 +805,7 @@ function createNayaxSalesJob({ db, directory, env = process.env, fetchImpl } = {
           mode: 'shadow', tenant, fetched: sales.length, equal: shadow.equal,
           diffSample: {
             sales: sampleDiff(shadow.salesDiff, { keyOf: (r) => String(r.nayax_transaction_id) }),
-            movements: sampleDiff(shadow.movementsDiff, { keyOf: (r) => String(r.movement_key) }),
+            movements: sampleDiff(shadow.movementsDiff, { keyOf: movementBaseKey }),
           },
         };
       }

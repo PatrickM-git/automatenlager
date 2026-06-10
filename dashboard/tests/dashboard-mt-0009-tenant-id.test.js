@@ -1,14 +1,13 @@
 'use strict';
 
-// Issue #96 — Migration 0009 (tenant_id auf alle operativen Tabellen + Index +
-// classification_settings.mandant_id -> tenant_id). LIVE-Sandbox mit ROLLBACK.
+// Issue #96 + #108 — Migration 0009 (tenant_id auf alle operativen Tabellen) +
+// Migration 0032 (classification_settings.mandant_id → tenant_id). LIVE-Sandbox.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { inSandbox, applyMigration } = require('./helpers/migration-sandbox.js');
 const { TENANT_REQUIRED_TABLES, tablesMissingTenantId } = require('../lib/db-schema.js');
-const { tenantColumn } = require('../lib/category-config.js');
 
 // ── DB-freier Contract-Guard-Test (reine Funktion) ────────────────────────────
 
@@ -32,9 +31,9 @@ test('#96 TENANT_REQUIRED_TABLES enthält die operativen Pflicht-Tabellen inkl. 
   // Ausnahmen sind NICHT in der Liste.
   assert.ok(!TENANT_REQUIRED_TABLES.includes('tenants'), 'tenants (PK=tenant_id) ausgenommen');
   assert.ok(!TENANT_REQUIRED_TABLES.includes('platform_admins'), 'platform_admins ausgenommen');
-  // classification_settings traegt mandant_id bis Stufe 6 -> bewusst NICHT Pflicht.
-  assert.ok(!TENANT_REQUIRED_TABLES.includes('classification_settings'),
-    'classification_settings ausgenommen (mandant_id bis Stufe 6)');
+  // classification_settings ist JETZT in der Liste (Migration 0032 hat mandant_id→tenant_id umbenannt).
+  assert.ok(TENANT_REQUIRED_TABLES.includes('classification_settings'),
+    'classification_settings ist nach 0032 in der Pflicht-Liste (tenant_id vorhanden)');
 });
 
 // ── LIVE-Sandbox: Migration anwenden, Vollständigkeit prüfen ──────────────────
@@ -48,11 +47,12 @@ async function tenantIdMeta(client, table) {
   return r.rows[0] || null;
 }
 
-test('#96 LIVE-Sandbox: nach 0009 trägt jede Pflicht-Tabelle tenant_id TEXT NOT NULL', async (t) => {
+test('#96 LIVE-Sandbox: nach 0009+0032 trägt jede Pflicht-Tabelle tenant_id TEXT NOT NULL', async (t) => {
   await inSandbox(t, async (client) => {
     await applyMigration(client, 7);
     await applyMigration(client, 8);
     await applyMigration(client, 9);
+    await applyMigration(client, 32); // classification_settings: mandant_id → tenant_id (#108)
 
     for (const table of TENANT_REQUIRED_TABLES) {
       const meta = await tenantIdMeta(client, table);
@@ -63,30 +63,28 @@ test('#96 LIVE-Sandbox: nach 0009 trägt jede Pflicht-Tabelle tenant_id TEXT NOT
   });
 });
 
-test('#96 LIVE-Sandbox: classification_settings behält mandant_id (Angleichung erst Stufe 6, schützt WF8)', async (t) => {
+test('#108 LIVE-Sandbox: nach 0032 trägt classification_settings tenant_id (nicht mandant_id)', async (t) => {
   await inSandbox(t, async (client) => {
     await applyMigration(client, 7);
     await applyMigration(client, 8);
     await applyMigration(client, 9);
+    await applyMigration(client, 32); // mandant_id → tenant_id
 
     const cols = await client.query(
       `SELECT column_name FROM information_schema.columns
         WHERE table_schema='automatenlager' AND table_name='classification_settings'`);
     const names = cols.rows.map((r) => r.column_name);
-    assert.ok(names.includes('mandant_id'), 'mandant_id bleibt erhalten (WF8 liest es hartcodiert)');
-    assert.ok(!names.includes('tenant_id'), 'tenant_id wird in Stufe 1 NICHT angelegt (Umbenennung erst Stufe 6)');
+    assert.ok(names.includes('tenant_id'), 'tenant_id vorhanden nach Migration 0032');
+    assert.ok(!names.includes('mandant_id'), 'mandant_id wurde umbenannt (nicht mehr vorhanden)');
 
-    // Die Brücke erkennt den realen Spaltennamen (mandant_id).
-    assert.equal(await tenantColumn(client), 'mandant_id', 'tenantColumn() liefert mandant_id in Stufe 1');
-
-    // PK bleibt auf mandant_id.
+    // PK liegt jetzt auf tenant_id.
     const pk = await client.query(
       `SELECT a.attname FROM pg_constraint con
          JOIN pg_class c ON c.oid=con.conrelid
          JOIN pg_namespace n ON n.oid=c.relnamespace
          JOIN pg_attribute a ON a.attrelid=con.conrelid AND a.attnum=ANY(con.conkey)
         WHERE n.nspname='automatenlager' AND c.relname='classification_settings' AND con.contype='p'`);
-    assert.equal(pk.rows[0].attname, 'mandant_id', 'PK bleibt mandant_id');
+    assert.equal(pk.rows[0].attname, 'tenant_id', 'PK ist jetzt tenant_id');
   });
 });
 

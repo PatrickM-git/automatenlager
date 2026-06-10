@@ -18,7 +18,7 @@ const DATA_TABLES = [
   'nayax_devices', 'workflow_state', 'prices',
 ];
 async function setup(client) {
-  for (const n of [7, 8, 9, 10]) await applyMigration(client, n);
+  for (const n of [7, 8, 9, 10, 32]) await applyMigration(client, n);
 }
 async function columnDefault(client, table) {
   const r = await client.query(
@@ -62,14 +62,14 @@ test('#97 LIVE-Sandbox: nach Backfill keine __default__-Zeile in Daten-Tabellen,
 test('#97 LIVE-Sandbox: Config-Tabellen kopiert auf t_faltrix, __default__-Vorlage bleibt (Override erhalten)', async (t) => {
   await inSandbox(t, async (client) => {
     await setup(client);
-    // classification_settings traegt in Stufe 1 weiter mandant_id (nicht umbenannt).
+    // classification_settings trägt nach Migration 0032 tenant_id.
     const cs = await client.query(
-      `SELECT mandant_id, config FROM automatenlager.classification_settings ORDER BY mandant_id`);
-    const ids = cs.rows.map((r) => r.mandant_id);
-    assert.ok(ids.includes('__default__'), '__default__-Vorlage bleibt (read-side fuer Stufe 1)');
-    assert.ok(ids.includes(TENANT), 't_faltrix-Kopie existiert (fuer Stufe 2/3)');
+      `SELECT tenant_id, config FROM automatenlager.classification_settings ORDER BY tenant_id`);
+    const ids = cs.rows.map((r) => r.tenant_id);
+    assert.ok(ids.includes('__default__'), '__default__-Vorlage bleibt (read-side)');
+    assert.ok(ids.includes(TENANT), 't_faltrix-Kopie existiert');
     // Faltrix' echter Override (kleinunternehmerAktiv:true) ist in beiden erhalten.
-    const faltrix = cs.rows.find((r) => r.mandant_id === TENANT);
+    const faltrix = cs.rows.find((r) => r.tenant_id === TENANT);
     assert.equal(faltrix.config.kleinunternehmerAktiv, true, 'Kleinunternehmer-Status mitkopiert');
   });
 });

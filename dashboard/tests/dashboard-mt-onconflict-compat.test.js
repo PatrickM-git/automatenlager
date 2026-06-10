@@ -6,8 +6,8 @@
 // Stufe 6) sind die fachlichen Schlüssel mandanten-geschlüsselt: die globalen
 // (key)-Uniques sind weg, das Konfliktziel ist `(tenant_id, key)`.
 // Ausnahmen ausserhalb des #111-Scope: slot_assignments (product_slot_key) und
-// nayax_devices (nayax_machine_id) bleiben global; classification_settings (mandant_id)
-// bis #108.
+// nayax_devices (nayax_machine_id) bleiben global.
+// classification_settings: mandant_id → tenant_id (Migration 0032, #108).
 //
 // Geprüft per EXPLAIN (löst die ON-CONFLICT-Constraint-Auflösung beim Planen aus,
 // ohne den INSERT auszuführen — keine Seiteneffekte, keine NOT-NULL/FK-Prüfung).
@@ -41,9 +41,8 @@ const CASES = [
   // n8n/pgw_write schreibt diese beiden Tabellen nicht.
   ['locations', "(location_key) VALUES ('x')", '(tenant_id, location_key)'],
   ['machines', "(machine_key) VALUES ('x')", '(tenant_id, machine_key)'],
-  // classification_settings traegt in Stufe 1 weiter mandant_id (Dashboard nutzt
-  // ON CONFLICT (mandant_id) via tenantColumn-Bruecke).
-  ['classification_settings', "(mandant_id) VALUES ('x')", '(mandant_id)'],
+  // classification_settings: mandant_id → tenant_id (Migration 0032, #108).
+  ['classification_settings', "(tenant_id) VALUES ('x')", '(tenant_id)'],
 ];
 
 test('ON-CONFLICT-Kompat: alle Schreibpfad-Konfliktziele bleiben nach allen Migrationen gültig (kein 42P10)', async (t) => {

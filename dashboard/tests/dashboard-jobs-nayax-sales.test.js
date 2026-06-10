@@ -340,6 +340,45 @@ test('#163 createNayaxSalesJob: ohne Token ⇒ skipped (kein Throw)', async () =
   assert.equal(r.skipped, 'kein NAYAX_API_TOKEN in der Env');
 });
 
+test('#206 runNayaxSalesShadow: onlyIntended=2, onlyActual=0 → equal=true (neue Transaktionen sind OK)', async () => {
+  // Simuliert den Fall aus #206: Port sieht 2 neue Sales, die n8n noch nicht hat.
+  // Der Shadow-Vergleich darf das NICHT als Fehler werten (onlyIntended=OK).
+  const { diffWrites } = require('../lib/jobs/shadow-harness.js');
+  const intendedSales = [
+    { nayax_transaction_id: '63245053854', quantity: 1 },
+    { nayax_transaction_id: '63245048872', quantity: 1 },
+  ];
+  const actualSales = []; // n8n hat diese noch nicht
+
+  const salesDiff = diffWrites(intendedSales, actualSales, {
+    keyOf: (r) => String(r.nayax_transaction_id),
+    fields: ['quantity'],
+  });
+  // Neue Definition: onlyIntended ist OK, onlyActual und mismatched sind Fehler.
+  const equal = salesDiff.onlyActual.length === 0 && salesDiff.mismatched.length === 0;
+  assert.equal(equal, true, 'onlyIntended=2, onlyActual=0 → Cutover ist sicher');
+  assert.equal(salesDiff.onlyIntended.length, 2, '2 neue Transaktionen erkannt');
+});
+
+test('#206 runNayaxSalesShadow: Bewegungsschlüssel mit verschiedenem Datum → gleich nach Normalisierung', () => {
+  const { diffWrites } = require('../lib/jobs/shadow-harness.js');
+  // Port generiert heute (_wf3_2026-06-10), n8n schrieb vorgestern (_wf3_2026-06-08).
+  function movementBaseKey(r) {
+    return String(r.movement_key || '').replace(/_wf3_\d{4}-\d{2}-\d{2}$/, '');
+  }
+  const intended = [
+    { movement_key: 'wf3_sale_B_COCA_COLA_20260520_APP_xyz_3_wf3_2026-06-10', quantity_delta_total: -2 },
+  ];
+  const actual = [
+    { movement_key: 'wf3_sale_B_COCA_COLA_20260520_APP_xyz_3_wf3_2026-06-08', quantity_delta_total: -2 },
+  ];
+  const diff = diffWrites(intended, actual, { keyOf: movementBaseKey, fields: ['quantity_delta_total'] });
+  assert.equal(diff.onlyIntended.length, 0, 'Bewegung nicht als onlyIntended gezählt (Datum normalisiert)');
+  assert.equal(diff.onlyActual.length, 0, 'Bewegung nicht als onlyActual gezählt');
+  assert.equal(diff.mismatched.length, 0, 'keine Wertdiff (gleiche Menge)');
+  assert.equal(diff.equal, true, 'Vergleich stimmt nach Datums-Normalisierung überein');
+});
+
 test('#163 createNayaxSalesJob: Default = Schattenbetrieb (rechnet + vergleicht, schreibt NICHT)', async () => {
   const fakeFetch = async () => ({ ok: true, json: async () => ([{ TransactionID: 'S1', MachineID: '457107528', ProductName: 'X (1 = 1.00)', SettlementValue: 1, SettlementDateTimeGMT: '2026-06-05T12:00:00Z', mdb_code_extracted: '1' }]) });
   // Fake-Tür: read liefert leer; tx() DARF im Schatten NIE aufgerufen werden.

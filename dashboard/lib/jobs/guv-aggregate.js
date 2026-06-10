@@ -275,7 +275,7 @@ async function readGuvInputs(db, tenant) {
       params: [],
       text:
         `SELECT COALESCE((SELECT config FROM automatenlager.classification_settings
-                           WHERE mandant_id='__default__' AND $1::text IS NOT NULL),
+                           WHERE tenant_id='__default__' AND $1::text IS NOT NULL),
                          '{}'::jsonb) AS config` }),
     // 5) Vorhandene GuV-Keys (90-Tage-Fenster) — Skip-Optimierung (faithful).
     () => db.read({

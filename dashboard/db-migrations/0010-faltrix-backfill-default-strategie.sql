@@ -34,6 +34,7 @@ DECLARE
   v_email  TEXT := 'faltrixgbr@gmail.com';
   v_old    TEXT := '__default__';
   t TEXT;
+  cs_col TEXT;
   -- Alle Daten-Tabellen: '__default__' -> realer Mandant VERSCHIEBEN.
   data_tables TEXT[] := ARRAY[
     'machines', 'locations', 'machine_profiles', 'slot_assignments',
@@ -53,12 +54,16 @@ BEGIN
   END LOOP;
 
   -- 3. Config-Tabellen: '__default__'-Config auf 't_faltrix' KOPIEREN (Vorlage bleibt).
-  -- classification_settings traegt in Stufe 1 weiter mandant_id (Umbenennung erst
-  -- Stufe 6, sonst braeche WF8). Kopie der __default__-Vorlage auf den realen Mandant.
+  -- Nach Migration 0032 heisst die Spalte tenant_id; davor mandant_id. Dynamisch erkennen.
+  SELECT column_name INTO cs_col
+    FROM information_schema.columns
+   WHERE table_schema = 'automatenlager' AND table_name = 'classification_settings'
+     AND column_name IN ('mandant_id', 'tenant_id') LIMIT 1;
+  cs_col := COALESCE(cs_col, 'tenant_id');
   EXECUTE format(
-    'INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
-       SELECT %L, config, now() FROM automatenlager.classification_settings WHERE mandant_id = %L
-     ON CONFLICT (mandant_id) DO NOTHING', v_tenant, v_old);
+    'INSERT INTO automatenlager.classification_settings (%I, config, updated_at)
+       SELECT %L, config, now() FROM automatenlager.classification_settings WHERE %I = %L
+     ON CONFLICT (%I) DO NOTHING', cs_col, v_tenant, cs_col, v_old, cs_col);
   EXECUTE format(
     'INSERT INTO automatenlager.settings_thresholds (tenant_id, machine_id, key, value, updated_at)
        SELECT %L, machine_id, key, value, now() FROM automatenlager.settings_thresholds WHERE tenant_id = %L

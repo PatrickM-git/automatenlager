@@ -226,7 +226,7 @@ async function runGuvBackfillForTenant(db, tenant, { csvText, config = null, dry
 async function loadConfig(db, tenant) {
   const res = await db.read({
     tenant, tables: ['classification_settings'],
-    text: `SELECT COALESCE((SELECT config FROM automatenlager.classification_settings WHERE mandant_id='__default__' AND $1::text IS NOT NULL), '{}'::jsonb) AS config`,
+    text: `SELECT COALESCE((SELECT config FROM automatenlager.classification_settings WHERE tenant_id='__default__' AND $1::text IS NOT NULL), '{}'::jsonb) AS config`,
   });
   return (res.rows[0] && res.rows[0].config) || {};
 }

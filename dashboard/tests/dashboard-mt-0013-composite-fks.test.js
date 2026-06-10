@@ -27,7 +27,7 @@ test('#100 LIVE-Sandbox: Eltern-Anker + tenant_id->tenants-FKs existieren', asyn
       const r = await client.query(`SELECT 1 FROM pg_constraint WHERE conname=$1`, [name]);
       assert.equal(r.rowCount, 1, `Eltern-Anker ${name} existiert`);
     }
-    // Stichprobe tenant_id->tenants-FK (classification_settings ausgenommen: mandant_id bis Stufe 6)
+    // Stichprobe tenant_id->tenants-FK (classification_settings hat keinen tenants-FK — __default__ Sentinel)
     for (const tab of ['machines', 'sales_transactions', 'stock_batches', 'settings_thresholds']) {
       const r = await client.query(
         `SELECT pg_get_constraintdef(oid) d FROM pg_constraint WHERE conname=$1`, [tab + '_tenant_fk']);

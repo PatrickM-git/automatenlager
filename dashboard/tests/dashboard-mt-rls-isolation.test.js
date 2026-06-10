@@ -32,7 +32,7 @@ const GROUP_TABLES = [
 ];
 
 async function applyAllRls(client) {
-  for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
+  for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]) await applyMigration(client, n);
 }
 async function setTenant(client, tenant) {
   await client.query("SELECT set_config('automatenlager.current_tenant', $1, true)", [tenant]);
@@ -115,27 +115,27 @@ test('#149 geteilte Config: eigener + __default__ sichtbar, fremder nie, __defau
       // nimmt ihn sonst; dieser Test seedet nicht und muss ihn selbst nehmen.
       await client.query('SELECT pg_advisory_xact_lock($1)', [SANDBOX_LOCK_KEY]);
       // sicherstellen, dass eine __default__- UND eine acme-Zeile existiert.
-      await client.query(`INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
-        VALUES ('__default__','{}'::jsonb, now()) ON CONFLICT (mandant_id) DO NOTHING`);
-      await client.query(`INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
-        VALUES ('acme','{}'::jsonb, now()) ON CONFLICT (mandant_id) DO NOTHING`);
-      await client.query(`INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
-        VALUES ('globex','{}'::jsonb, now()) ON CONFLICT (mandant_id) DO NOTHING`);
+      await client.query(`INSERT INTO automatenlager.classification_settings (tenant_id, config, updated_at)
+        VALUES ('__default__','{}'::jsonb, now()) ON CONFLICT (tenant_id) DO NOTHING`);
+      await client.query(`INSERT INTO automatenlager.classification_settings (tenant_id, config, updated_at)
+        VALUES ('acme','{}'::jsonb, now()) ON CONFLICT (tenant_id) DO NOTHING`);
+      await client.query(`INSERT INTO automatenlager.classification_settings (tenant_id, config, updated_at)
+        VALUES ('globex','{}'::jsonb, now()) ON CONFLICT (tenant_id) DO NOTHING`);
       await applyAllRls(client);
       await client.query('SET ROLE automatenlager_app');
       await setTenant(client, 'acme');
       // sichtbar: acme + __default__; NICHT globex.
-      const vis = await client.query(`SELECT mandant_id FROM automatenlager.classification_settings ORDER BY 1`);
-      const ids = vis.rows.map((r) => r.mandant_id);
+      const vis = await client.query(`SELECT tenant_id FROM automatenlager.classification_settings ORDER BY 1`);
+      const ids = vis.rows.map((r) => r.tenant_id);
       assert.ok(ids.includes('acme'), 'eigener Mandant sichtbar');
       assert.ok(ids.includes('__default__'), '__default__-Vorlage sichtbar');
       assert.ok(!ids.includes('globex'), 'fremder Mandant NIE sichtbar');
       // __default__ ist für die App schreibgeschützt: ein UPDATE trifft via USING
-      // (mandant_id=eigener) die __default__-Zeile NICHT ⇒ 0 betroffene Zeilen.
-      const upd = await client.query(`UPDATE automatenlager.classification_settings SET updated_at=now() WHERE mandant_id='__default__'`);
+      // (tenant_id=eigener) die __default__-Zeile NICHT ⇒ 0 betroffene Zeilen.
+      const upd = await client.query(`UPDATE automatenlager.classification_settings SET updated_at=now() WHERE tenant_id='__default__'`);
       assert.equal(upd.rowCount, 0, '__default__ kann von der App nicht geändert werden (USING schützt)');
       // Eigene Zeile IST änderbar (Gegenprobe: nicht-vakuös).
-      const updOwn = await client.query(`UPDATE automatenlager.classification_settings SET updated_at=now() WHERE mandant_id='acme'`);
+      const updOwn = await client.query(`UPDATE automatenlager.classification_settings SET updated_at=now() WHERE tenant_id='acme'`);
       assert.equal(updOwn.rowCount, 1, 'eigene Config-Zeile ist änderbar');
       await client.query('RESET ROLE');
     });
