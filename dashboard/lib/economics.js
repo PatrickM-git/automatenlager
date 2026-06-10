@@ -171,11 +171,22 @@ function resolvePeriod(query = {}) {
   return { from, to };
 }
 
+// #193: VK/EK pro Stück, abgeleitet aus den GEBUCHTEN GuV-Werten der Zeile (nicht aus
+// einer separaten Preisquelle) — spiegelt exakt, was die GuV verrechnet hat, und macht
+// EK-Platzhalter sofort sichtbar. VK/Stk = revenue_gross/qty (brutto), EK/Stk =
+// cost_of_goods/qty (netto) mit cost_of_goods = revenue_net − db_net. qty=0 ⇒ null.
+function perUnit(amount, qty) {
+  const q = toNum(qty);
+  if (!q || q <= 0) return null;
+  return round2(toNum(amount) / q);
+}
+
 function parseProductRow(row) {
   const revenue = round2(toNum(row.revenue_net));
   const db = round2(toNum(row.db_net));
   const revenueGross = round2(toNum(row.revenue_gross));
   const dbGross = round2(toNum(row.gross_profit));
+  const qty = toNum(row.qty);
   return {
     product_id: toNum(row.product_id),
     product_name: formatProductName(row.product_name) ?? String(toNum(row.product_id)),
@@ -184,9 +195,11 @@ function parseProductRow(row) {
     db_net: db,
     revenue_gross: revenueGross,
     gross_profit: dbGross,
-    qty: toNum(row.qty),
+    qty,
     margin_pct: marginPct(db, revenue),
     margin_gross_pct: marginPct(dbGross, revenueGross),
+    vk_per_unit: perUnit(revenueGross, qty),       // Verkaufspreis brutto / Stück
+    ek_per_unit: perUnit(revenue - db, qty),        // Einkaufspreis netto / Stück (cost_of_goods/qty)
   };
 }
 
@@ -918,5 +931,7 @@ module.exports = {
   parseMachineFilter,
   buildSeriesFromBuckets,
   dayKeyBerlin,
+  parseProductRow,
+  perUnit,
 };
 

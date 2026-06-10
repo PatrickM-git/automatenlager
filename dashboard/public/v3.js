@@ -1031,9 +1031,14 @@
       });
     }
     if (route.path === '/guv') {
-      return loadGuvData(_guvQuery)
-        .then(function (data) { return { status: 'ok', guv: data }; })
-        .catch(function (err) { return { status: err && err.message === '403' ? 'forbidden' : 'error' }; });
+      return Promise.all([
+        loadGuvData(_guvQuery),
+        fetchJson('/api/dashboard').catch(function () { return {}; }),
+      ]).then(function (results) {
+        var viewer = (results[1] && results[1].viewer) || {};
+        _guvCanEdit = !!viewer.canTriggerActions; // #193: EK/VK-Korrektur nur für Admin
+        return { status: 'ok', guv: results[0] };
+      }).catch(function (err) { return { status: err && err.message === '403' ? 'forbidden' : 'error' }; });
     }
     if (route.path === '/slots') {
       return Promise.all([
@@ -1791,6 +1796,7 @@
     };
   })();
   var _guvData = null;
+  var _guvCanEdit = false; // #193: Admin darf EK/VK in der G&V-Tabelle korrigieren
   var _guvScope = null; /* { locations: [...], machines: [...] } – einmal geladen */
   var _liveTimer = null; /* Auto-Refresh-Handle der Live-Kachel (in renderRoute aufgeräumt) */
   var _liveReqToken = 0; /* verwirft veraltete Live-Antworten bei schnellem Filterwechsel */
@@ -1840,12 +1846,16 @@
       var p = byId[k];
       var rg = Math.round(p.revenue_gross * 100) / 100;
       var gp = Math.round(p.gross_profit * 100) / 100;
+      // #193: VK/EK pro Stück aus den gebuchten Werten ableiten (qty=0 ⇒ null).
+      var vkPerUnit = p.qty > 0 ? Math.round((p.revenue_gross / p.qty) * 100) / 100 : null;
+      var ekPerUnit = p.qty > 0 ? Math.round(((p.revenue_net - p.db_net) / p.qty) * 100) / 100 : null;
       return {
         product_id: p.product_id,
         product_name: p.product_name != null ? p.product_name : String(p.product_id),
         revenue_net: Math.round(p.revenue_net * 100) / 100,
         db_net: Math.round(p.db_net * 100) / 100,
         revenue_gross: rg, gross_profit: gp, qty: p.qty,
+        vk_per_unit: vkPerUnit, ek_per_unit: ekPerUnit,
         cost_missing: !!p.cost_missing,
         margin_gross_pct: p.cost_missing ? null : (rg > 0 ? Math.round((gp / rg) * 1000) / 10 : 0),
       };
@@ -2386,14 +2396,27 @@
     }
     return '<td class="v3-guv-table__num">' + fmtPct(r.margin_gross_pct) + '</td>';
   }
+  /* #193: VK/EK pro Stück. Für Admins als Korrektur-Button (data-guv-edit), sonst nur Anzeige.
+     null (qty=0 / EK fehlt) ⇒ „–". EK fehlt wird sichtbar = Daten­qualitäts-Signal. */
+  function guvUnitCell(r, field) {
+    var val = field === 'vk' ? r.vk_per_unit : r.ek_per_unit;
+    var disp = (val == null) ? '–' : fmtEuro(val);
+    if (!_guvCanEdit || !r.product_id) { return '<td class="v3-guv-table__num">' + disp + '</td>'; }
+    return '<td class="v3-guv-table__num">' +
+      '<button type="button" class="v3-guv-edit" data-guv-edit="' + field + '" data-product-id="' + r.product_id +
+      '" data-current="' + (val == null ? '' : val) + '" data-name="' + esc(r.product_name) +
+      '" title="' + (field === 'vk' ? 'Verkaufspreis' : 'Einkaufspreis') + ' korrigieren">' + disp + ' ✎</button></td>';
+  }
   function guvRowsHtml(rows) {
-    if (!rows.length) { return '<tr><td colspan="5" class="v3-guv-table__empty">Keine Treffer</td></tr>'; }
+    if (!rows.length) { return '<tr><td colspan="7" class="v3-guv-table__empty">Keine Treffer</td></tr>'; }
     return rows.map(function (r) {
       return '<tr>' +
         '<td class="v3-guv-table__name">' + esc(r.product_name) + '</td>' +
         '<td class="v3-guv-table__num">' + fmtEuro(r.revenue_gross) + '</td>' +
         '<td class="v3-guv-table__num">' + fmtEuro(r.gross_profit) + '</td>' +
         guvMargeCell(r) +
+        guvUnitCell(r, 'vk') +
+        guvUnitCell(r, 'ek') +
         '<td class="v3-guv-table__num">' + fmtInt(r.qty) + '</td>' +
       '</tr>';
     }).join('');
@@ -2410,7 +2433,10 @@
       '<thead><tr>' +
         '<th>Produkt</th>' +
         th('Umsatz brutto', 'revenue_gross') + th('GuV brutto', 'gross_profit') +
-        th('Marge', 'margin_gross_pct') + th('Stück', 'qty') +
+        th('Marge', 'margin_gross_pct') +
+        '<th class="v3-guv-table__num" title="Verkaufspreis brutto pro Stück (aus gebuchter GuV)">VK/Stk</th>' +
+        '<th class="v3-guv-table__num" title="Einkaufspreis netto pro Stück (Kostenbasis der GuV)">EK/Stk</th>' +
+        th('Stück', 'qty') +
       '</tr></thead>' +
       '<tbody>' + guvRowsHtml(rows) + '</tbody>' +
     '</table>';
@@ -2741,6 +2767,33 @@
       if (!wrap || !_guvData) { return; }
       wrap.innerHTML = renderGuvTableEl((_guvData && _guvData.byProduct) || [], _guvQuery);
       bindSortButtons();
+      bindEditButtons();
+    }
+    // #193: EK/VK korrigieren (Admin). go-forward — Stammdaten durch die Tür; die
+    // historische G&V (guv_daily) bleibt unverändert (klar kommuniziert).
+    function bindEditButtons() {
+      root.querySelectorAll('[data-guv-edit]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var field = btn.getAttribute('data-guv-edit');
+          var pid = Number(btn.getAttribute('data-product-id'));
+          var cur = btn.getAttribute('data-current') || '';
+          var name = btn.getAttribute('data-name') || '';
+          var label = field === 'vk' ? 'Verkaufspreis brutto/Stück' : 'Einkaufspreis netto/Stück';
+          var raw = window.prompt(name + ' — neuer ' + label + ' in € (go-forward; historische G&V bleibt):', cur);
+          if (raw == null) { return; }
+          var value = Number(String(raw).replace(',', '.'));
+          if (!isFinite(value) || value <= 0) { window.alert('Bitte eine Zahl größer 0 eingeben.'); return; }
+          var url = field === 'vk' ? '/api/v2/economics/correct-vk' : '/api/v2/economics/correct-ek';
+          var body = field === 'vk' ? { product_id: pid, sale_price_gross: value } : { product_id: pid, unit_cost_net: value };
+          postJson(url, body).then(function (res) {
+            if (res.ok && res.json && res.json.ok) {
+              window.alert((res.json.message || 'Korrektur gespeichert') + '.\nHinweis: wirkt go-forward; bereits gebuchte G&V-Zeilen bleiben unverändert.');
+            } else {
+              window.alert('Korrektur fehlgeschlagen: ' + ((res.json && res.json.error && res.json.error.message) || res.status));
+            }
+          }).catch(function () { window.alert('Korrektur fehlgeschlagen (Netzwerk).'); });
+        });
+      });
     }
     function bindSortButtons() {
       root.querySelectorAll('[data-guv-sort]').forEach(function (btn) {
@@ -2760,6 +2813,7 @@
       var limit = root.querySelector('[data-guv-limit]');
       if (limit) { limit.addEventListener('change', function (e) { _guvQuery.limit = e.target.value; redrawTable(); }); }
       bindSortButtons();
+      bindEditButtons();
       bindCarousel();
       bindChartTips();
       bindExport();

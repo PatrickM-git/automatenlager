@@ -12,6 +12,7 @@ const { buildAlertDigest, queryAlertDigestPg } = require('./lib/alert-digest.js'
 const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillAuditEntry } = require('./lib/refill.js');
 const { applyRefill } = require('./lib/refill-apply.js'); // #162 (Stufe 6 Slice 2): WF7 in-process durch die Tür
 const { applyProductBatch } = require('./lib/jobs/invoice-intake.js'); // #163 (Stufe 6 Slice 3): WF2-Freigabe in-process durch die Tür
+const { validateCorrection, applyEkCorrection, applyVkCorrection } = require('./lib/economics-correct.js'); // #193: VK/EK-Korrektur durch die Tür
 const { availableBatchStatusSqlList } = require('./lib/stock-status.js');
 const { validateWriteOff, buildWriteOffAuditEntry, writeOffBatchPg } = require('./lib/write-off.js'); // #138: writeOffBatchPg geht durch die Tür
 const { validateInventoryCount, buildInventoryCountAuditEntry, setBatchCountPg } = require('./lib/inventory-count.js'); // #152: Inline-Inventur (Chargenrest setzen)
@@ -2468,6 +2469,54 @@ const server = http.createServer(async (req, res) => {
         fs.appendFileSync(auditPath, `${JSON.stringify({ at: new Date().toISOString(), login: viewer.login, tenant: viewer.tenantId, product_key, batch_id, ok, message })}\n`, 'utf8');
       } catch { /* audit write failure must not block response */ }
       sendJson(res, ok ? 200 : 502, ok ? { ok, message, summary: result } : { ok, error: { code: 'WF2_ERROR', message } });
+      return;
+    }
+
+    // ── G&V VK/EK-Korrektur (#193): Stammdaten go-forward durch die Tür ────────
+    if ((parsed.pathname === '/api/v2/economics/correct-ek' || parsed.pathname === '/api/v2/economics/correct-vk') && req.method === 'POST') {
+      const isEk = parsed.pathname.endsWith('correct-ek');
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        auditDenied(viewer, 'economics_correct_denied', { field: isEk ? 'ek' : 'vk' });
+        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Read-Only-Benutzer duerfen keine Preise korrigieren.' } });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await new Promise((resolve, reject) => {
+          let data = ''; req.on('data', (c) => { data += c; }); req.on('end', () => { resolve(data); }); req.on('error', reject);
+        }));
+      } catch {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON im Request-Body.' } });
+        return;
+      }
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
+      const productId = body && body.product_id;
+      const value = isEk ? (body && body.unit_cost_net) : (body && body.sale_price_gross);
+      const check = validateCorrection({ field: isEk ? 'ek' : 'vk', value, productId });
+      if (!check.ok) {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_CORRECTION', message: check.errors.join('; ') } });
+        return;
+      }
+      if (!tenantDb) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      let result; let ok = true; let message = '';
+      try {
+        result = isEk
+          ? await applyEkCorrection(tenantDb, viewer.tenantId, { productId, unitCostNet: check.value })
+          : await applyVkCorrection(tenantDb, viewer.tenantId, { productId, salePriceGross: check.value });
+        const n = isEk ? result.batchesUpdated : result.pricesUpdated;
+        ok = n > 0;
+        message = ok ? `${isEk ? 'EK' : 'VK'} korrigiert (${n} Zeile(n), go-forward)` : `Keine aktive ${isEk ? 'Charge' : 'Preiszeile'} für Produkt ${productId} gefunden`;
+      } catch (err) { ok = false; message = `Korrektur fehlgeschlagen: ${err.message}`; }
+      const auditPath = path.join(__dirname, 'logs', 'economics-corrections.jsonl');
+      try {
+        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
+        fs.appendFileSync(auditPath, `${JSON.stringify({ at: new Date().toISOString(), login: viewer.login, tenant: viewer.tenantId, field: isEk ? 'ek' : 'vk', product_id: productId, value: check.value, ok, message })}\n`, 'utf8');
+      } catch { /* Audit darf die Antwort nie kippen */ }
+      sendJson(res, ok ? 200 : (result ? 404 : 502), ok ? { ok, message, summary: result } : { ok, error: { code: 'CORRECTION_FAILED', message } });
       return;
     }
 
