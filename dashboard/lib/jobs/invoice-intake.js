@@ -167,33 +167,33 @@ function buildProductBatchEvents(decision = {}) {
 // ─────────────────────────────────────────────────────────────────────────────
 const SUPPLIER_UPSERT_SQL = `
   INSERT INTO automatenlager.suppliers (supplier_key, name, notes, tenant_id)
-  VALUES ($2, $3, $4, $1) ON CONFLICT (supplier_key) DO NOTHING`;
+  VALUES ($2, $3, $4, $1) ON CONFLICT (tenant_id, supplier_key) DO NOTHING`;
 const INVOICE_INSERT_SQL = `
   INSERT INTO automatenlager.invoices
     (invoice_key, supplier_id, invoice_number, invoice_date, total_gross, total_net, vat_total, source_pdf_path, claude_extraction_json, tenant_id)
   SELECT $2, s.supplier_id, $4, $5::date, $6::numeric, $7::numeric, $8::numeric, $9, $10::jsonb, $1
     FROM automatenlager.suppliers s WHERE s.supplier_key = $3 AND s.tenant_id = $1 LIMIT 1
-  ON CONFLICT (invoice_key) DO NOTHING`;
+  ON CONFLICT (tenant_id, invoice_key) DO NOTHING`;
 const INVOICE_ITEM_INSERT_SQL = `
   INSERT INTO automatenlager.invoice_items
     (invoice_id, line_number, description_raw, quantity, unit_price_net, total_net, vat_rate_pct, mhd_date, tenant_id)
   SELECT inv.invoice_id, $3::integer, $4, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::date, $1
     FROM automatenlager.invoices inv WHERE inv.invoice_key = $2 AND inv.tenant_id = $1 LIMIT 1
-  ON CONFLICT (invoice_id, line_number) DO NOTHING`;
+  ON CONFLICT (tenant_id, invoice_id, line_number) DO NOTHING`;
 const PRODUCT_INSERT_SQL = `
   INSERT INTO automatenlager.products (product_key, name, category, vat_rate_pct, unit_of_measure, tenant_id)
-  VALUES ($2, $3, $4, $5::numeric, $6, $1) ON CONFLICT (product_key) DO NOTHING`;
+  VALUES ($2, $3, $4, $5::numeric, $6, $1) ON CONFLICT (tenant_id, product_key) DO NOTHING`;
 const PRODUCT_ALIAS_INSERT_SQL = `
   INSERT INTO automatenlager.product_aliases (product_id, alias, source, is_primary, tenant_id)
   SELECT p.product_id, $3, $4, COALESCE($5::boolean, FALSE), $1
     FROM automatenlager.products p WHERE p.product_key = $2 AND p.tenant_id = $1 LIMIT 1
-  ON CONFLICT (alias, source) DO NOTHING`;
+  ON CONFLICT (tenant_id, alias, source) DO NOTHING`;
 const STOCK_BATCH_INSERT_SQL = `
   INSERT INTO automatenlager.stock_batches
     (batch_key, product_id, invoice_item_id, initial_qty, remaining_qty, unit_cost_net, mhd_date, status, received_at, tenant_id)
   SELECT $2, p.product_id, $4::bigint, $5::integer, $6::integer, $7::numeric, $8::date, $9, $10::date, $1
     FROM automatenlager.products p WHERE p.product_key = $3 AND p.tenant_id = $1 LIMIT 1
-  ON CONFLICT (batch_key) DO NOTHING`;
+  ON CONFLICT (tenant_id, batch_key) DO NOTHING`;
 
 /** WF1: Rechnungskopf + Positionen durch die Tür (supplier→invoice→items). */
 async function applyInvoiceEvents(db, tenant, { invoice, events, nowIso } = {}) {

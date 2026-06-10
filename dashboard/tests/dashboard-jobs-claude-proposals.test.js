@@ -98,7 +98,7 @@ test('#162 applyProposalDecisions LIVE: approve/reject durch die Tür; globex is
         );
       }
     }
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
     const out = await cp.applyProposalDecisions(db, 'acme', {

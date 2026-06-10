@@ -114,7 +114,7 @@ test('#162 applyPicklist LIVE: Slot-Update + pick-Movement durch die Tür; globe
         [ten.productId, `PickName ${ten.tenantId}`, ten.tenantId],
       );
     }
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
     // Seed-Slot acme: current 5, capacity 20, Charge b_acme remaining 30 ⇒ availableFill 25; pick 8 ⇒ +8 = 13

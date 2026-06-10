@@ -82,7 +82,7 @@ test('#163 buildProductBatchEvents: neues Produkt ⇒ product + alias + stock_ba
 test('#163 applyInvoiceEvents LIVE: Lieferant + Rechnung + Positionen durch die Tür; globex isoliert', async (t) => {
   await inSandbox(t, async (client) => {
     await seedAcmeGlobex(client);
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
     const res = await ii.applyInvoiceEvents(db, 'acme', { invoice: sampleInvoice(), nowIso: NOW });
@@ -109,7 +109,7 @@ test('#163 applyInvoiceEvents LIVE: Lieferant + Rechnung + Positionen durch die 
 test('#163 applyProductBatch LIVE: neues Produkt + Alias + Charge; verlinkt invoice_item.product_id; globex isoliert', async (t) => {
   await inSandbox(t, async (client) => {
     await seedAcmeGlobex(client);
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
     // erst Rechnung+Position anlegen (Linking-Ziel)
@@ -159,7 +159,7 @@ test('#163 applyProductBatch LIVE: neues Produkt + Alias + Charge; verlinkt invo
 test('#163 runInvoiceIntakeShadow: Deckungsgleichheit vs. Ist → equal; fehlende Position → ungleich', async (t) => {
   await inSandbox(t, async (client) => {
     await seedAcmeGlobex(client);
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
     // n8n-Ist: Rechnung mit 2 Positionen liegt schon vor.

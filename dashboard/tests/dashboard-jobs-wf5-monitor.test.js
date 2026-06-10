@@ -84,7 +84,7 @@ test('#162 syncWf5Warnings LIVE: INSERT + Auto-Resolve durch die Tür; globex is
         [`exp_${ten.tenantId}`, ten.productId, ten.tenantId],
       );
     }
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
     // 1) Bedingungen lesen + Warnungen bauen + synchronisieren (nur acme)

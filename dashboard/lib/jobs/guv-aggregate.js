@@ -336,7 +336,7 @@ async function writeGuvRows(db, tenant, rows) {
               quantity_sold, revenue_gross, revenue_net, cost_of_goods, gross_profit, cost_basis, source)
            VALUES ($1, $2, $3::date, $4::bigint, $5::integer, $6::bigint,
                    $7::integer, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12, $13)
-           ON CONFLICT (guv_key) DO NOTHING`,
+           ON CONFLICT (tenant_id, guv_key) DO NOTHING`,
         params: [row.guv_key, row.posting_date, machineId, row.mdb_code, productId,
           row.quantity_sold, row.revenue_gross, row.revenue_net, row.cost_of_goods, row.gross_profit, row.cost_basis, row.source],
       });

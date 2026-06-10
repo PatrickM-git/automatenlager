@@ -32,7 +32,7 @@ const GROUP_TABLES = [
 ];
 
 async function applyAllRls(client) {
-  for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+  for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
 }
 async function setTenant(client, tenant) {
   await client.query("SELECT set_config('automatenlager.current_tenant', $1, true)", [tenant]);
