@@ -290,8 +290,10 @@ function buildWorker(env = process.env) {
   // WF8 GuV-Aggregator (n8n: Knoten heißt "Täglich 02:00", echte Regel = alle 15 min,
   // minutesInterval:15) → per-Mandant-Job durch die Tür, intervalMs (drift-immun).
   // Idempotent (ON CONFLICT guv_key) ⇒ häufige Läufe sind unschädlich.
+  // runOnStart: sofortiger erster Lauf — damit bei häufigen Container-Neustarts (Deploy-Loop)
+  // der Job bereits gelaufen ist, bevor der nächste SIGTERM kommt (sonst Lücken von >15 min).
   if (guvAggregateJob) {
-    schedules.push({ name: guvAggregateJob.key, intervalMs: Number(env.WORKER_GUV_MS) || 15 * 60 * 1000, kind: 'tenant',
+    schedules.push({ name: guvAggregateJob.key, intervalMs: Number(env.WORKER_GUV_MS) || 15 * 60 * 1000, runOnStart: true, kind: 'tenant',
       run: () => guvAggregateJob.run() });
   }
   // GuV-Backfill (Issue #172): Lücken-Fallback aus dem Roh-Export → per Mandant durch

@@ -543,7 +543,7 @@ const SALE_INSERT_SQL = `
     LEFT JOIN automatenlager.slot_assignments sa ON sa.product_slot_key = $15 AND sa.tenant_id = $1
    WHERE m.machine_key = $3 AND m.tenant_id = $1
    LIMIT 1
-  ON CONFLICT (nayax_transaction_id) DO NOTHING`;
+  ON CONFLICT (tenant_id, provider, nayax_transaction_id) DO NOTHING`;
 
 const MOVEMENT_INSERT_SQL = `
   INSERT INTO automatenlager.stock_movements
@@ -554,7 +554,7 @@ const MOVEMENT_INSERT_SQL = `
     LEFT JOIN automatenlager.slot_assignments sa ON sa.product_slot_key = $3 AND sa.tenant_id = $1
    WHERE sb.batch_key = $10 AND sb.tenant_id = $1
    LIMIT 1
-  ON CONFLICT (movement_key) DO NOTHING`;
+  ON CONFLICT (tenant_id, movement_key) DO NOTHING`;
 
 const WARNING_INSERT_SQL = `
   INSERT INTO automatenlager.warnings
@@ -563,16 +563,15 @@ const WARNING_INSERT_SQL = `
     FROM (SELECT 1) x
     LEFT JOIN automatenlager.machines m ON m.machine_key = $5 AND m.tenant_id = $1
     LEFT JOIN automatenlager.products p ON p.product_key = $6 AND p.tenant_id = $1
-  ON CONFLICT (warning_key) DO NOTHING`;
+  ON CONFLICT (tenant_id, warning_key) DO NOTHING`;
 
-// Watermark-Upsert auf der PK (workflow_key). Hinweis: die globale PK (statt
-// (tenant_id, workflow_key)) ist die in der SPEC dokumentierte #111-Altlast →
-// per-Mandant-Watermark erst nach Slice 4 voll MT-fähig. Für den heutigen
-// Einzelmandanten (Faltrix) korrekt; der Schreibweg läuft trotzdem durch die Tür (RLS).
+// Watermark-Upsert auf der mandanten-PK (tenant_id, workflow_key). Seit #111 (0031)
+// ist der Watermark per Mandant geschlüsselt — der globale (workflow_key)-PK ist weg.
+// Schreibweg läuft durch die Tür (RLS); die WHERE-Klausel bleibt als Defense-in-depth.
 const WATERMARK_UPSERT_SQL = `
   INSERT INTO automatenlager.workflow_state (workflow_key, last_inventory_review_at, updated_at, tenant_id)
   VALUES ($2, $3::timestamptz, now(), $1)
-  ON CONFLICT (workflow_key) DO UPDATE
+  ON CONFLICT (tenant_id, workflow_key) DO UPDATE
     SET last_inventory_review_at = EXCLUDED.last_inventory_review_at, updated_at = now()
     WHERE workflow_state.tenant_id = $1`;
 

@@ -66,6 +66,40 @@ test('#161 createWorkerHealthMonitorJob: ohne exec ⇒ TypeError; mit Fakes ⇒ 
   assert.equal(sent[0].to, 'ops@x');
 });
 
+test('#161 createWorkerHealthMonitorJob: Cooldown unterdrückt Folge-Mails', async () => {
+  let tick = NOW.getTime();
+  const fakeExec = async () => ({ rows: [] }); // keine Läufe ⇒ NO_SUCCESS
+  const sent = [];
+  const job = mon.createWorkerHealthMonitorJob({
+    exec: fakeExec,
+    mailer: { send: async (m) => { sent.push(m); return { id: '1' }; } },
+    env: { ALERT_EMAIL_DEFAULT: 'ops@x' },
+    expectedJobs: [{ key: 'wf-guv-aggregate', maxAgeMin: 60 }],
+    now: () => new Date(tick),
+    cooldownMs: 60 * 60 * 1000, // 1 h für den Test
+  });
+
+  // 1. Lauf → Mail gesendet
+  const r1 = await job.run();
+  assert.equal(r1.mailed, true);
+  assert.equal(r1.suppressed, false);
+  assert.equal(sent.length, 1);
+
+  // 2. Lauf 10 min später → Cooldown greift → keine Mail
+  tick += 10 * 60 * 1000;
+  const r2 = await job.run();
+  assert.equal(r2.mailed, false);
+  assert.equal(r2.suppressed, true);
+  assert.equal(sent.length, 1);
+
+  // 3. Lauf nach Ablauf des Cooldowns (61 min nach erstem Lauf) → Mail gesendet
+  tick = NOW.getTime() + 61 * 60 * 1000;
+  const r3 = await job.run();
+  assert.equal(r3.mailed, true);
+  assert.equal(r3.suppressed, false);
+  assert.equal(sent.length, 2);
+});
+
 test('#161 readJobRuns LIVE: Query gegen echtes audit.workflow_runs (Infra)', async (t) => {
   const client = await connectOrSkip(t);
   if (!client) return;

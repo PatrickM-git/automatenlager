@@ -106,21 +106,38 @@ async function readJobRuns(exec, keys) {
  * @param {()=>Date} [deps.now]
  * @returns {{key:string, run:()=>Promise<any>}}
  */
-function createWorkerHealthMonitorJob({ exec, mailer, env = process.env, expectedJobs = DEFAULT_EXPECTED_JOBS, now } = {}) {
+function createWorkerHealthMonitorJob({ exec, mailer, env = process.env, expectedJobs = DEFAULT_EXPECTED_JOBS, now, cooldownMs } = {}) {
   if (typeof exec !== 'function') throw new TypeError('monitor: exec (INFRA-Executor) erforderlich');
   const clock = typeof now === 'function' ? now : () => new Date();
+  // Cooldown: nach einer gesendeten Alert-Mail frühestens wieder nach cooldownMs mailen.
+  // Verhindert Spam bei dauerhafter Alert-Bedingung (z. B. täglicher Job verpasst).
+  // Standard 4 h; überschreibbar via cooldownMs-Opt oder WORKER_MONITOR_COOLDOWN_MS-Env.
+  const minCooldown = Number(cooldownMs) > 0
+    ? Number(cooldownMs)
+    : (Number(env.WORKER_MONITOR_COOLDOWN_MS) > 0 ? Number(env.WORKER_MONITOR_COOLDOWN_MS) : 4 * 60 * 60 * 1000);
+  let lastMailedAt = null;
   return {
     key: WORKFLOW_KEY,
     run: async () => {
       const rows = await readJobRuns(exec, expectedJobs.map((j) => j.key));
       const { alerts, ok } = evaluateJobHealth(rows, expectedJobs, clock());
       let mailed = false;
+      let suppressed = false;
       if (alerts.length && mailer) {
-        const to = (env.ALERT_EMAIL_DEFAULT && String(env.ALERT_EMAIL_DEFAULT).trim()) || null;
-        const mail = buildMonitorMail(alerts, clock().toISOString());
-        if (to && mail) { await mailer.send({ to, subject: mail.subject, html: mail.html }); mailed = true; }
+        const nowTs = clock();
+        const cooldownElapsed = !lastMailedAt || (nowTs.getTime() - lastMailedAt.getTime()) >= minCooldown;
+        if (cooldownElapsed) {
+          const to = (env.ALERT_EMAIL_DEFAULT && String(env.ALERT_EMAIL_DEFAULT).trim()) || null;
+          const mail = buildMonitorMail(alerts, nowTs.toISOString());
+          if (to && mail) { await mailer.send({ to, subject: mail.subject, html: mail.html }); mailed = true; lastMailedAt = nowTs; }
+        } else {
+          suppressed = true;
+        }
+      } else {
+        // Alerts weg → Cooldown zurücksetzen, damit die nächste echte Welle sofort meldet.
+        lastMailedAt = null;
       }
-      return { checked: expectedJobs.length, okJobs: ok, alerts, mailed };
+      return { checked: expectedJobs.length, okJobs: ok, alerts, mailed, suppressed };
     },
   };
 }

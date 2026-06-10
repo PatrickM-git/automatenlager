@@ -219,7 +219,7 @@ test('#163 applyNayaxSales LIVE: sale + stock_movement (Trigger bucht remaining_
         [`b_${ten.tenantId}`, ten.tenantId],
       );
     }
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
     // Bestehende Watermark-Zeile (i. d. R. Faltrix' globaler Schlüssel) vorab erfassen —
@@ -249,20 +249,19 @@ test('#163 applyNayaxSales LIVE: sale + stock_movement (Trigger bucht remaining_
     });
     assert.equal(Number(batch.rows[0].remaining_qty), 29, 'remaining_qty vom Trigger dekrementiert (kein Doppel-Dekrement)');
 
-    // Watermark mandantensicher: gehört der globale Schlüssel bereits einem anderen
-    // Mandanten (Faltrix, #111-Altlast), bleibt dessen Zeile UNVERÄNDERT (Guard greift);
-    // andernfalls hat acme jetzt eine eigene Zeile mit dem neuen Zeitstempel.
+    // Watermark mandantensicher seit #111 (0031): PK ist (tenant_id, workflow_key).
+    // acme bekommt IMMER seine EIGENE Zeile; eine evtl. vorhandene Fremd-Zeile (z. B.
+    // __default__/Faltrix-Seed) bleibt UNVERÄNDERT — kein Update über die Mandantengrenze.
     const post = await client.query(
       `SELECT tenant_id, last_inventory_review_at FROM automatenlager.workflow_state WHERE workflow_key = 'WF3_NAYAX_FIFO'`);
-    const foreign = pre.rows[0] && pre.rows[0].tenant_id !== 'acme';
-    if (foreign) {
-      assert.equal(post.rows.length, 1, 'kein zweiter Zeilen-Schmuggel');
-      assert.equal(post.rows[0].tenant_id, pre.rows[0].tenant_id, 'fremde Watermark-Zeile nicht gekapert');
-      assert.deepEqual(post.rows[0].last_inventory_review_at, pre.rows[0].last_inventory_review_at, 'fremder Zeitstempel unverändert');
-    } else {
-      const own = post.rows.find((r) => r.tenant_id === 'acme');
-      assert.ok(own, 'acme-Watermark gesetzt');
-      assert.equal(new Date(own.last_inventory_review_at).toISOString(), '2026-06-05T12:00:00.000Z');
+    const own = post.rows.find((r) => r.tenant_id === 'acme');
+    assert.ok(own, 'acme-Watermark als eigene Zeile gesetzt');
+    assert.equal(new Date(own.last_inventory_review_at).toISOString(), '2026-06-05T12:00:00.000Z');
+    if (pre.rows[0] && pre.rows[0].tenant_id !== 'acme') {
+      const foreignRow = post.rows.find((r) => r.tenant_id === pre.rows[0].tenant_id);
+      assert.ok(foreignRow, 'fremde Watermark-Zeile bleibt erhalten (kein Hijack)');
+      assert.deepEqual(foreignRow.last_inventory_review_at, pre.rows[0].last_inventory_review_at,
+        'fremder Zeitstempel unverändert');
     }
 
     // ISOLATION: globex unangetastet
@@ -286,7 +285,7 @@ test('#163 runNayaxSalesShadow: compute-only, Deckungsgleichheit vs. n8n-Ist →
     await client.query(
       `UPDATE automatenlager.stock_batches SET mhd_date = '2027-06-01' WHERE batch_key = 'b_acme' AND tenant_id = 'acme'`,
     );
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
     // n8n-Ist simulieren: ein Verkauf SHX1 liegt bereits in sales_transactions.
