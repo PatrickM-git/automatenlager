@@ -17,7 +17,7 @@
 const { resolveTenantAlertEmail } = require('./mailer.js');
 
 const CUTOVER_MONITOR_KEY = 'cutover-readiness-monitor';
-const DEFAULT_THRESHOLD = 7;
+const DEFAULT_THRESHOLD = 1;
 
 /**
  * Reine Logik: Serien-Stand fortschreiben.

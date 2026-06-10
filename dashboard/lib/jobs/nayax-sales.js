@@ -703,7 +703,15 @@ async function runNayaxSalesShadow(db, tenant, { sales = [], config = {}, nowIso
   const wmIso = (workflowState && workflowState.last_inventory_review_at)
     ? new Date(workflowState.last_inventory_review_at).toISOString()
     : (cfg.inventory_cutover_datetime || '1970-01-01T00:00:00.000Z');
-  const winStart = windowStartIso || new Date(new Date(wmIso).getTime() - 2 * 86400000).toISOString();
+  // Vergleichsfenster: früheste Transaktion in der aktuellen Sales-Charge, damit nur
+  // Movements verglichen werden die aus DIESEN Transaktionen entstanden sein könnten.
+  // Alte n8n-Läufe (> sales-Fenster) polluten sonst onlyActual → equal=false obwohl korrekt.
+  const salesEarliest = sales.length > 0
+    ? sales.reduce((min, s) => { const d = saleDate(s); return d < min ? d : min; }, saleDate(sales[0]))
+    : null;
+  const validSalesEarliest = salesEarliest && salesEarliest.getTime() > new Date('2020-01-01').getTime();
+  const winStart = windowStartIso
+    || (validSalesEarliest ? salesEarliest.toISOString() : new Date(new Date(wmIso).getTime() - 2 * 86400000).toISOString());
   const prodRes = await door.read({ tables: ['slot_assignments', 'products', 'machines', 'product_aliases'], text: PRODUCT_READ_SQL });
   const batchRes = await door.read({ tables: ['stock_batches', 'products'], text: batchReadSql() });
 

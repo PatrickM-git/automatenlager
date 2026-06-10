@@ -222,6 +222,12 @@ test('#163 applyNayaxSales LIVE: sale + stock_movement (Trigger bucht remaining_
     for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
+    // Compat-Hack workflow_state_key_uk (Single-Tenant-Hotfix bis Cutover #198) kollidiert mit
+    // dem Sandbox-Insert für 'acme', wenn Faltrix' Produktions-Zeile noch sichtbar ist.
+    // Innerhalb des Sandbox-BEGIN/ROLLBACK sicher: ROLLBACK stellt die Produktions-Zeile wieder her.
+    // Muss VOR dem pre-Snapshot erfolgen, damit die Fremd-Zeilen-Assertion nicht auf gelöschte Zeile prüft.
+    await client.query(`DELETE FROM automatenlager.workflow_state WHERE workflow_key = 'WF3_NAYAX_FIFO'`);
+
     // Bestehende Watermark-Zeile (i. d. R. Faltrix' globaler Schlüssel) vorab erfassen —
     // sie darf von einem Fremd-Mandanten NICHT überschrieben werden (mandantensicher).
     const pre = await client.query(
