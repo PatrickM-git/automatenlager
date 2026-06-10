@@ -3,6 +3,30 @@
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 > Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-10_lager-fix-wf3-constraint.md`.
 
+## Session 2026-06-10 (Nachmittag) — Cutover-Guard-Fix + EK/Pfand-Kostenbasis-Reconciliation
+
+### Cutover-Guard (n8n-Ablösung)
+- **Threshold 7 → 1 Tag** (`cutover-monitor.js` `DEFAULT_THRESHOLD`), per `CUTOVER_STREAK_THRESHOLD` überschreibbar.
+- **Shadow-Window-Bug behoben** (`nayax-sales.js` `runNayaxSalesShadow`): Vergleichsfenster startete bei `Watermark−2d` → alte n8n-Movements polluteten `onlyActual` → `equal=false` (Streak blieb 0). Jetzt: Fenster ab frühester Transaktion der aktuellen Sales-Charge. Befund kam aus Issue [#206](https://github.com/PatrickM-git/automatenlager/issues/206) (Guard hatte ihn **automatisch** eröffnet — funktionierte, war nur im Dashboard unsichtbar).
+- Commit `437d171`, deployt, Suite grün (16/16 nayax-sales, 9/9 cutover).
+- **Status n8n-Ablösung:** Fundament + nicht-kritische Jobs LIVE. WF3/WF1 = Schatten. Nach 1 deckungsgleicher Nacht → Cutover-Mail → n8n WF3/WF1 deaktivieren, dann WF2/WF4 + Migration 0033 (BYPASSRLS-Entzug).
+
+### EK/Pfand-Kostenbasis — Reconciliation gegen Metro-Rechnungen (Steuerberater-Bericht)
+**Entscheidung des Nutzers:** Pfand gehört in die Warenkosten (Automatengeschäft: Kunde nimmt Flasche mit → Pfand nicht rückholbar). Kanonisch: `unit_cost_net` = **Netto + Pfand**; GuV = `× MwSt` = brutto. Memory `ek-pfand-kostenbasis`.
+- **Aktive Charge korrigiert:** Lichtenauer still 0,35 (letzte Session fälschlich = Pfand entfernt) → **0,7364** (0,350 + 0,386 Kistenpfand 4,25÷11).
+- **Sheet-Befund:** Spalte `unit_cost` mischt Basen — Rechnungs-Import-Zeilen = netto+Pfand (OHNE MwSt), 02.05-Bestandsaufnahme-Zeilen = brutto (MIT MwSt, ×1,19). Daher GuV teils Doppel-MwSt (z.B. Red Bull Spring 2,09 = 1,7612×1,19).
+- **guv_daily restated** (reversibel, Backup `automatenlager.guv_daily_bak_20260610`), je Produkt EINHEITLICH netto+Pfand × MwSt:
+  - Lichtenauer still → **0,88** (war wild: 1,05/0,85/0,42), medium → **1,07** (zwei 0,00-Bug-Zeilen gefixt)
+  - Red Bull → **1,29** (netto+Pfand 1,08), Red Bull Spring → **1,76** (netto+Pfand 1,48; KEIN Verlust mehr, VK 2,00 > 1,76)
+  - Coca Cola Zero → **0,99** (netto 0,58 + 0,25)
+- **Gesamt-Audit:** Rest aller Produkte im Rundungsbereich (≤0,03) korrekt.
+
+### NOCH OFFEN (EK)
+1. **Coca Cola / Fanta Exotic / Sprite**: weiter Platzhalter **1,2852** (keine Rechnung gesehen) — echte EK eintragen.
+2. **Hochwald Eiskaffee**: wird 19% statt **7%** (Milchgetränk) gebucht → Per-Produkt-MwSt = Stufe 6.
+3. **Red Bull go-forward:** Aktive FIFO-Front-Charge = 1,48 (→1,76); Historie auf 1,08 (→1,29) restated. Minimaler Sprung bis die 1,48-Charge leer ist. Bei Bedarf Einheits-EK erzwingen.
+4. Sheet ↔ DB driften (z.B. Lichtenauer still Sheet 0,714 vs DB jetzt 0,7364) — Sheet ist nicht mehr Single-Source.
+
 ## Session 2026-06-10 (sehr spät) — Alle Seiten hängen + 45 Warnungen + WF3-Constraint
 
 **Branch `main`**, Commits `95001bf`–`c0d65d8`, deployt (außer WF3-Constraint-Fix, Mini offline).
