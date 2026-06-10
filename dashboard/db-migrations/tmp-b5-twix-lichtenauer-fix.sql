@@ -27,7 +27,7 @@ VALUES
    1.00,  1.00,
    -15.50, ROUND(1.00 - (0.4800 * 1.19), 2),
    19, ROUND((0.4800 * 1.19) / 16.50, 4),
-   'admin', 'B-5: WF8-Sheets Kartonpreis 16.50 statt Stueckpreis 0.48');
+   'admin', '{"note":"B-5: WF8-Sheets Kartonpreis 16.50 statt Stueckpreis 0.48"}');
 
 -- 2. Lichtenauer Still: batch unit_cost_net korrigieren
 --    0.7140 -> 0.35 (laut Rechnung 2026-05-29, netto ohne MwSt, ohne Pfand)
