@@ -70,9 +70,9 @@ async function setupRestatement(client, { acmeKu = true } = {}) {
 
   // KU-Config global (__default__).
   await client.query(
-    `INSERT INTO automatenlager.classification_settings (mandant_id, config, updated_at)
+    `INSERT INTO automatenlager.classification_settings (tenant_id, config, updated_at)
        VALUES ('__default__', $1::jsonb, now())
-     ON CONFLICT (mandant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+     ON CONFLICT (tenant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
     [JSON.stringify({ kleinunternehmerAktiv: true })]);
 
   for (const n of [22, 23, 24, 25, 26, 30]) await applyMigration(client, n); // RLS scharf + audit-Grants

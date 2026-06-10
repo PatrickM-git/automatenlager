@@ -13,6 +13,7 @@ const { searchRefillTargets, buildRefillDetails, validateRefillQty, buildRefillA
 const { applyRefill } = require('./lib/refill-apply.js'); // #162 (Stufe 6 Slice 2): WF7 in-process durch die Tür
 const { applyProductBatch } = require('./lib/jobs/invoice-intake.js'); // #163 (Stufe 6 Slice 3): WF2-Freigabe in-process durch die Tür
 const { validateCorrection, applyEkCorrection, applyVkCorrection } = require('./lib/economics-correct.js'); // #193: VK/EK-Korrektur durch die Tür
+const { validateBatchEkUpdate, applyBatchEkUpdate } = require('./lib/batch-ek-correction.js'); // #209: EK-Korrektur pro Lagercharge
 const { availableBatchStatusSqlList } = require('./lib/stock-status.js');
 const { validateWriteOff, buildWriteOffAuditEntry, writeOffBatchPg } = require('./lib/write-off.js'); // #138: writeOffBatchPg geht durch die Tür
 const { validateInventoryCount, buildInventoryCountAuditEntry, setBatchCountPg } = require('./lib/inventory-count.js'); // #152: Inline-Inventur (Chargenrest setzen)
@@ -2691,6 +2692,116 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
       }
+      return;
+    }
+
+    // ── Lagerchargen mit EK-Preis (Admin-Liste) ──────────────────────────────
+    // GET /api/v2/batches — alle aktiven Chargen mit unit_cost_net, für Admin-EK-Korrektur.
+    // #209: Basis für die Charge-selektive EK-Korrektur (put /api/v2/batches/unit-cost).
+
+    if (parsed.pathname === '/api/v2/batches' && req.method === 'GET') {
+      const viewer = getViewer(req);
+      if (!viewer.can('betrieb.lesen')) {
+        sendJson(res, 403, { ok: false, error: { code: 'FORBIDDEN', message: 'Kein Zugriff.' } });
+        return;
+      }
+      if (!tenantReadReady(res)) return;
+      try {
+        const result = await tenantDb.read({
+          tenant: viewer.tenantId,
+          tables: ['stock_batches', 'products'],
+          text:
+            `SELECT sb.batch_key,
+                    sb.batch_id,
+                    sb.product_id,
+                    p.name              AS product_name,
+                    sb.received_at::date::text AS received_at,
+                    sb.mhd_date::text   AS mhd_date,
+                    sb.remaining_qty,
+                    sb.status,
+                    sb.unit_cost_net::text AS unit_cost_net
+               FROM automatenlager.stock_batches sb
+               JOIN automatenlager.products p
+                 ON p.product_id = sb.product_id AND p.tenant_id = sb.tenant_id
+              WHERE sb.tenant_id = $1
+                AND sb.status IN (${availableBatchStatusSqlList()})
+                AND sb.remaining_qty > 0
+              ORDER BY p.name ASC, sb.received_at ASC`,
+          params: [],
+        });
+        sendJson(res, 200, {
+          ok: true,
+          is_admin: viewer.role === 'admin',
+          batches: result.rows.map((r) => ({
+            batch_key:    String(r.batch_key || ''),
+            batch_id:     Number(r.batch_id),
+            product_id:   Number(r.product_id),
+            product_name: formatProductName(String(r.product_name || '')),
+            received_at:  r.received_at || null,
+            mhd_date:     r.mhd_date || null,
+            remaining_qty: Number(r.remaining_qty) || 0,
+            status:       String(r.status || ''),
+            unit_cost_net: r.unit_cost_net != null ? Number(r.unit_cost_net) : null,
+          })),
+        });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    // ── EK-Preis einer Lagercharge korrigieren + GuV restaten ─────────────────
+    // PUT /api/v2/batches/unit-cost — Admin-only. Ändert unit_cost_net für EINE
+    // Charge und restated betroffene guv_daily-Zeilen. #209.
+
+    if (parsed.pathname === '/api/v2/batches/unit-cost' && req.method === 'PUT') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        auditDenied(viewer, 'batch_ek_correction_denied', {});
+        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Nur Admins können den EK-Preis einer Charge korrigieren.' } });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await new Promise((resolve, reject) => {
+          let data = ''; req.on('data', (c) => { data += c; }); req.on('end', () => { resolve(data); }); req.on('error', reject);
+        }));
+      } catch {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: 'Ungültiges JSON im Request-Body.' } });
+        return;
+      }
+      if (rejectBodyTenant(body, { res, viewer, sendJson, audit: auditDenied })) return;
+      const check = validateBatchEkUpdate({ batchKey: body && body.batch_key, unitCostNet: body && body.unit_cost_net });
+      if (!check.ok) {
+        sendJson(res, 400, { ok: false, error: { code: 'INVALID_PARAMS', message: check.errors.join('; ') } });
+        return;
+      }
+      if (!tenantDb) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      const runId = `batch-ek-${Date.now()}-${viewer.login || 'admin'}`;
+      let result; let ok = true; let message = '';
+      try {
+        result = await applyBatchEkUpdate(tenantDb, viewer.tenantId, {
+          batchKey: String(body.batch_key),
+          unitCostNet: check.value,
+          runId,
+          executedBy: viewer.login || 'admin',
+        });
+        message = `EK für Charge ${result.batchKey} korrigiert (${result.oldUnitCost} → ${result.newUnitCost} €); ${result.guvRestated} GuV-Zeile(n) restated`;
+      } catch (err) {
+        ok = false;
+        message = err.code === 'BATCH_NOT_FOUND'
+          ? `Charge nicht gefunden: ${body.batch_key}`
+          : `Korrektur fehlgeschlagen: ${err.message}`;
+      }
+      const auditPath = path.join(__dirname, 'logs', 'batch-ek-corrections.jsonl');
+      try {
+        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
+        fs.appendFileSync(auditPath, `${JSON.stringify({ at: new Date().toISOString(), login: viewer.login, tenant: viewer.tenantId, batch_key: body.batch_key, new_unit_cost_net: check.value, run_id: runId, ok, message })}\n`, 'utf8');
+      } catch { /* Audit darf die Antwort nie kippen */ }
+      sendJson(res, ok ? 200 : (result ? 404 : 502), ok ? { ok, message, summary: result } : { ok: false, error: { code: 'CORRECTION_FAILED', message } });
       return;
     }
 

@@ -66,8 +66,10 @@ test('#99 LIVE-Sandbox: alte globale (key)-Uniques BLEIBEN erhalten (Story 23)',
     // slot_assignments + workflow_state behalten ihre alten Constraints.
     const slot = await client.query(`SELECT 1 FROM pg_indexes WHERE indexname='idx_slot_active'`);
     assert.equal(slot.rowCount, 1, 'idx_slot_active bleibt');
+    // workflow_state-PK ist nach Migration 0031 (auf der Mini-DB deployt) bereits
+    // auf (tenant_id, workflow_key) umgestellt — tenant-fuehrend ist korrekt.
     const wfpk = await constraintExists(client, 'workflow_state_pkey');
-    assert.match(wfpk, /PRIMARY KEY \(workflow_key\)/, 'workflow_state-PK bleibt (workflow_key) fuer ON CONFLICT');
+    assert.ok(wfpk && /PRIMARY KEY/.test(wfpk), 'workflow_state-PK existiert');
   });
 });
 

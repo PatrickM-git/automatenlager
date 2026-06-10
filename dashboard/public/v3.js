@@ -1019,13 +1019,16 @@
         fetchJson('/api/v2/inventory-mhd'),
         fetchJson('/api/v2/assortment-slots').catch(function () { return {}; }),
         fetchJson('/api/dashboard').catch(function () { return {}; }),
+        fetchJson('/api/v2/batches').catch(function () { return {}; }), // #209: EK-Chargen (Admin)
       ]).then(function (results) {
-        var res    = results[0];
-        var viewer = (results[2] && results[2].viewer) || {};
+        var res     = results[0];
+        var viewer  = (results[2] && results[2].viewer) || {};
+        var batchEk = results[3]; // { ok, is_admin, batches }
         _lagerCanEdit = !!viewer.canTriggerActions;
         var batches = (res && res.data && res.data.allBatches) || [];
-        if (batches.length === 0) { return { status: 'empty' }; }
-        return { status: 'ok', lager: { batches: batches } };
+        var ekBatches = (batchEk && batchEk.ok && batchEk.batches) || [];
+        if (batches.length === 0 && ekBatches.length === 0) { return { status: 'empty' }; }
+        return { status: 'ok', lager: { batches: batches, ekBatches: ekBatches } };
       }).catch(function () {
         return { status: 'error' };
       });
@@ -1330,6 +1333,7 @@
   var _lagerBatches = [];
   var _lagerCanEdit = false;
   var _lagerSort    = { col: 'mhd_date', dir: 'asc' };
+  var _ekBatches    = []; // #209: EK-Chargen (Admin)
   var WRITE_OFF_REASONS = ['MHD abgelaufen', 'Bruch / Beschädigung', 'Schwund', 'Rückruf', 'Sonstiges'];
 
   function mhdSeverity(days) {
@@ -1439,9 +1443,10 @@
   }
 
   function renderLagerPage(data) {
-    var batches = (data && data.batches) || [];
-    var total   = batches.length;
-    var totalQty = batches.reduce(function (s, b) { return s + b.remaining_qty; }, 0);
+    var batches   = (data && data.batches)   || [];
+    var ekBatches = (data && data.ekBatches) || [];
+    var total     = batches.length;
+    var totalQty  = batches.reduce(function (s, b) { return s + b.remaining_qty; }, 0);
 
     var kpis = '<div class="v3-cockpit-kpis" style="margin-bottom:18px">' +
       '<div class="v3-cockpit-kpi"><span class="v3-cockpit-kpi__label">Chargen</span>' +
@@ -1450,7 +1455,7 @@
         '<span class="v3-cockpit-kpi__value">' + totalQty + '</span></div>' +
     '</div>';
 
-    return kpis + renderLagerTable(batches) + renderBatchSearchSection();
+    return kpis + renderLagerTable(batches) + renderBatchSearchSection() + renderEkChargenSection(ekBatches);
   }
 
   function rerenderLagerTable() {
@@ -1708,6 +1713,140 @@
           product_name: btn.getAttribute('data-product-name') || '',
           remaining:    Number(btn.getAttribute('data-remaining')) || 0,
           batch_count:  Number(btn.getAttribute('data-batch-count')) || 1,
+        });
+      });
+    });
+  }
+
+  /* ---- EK-Chargen-Tabelle (Admin / #209) ---------------------------------- */
+
+  function renderEkChargenSection(ekBatches) {
+    if (!_lagerCanEdit || !ekBatches || ekBatches.length === 0) { return ''; }
+    var rows = ekBatches.map(function (b) {
+      var ekDisplay = b.unit_cost_net != null
+        ? b.unit_cost_net.toFixed(4).replace('.', ',') + ' €'
+        : '—';
+      var received = b.received_at ? b.received_at.split('-').reverse().join('.') : '—';
+      var editBtn = '<button type="button" class="v3-btn v3-btn--sm" data-ek-edit-btn' +
+        ' data-batch-key="' + esc(b.batch_key) + '"' +
+        ' data-product-name="' + esc(b.product_name) + '"' +
+        ' data-unit-cost="' + (b.unit_cost_net != null ? b.unit_cost_net : '') + '"' +
+        ' title="EK-Preis dieser Charge korrigieren">✎ EK</button>';
+      return '<tr class="v3-lager-row">' +
+        '<td class="v3-lager-td v3-lager-td--name">' + esc(b.product_name) + '</td>' +
+        '<td class="v3-lager-td">' + esc(received) + '</td>' +
+        '<td class="v3-lager-td v3-lager-td--qty">' + b.remaining_qty + ' Stk.</td>' +
+        '<td class="v3-lager-td" style="font-variant-numeric:tabular-nums">' + ekDisplay + '</td>' +
+        '<td class="v3-lager-td v3-lager-td--action">' + editBtn + '</td>' +
+      '</tr>';
+    }).join('');
+
+    return '<section class="v3-lager-search-section" data-ek-chargen-section>' +
+      '<h2 class="v3-lager-search-section__title">EK-Preis pro Charge <span class="v3-badge v3-badge--warn" style="vertical-align:middle;font-size:11px">Admin</span></h2>' +
+      '<p class="v3-lager-search-section__lead">Einstandspreis einer Lagercharge korrigieren. Betroffene GuV-Zeilen werden automatisch restated und im Audit-Log festgehalten.</p>' +
+      '<div data-ek-chargen-status style="margin-bottom:8px"></div>' +
+      '<div class="v3-lager-table-wrap">' +
+        '<table class="v3-lager-table" aria-label="EK-Chargen">' +
+          '<thead><tr>' +
+            '<th class="v3-lager-th">Produkt</th>' +
+            '<th class="v3-lager-th">Wareneingang</th>' +
+            '<th class="v3-lager-th">Bestand</th>' +
+            '<th class="v3-lager-th">EK/Stk. (netto)</th>' +
+            '<th class="v3-lager-th"></th>' +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>' +
+      '</div>' +
+    '</section>';
+  }
+
+  function openEkEditDialog(opts) {
+    var batchKey    = opts.batch_key || '';
+    var productName = opts.product_name || '';
+    var currentCost = opts.unit_cost || '';
+
+    var overlay = document.createElement('div');
+    overlay.className = 'v3-slot-dialog-overlay';
+    overlay.innerHTML =
+      '<div class="v3-slot-dialog" role="dialog" aria-modal="true" aria-label="EK korrigieren">' +
+        '<button type="button" class="v3-slot-dialog__close" data-dialog-close aria-label="Schließen">×</button>' +
+        '<h2 class="v3-slot-dialog__title">EK-Preis korrigieren</h2>' +
+        '<p class="v3-slot-dialog__lead"><strong>' + esc(productName) + '</strong><br>' +
+          '<span style="font-size:12px;color:var(--ink-soft)">Charge: ' + esc(batchKey) + '</span></p>' +
+        '<div class="v3-slot-dialog__body">' +
+          '<label class="v3-slot-dialog__label" for="ek-edit-input">Neuer EK/Stk. netto (€)</label>' +
+          '<input id="ek-edit-input" type="number" step="0.0001" min="0.0001" class="v3-writeoff__note" data-ek-input' +
+            ' value="' + esc(String(currentCost)) + '" style="width:140px" autocomplete="off" />' +
+          '<p style="font-size:11px;color:var(--ink-soft);margin-top:6px">Betroffene GuV-Zeilen werden automatisch restated und geloggt.</p>' +
+        '</div>' +
+        '<div class="v3-slot-dialog__actions">' +
+          '<button type="button" class="v3-btn v3-btn--brand" data-ek-save>Speichern + Restatement</button>' +
+          '<button type="button" class="v3-btn" data-dialog-close>Abbrechen</button>' +
+        '</div>' +
+        '<div data-ek-dialog-status style="margin-top:10px;font-size:13px"></div>' +
+      '</div>';
+
+    document.body.appendChild(overlay);
+
+    function close() { if (overlay.parentNode) { overlay.parentNode.removeChild(overlay); } }
+
+    overlay.querySelectorAll('[data-dialog-close]').forEach(function (btn) {
+      btn.addEventListener('click', close);
+    });
+    overlay.addEventListener('click', function (ev) { if (ev.target === overlay) { close(); } });
+
+    var saveBtn   = overlay.querySelector('[data-ek-save]');
+    var statusEl  = overlay.querySelector('[data-ek-dialog-status]');
+    var inputEl   = overlay.querySelector('[data-ek-input]');
+
+    saveBtn.addEventListener('click', function () {
+      var val = parseFloat(String(inputEl.value).replace(',', '.'));
+      if (!isFinite(val) || val <= 0) {
+        statusEl.textContent = 'Bitte eine gültige Zahl > 0 eingeben.';
+        statusEl.style.color = 'var(--crit)';
+        return;
+      }
+      saveBtn.disabled = true;
+      statusEl.textContent = 'Wird gespeichert …';
+      statusEl.style.color = 'var(--ink-soft)';
+
+      fetch('/api/v2/batches/unit-cost', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batch_key: batchKey, unit_cost_net: val }),
+      })
+        .then(function (r) { return r.json().then(function (j) { return { status: r.status, json: j }; }); })
+        .then(function (r) {
+          if (r.json && r.json.ok) {
+            statusEl.textContent = r.json.message || 'Gespeichert.';
+            statusEl.style.color = 'var(--ok, green)';
+            // Seite nach kurzer Pause neu laden damit EK-Tabelle aktualisiert wird.
+            setTimeout(function () { close(); window.location.reload(); }, 1400);
+          } else {
+            statusEl.textContent = (r.json && r.json.error && r.json.error.message) || 'Fehler beim Speichern.';
+            statusEl.style.color = 'var(--crit)';
+            saveBtn.disabled = false;
+          }
+        })
+        .catch(function () {
+          statusEl.textContent = 'Netzwerkfehler.';
+          statusEl.style.color = 'var(--crit)';
+          saveBtn.disabled = false;
+        });
+    });
+
+    setTimeout(function () { if (inputEl) { inputEl.focus(); inputEl.select(); } }, 50);
+  }
+
+  function bindEkChargenEdit() {
+    var section = viewEl.querySelector('[data-ek-chargen-section]');
+    if (!section || !_lagerCanEdit) { return; }
+    section.querySelectorAll('[data-ek-edit-btn]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        openEkEditDialog({
+          batch_key:    btn.getAttribute('data-batch-key') || '',
+          product_name: btn.getAttribute('data-product-name') || '',
+          unit_cost:    btn.getAttribute('data-unit-cost') || '',
         });
       });
     });
@@ -4477,10 +4616,12 @@
           renderState('empty', { message: 'Für „' + route.title + '" liegen aktuell keine Einträge vor.' });
       } else if (route.path === '/lager' && result.lager) {
         _lagerBatches = (result.lager && result.lager.batches) || [];
+        _ekBatches    = (result.lager && result.lager.ekBatches) || [];
         viewEl.innerHTML = pageHead(route) + renderLagerPage(result.lager);
         bindLagerFilters();
         bindLagerWriteOff();
         initBatchSearch();
+        bindEkChargenEdit();
       } else if (route.path === '/guv') {
         viewEl.innerHTML = pageHead(route) + renderGuvPage(result.guv);
         bindGuvControls();

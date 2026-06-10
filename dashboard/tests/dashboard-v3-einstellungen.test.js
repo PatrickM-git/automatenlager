@@ -176,11 +176,8 @@ test('AC-W3 LIVE: Admin-POST persistiert, GET spiegelt es (Snapshot/Restore)', a
 
   const snap = new Client({ connectionString: pgUrl, connectionTimeoutMillis: 3000 });
   try { await snap.connect(); } catch (e) { t.skip(`PG nicht erreichbar (${e.code || e.message}).`); return; }
-  // Originalzustand sichern, um die Produktions-Default-Zeile danach zu restaurieren.
-  // Spaltenname über die Übergangsbrücke (#96): tenant_id nach Migration 0009,
-  // mandant_id davor — der Test bleibt gegen beide Schema-Zustände korrekt.
-  const { tenantColumn } = require('../lib/category-config.js');
-  const tcol = await tenantColumn(snap);
+  // Migration 0032 hat mandant_id → tenant_id umbenannt; Spalte ist jetzt immer tenant_id.
+  const tcol = 'tenant_id';
   let original;
   try {
     const r = await snap.query(`SELECT config FROM automatenlager.classification_settings WHERE ${tcol}='__default__'`);

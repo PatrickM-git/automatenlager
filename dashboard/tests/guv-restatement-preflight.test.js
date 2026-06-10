@@ -177,7 +177,7 @@ test('#177 LIVE: Bestand je source/cost_basis + reproduzierbarer Exit-Code (read
       const products = (await client.query(
         `SELECT product_key, category, vat_rate_pct FROM automatenlager.products`)).rows;
       const cfg = (await client.query(
-        `SELECT config FROM automatenlager.classification_settings WHERE mandant_id='__default__'`)).rows[0];
+        `SELECT config FROM automatenlager.classification_settings WHERE tenant_id='__default__'`)).rows[0];
       return { rows, products, config: (cfg && cfg.config) || {} };
     };
 
