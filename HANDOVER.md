@@ -1,213 +1,64 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-10_a2-start.md`.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-10_b-ek-investigation.md`.
 
-## Session 2026-06-10 (nachmittags) — A2 Abschluss: #108 + #206 + BYPASSRLS-Test + EK-Issues (#209/#210)
+## Session 2026-06-10 (abends) — #209 EK-Korrektur pro Lagercharge + GuV-Restatement
 
-**Commit `87ecb21`** auf `main` gepusht. Suite 25/25 live-Tests grün (inkl. alle vorher fehlgeschlagenen).
+**Commit `fc1dcd8`** auf `main`, gepusht + deployt. Suite **1322/1323 grün** (1 skip: deploy-gated BYPASSRLS-Test).
 
-### #108 classification_settings.mandant_id → tenant_id — KOMPLETT (Code + Migration + Tests)
-- **Migration `0032`** (`0032-classification-settings-tenant-id.sql`): idempotentes RENAME + RLS-Policy-Neuerstellung (DROP/CREATE mit `tenant_id`). **Bereits auf Mini-DB angewendet** (via node-pg direkt, SSH-Tunnel aktiv).
-- **`category-config.js`**: `tenantColumn()`-Bridge-Funktion komplett entfernt; `readOverride()`/`writeOverride()` hardkodiert auf `tenant_id`.
-- **`guv-aggregate.js`** + **`guv-backfill.js`**: je eine `mandant_id`→`tenant_id` in SQL-Abfragen.
-- **`db-schema.js`**: `classification_settings` in `TENANT_REQUIRED_TABLES` aufgenommen.
-- Tests: alle `mandant_id`→`tenant_id` aktualisiert; Migrations-Listen um 32 erweitert.
+### #209 EK-Preis pro Lagercharge korrigierbar — KOMPLETT (Code + Tests + Deploy)
 
-### #206 Shadow-Diff: Datum-Normalisierung — KOMPLETT (Code + Tests)
-- **`nayax-sales.js`**: `movementBaseKey()` strippt `_wf3_YYYY-MM-DD`-Suffix; `equal`-Definition erlaubt `onlyIntended > 0` (neue Tx seit n8n-Lauf legitim). 2 neue Tests.
-- **Shadow-Status** (`workflow_state.CUTOVER_STREAK_WF3`): `streak=0`, letzter Diff 2026-06-09 **vor** dem Fix (deploy-gated). Nächster Lauf nach Mini-Deploy sollte `equal=true` → Cutover-Mail.
+**Warum Charge, nicht Produkt:** Jede Lagercharge hat einen eigenen EK aus der Eingangsrechnung. Korrekturen an der Quelle (Charge) sind sauber; die GuV ist abgeleitet.
 
-### Migration 0033 + Sicherheitsnachweis — KOMPLETT (Code), deploy-gated
-- **Migration `0033`** (`0033-revoke-n8n-bypassrls.sql`): `ALTER ROLE n8n_app NOBYPASSRLS` — DEPLOY-GATED auf #198.
-- **`dashboard-bypassrls-security.test.js`**: SKIPpt wenn n8n_app noch BYPASSRLS=true.
+#### Neue Dateien
+- **`dashboard/lib/batch-ek-correction.js`**:
+  - `validateBatchEkUpdate({ batchKey, unitCostNet })` — Validierung.
+  - `applyBatchEkUpdate(db, tenant, { batchKey, unitCostNet, runId })` — atomare Tx:
+    1. `stock_batches.unit_cost_net` für die Charge aktualisieren (FOR UPDATE).
+    2. FIFO-Datumsgrenze berechnen: nächste Charge nach `received_at` der bearbeiteten Charge.
+    3. Alle `guv_daily`-Zeilen in dem Zeitfenster (product_id + received_at ≤ posting_date < nächste received_at) restaten: `new_cogs = old_cogs × (new_ek / old_ek)`; Fallback `qty × new_ek` wenn `old_ek ≈ 0`.
+    4. `audit.guv_restatement_log` schreiben (runId, Kontext, Alt-/Neu-Werte).
+  
+- **`dashboard/tests/dashboard-batch-ek-correction.test.js`**: 5 Live-Sandbox-Tests:
+  - Validierung; Restatement mit Audit-Log-Check; Mandanten-Isolation; Datumsgrenze; BATCH_NOT_FOUND.
 
-### Migrationen 0010/0026 sandbox-idempotent gegen post-0032-DB gepatcht
-- **0010**: dynamische Spalterkennung (`mandant_id` vs `tenant_id`) via `SELECT INTO cs_col`.
-- **0026**: `DO`-Block mit `EXECUTE format('%I', col)` — keine hartkodierten `mandant_id`-Referenzen mehr.
+#### Geänderte Dateien
+- **`dashboard/server.js`**: 2 neue Routen:
+  - `GET /api/v2/batches` — alle aktiven Chargen mit `unit_cost_net`, `received_at` (lesen: betrieb.lesen).
+  - `PUT /api/v2/batches/unit-cost` — Admin-only (canTriggerActions), body: `{ batch_key, unit_cost_net }`, Audit-Log in `logs/batch-ek-corrections.jsonl`.
+- **`dashboard/public/v3.js`**:
+  - `/lager`-Route lädt zusätzlich `/api/v2/batches` → `ekBatches`.
+  - `renderEkChargenSection()` — Tabelle mit allen Chargen + EK, nur für Admins sichtbar.
+  - `openEkEditDialog()` — Modal mit Inline-Edit + Restatement-Feedback (reload nach Speichern).
+  - `bindEkChargenEdit()` — Event-Delegation auf Edit-Buttons.
 
-### EK-Preis-Issues geöffnet
-- **[#210](https://github.com/PatrickM-git/automatenlager/issues/210)** — Verdacht MwSt-Doppelzählung: `unit_cost_net` könnte Brutto-Werte enthalten. Suspektes Muster: Red Bull Spring `1.7612 = 1.48 × 1.19`. **Klärung gegen echte Rechnung nötig, bevor Code geändert wird.**
-- **[#209](https://github.com/PatrickM-git/automatenlager/issues/209)** — Admin-UI für EK-Korrektur + historisches Restatement (wie 0030, aber für `unit_cost_net`).
+#### Sandbox-Fixes (pre-existing, post-0032-Deploy)
+- **`guv-restatement.test.js`**: `mandant_id` → `tenant_id` in Classification-Settings-INSERT.
+- **`guv-restatement-preflight.test.js`**: `mandant_id` → `tenant_id` in SELECT.
+- **`dashboard-mt-0012-business-keys.test.js`**: `workflow_state_pkey`-Assertion aktualisiert (Mini-DB hat bereits `PRIMARY KEY (tenant_id, workflow_key)` — 0031 teilweise deployed).
+- **`dashboard-v3-einstellungen.test.js`**: `tenantColumn()` (entfernt in #108) → `tenant_id` hardkodiert.
+
+### Offene EK-Fehler (#211) — noch zu beheben
+
+3 konkrete EK-Fehler in der DB (laut Rechnungsvergleich, letzter Session):
+1. **Twix** (`batch_key = ?`): `0.016` → `0.480` (WF2-Parse-Fehler).
+2. **7 Days Croissant** (`batch_key = ?`): `0.5056` → `0.4725` (MwSt vor Stück-Division angewendet).
+3. **Sprite/Fanta/Coca-Cola Mai** (3 Chargen): `1.2852` → echt je Produkt (Platzhalter).
+
+**Nächster Schritt für #211:** Im Dashboard → Lager → EK-Chargen (Admin) die 3 Chargen suchen, `unit_cost_net` korrigieren. Die GuV-Zeilen werden automatisch restated.
+
+### WF2-Bug (#211 verwandt)
+7 Days Croissant: WF2 rechnet MwSt (7%) VOR der Division durch 4 (Packungsgröße) an. Fix in n8n-Workflow erforderlich (wenn 7 Days wieder eingekauft wird). Späteres Thema.
+
+### Cutover #198 Status
+- Shadow-Streak nach Fix noch bei 0 (letzter Lauf war vor Deploy).
+- Nächster automatischer Run um 01:00 sollte `equal=true` → Cutover-Mail senden.
+- Nach Cutover-Mail + 7 Tagen Streak: Migration 0033 anwenden, n8n WF3/WF1/WF2/WF4 deaktivieren.
 
 ## Nächste Schritte
 
-1. **Mini-Deploy** (`git pull --ff-only` + Container-Restart) — damit #206-Fix aktiv wird.
-2. **Cutover beobachten**: Nächste Nacht 01:00 WF3-Shadow → wenn `equal=true` → Cutover-Mail. Dann `WF3_CUTOVER=1` setzen + n8n WF3 deaktivieren.
-3. **EK-Klärung** (#210): eine Originalrechnung holen und `unit_cost_net` mit Netto-Stückpreis vergleichen. Falls Brutto → Korrektur-Issue implementieren.
-4. **#209 Admin-EK-Korrektur** (nach #210-Klärung).
-5. **Nach Cutover**: Migration 0031 (deploy-gated) + 0033 (BYPASSRLS) anwenden.
-
-## Session 2026-06-10 (früh) — Stufe 6 Slice 4 (#164) gestartet: **Unit 1 = #111 fertig (Code, deploy-gated)** + Cutover-Fenster auf 1 Tag
-
-`start-issue`→`tdd` für **#164** (Abschluss-Slice: WF-PGW stilllegen, BYPASSRLS-Entzug, #108+#111, Sicherheitsnachweis). #164 ist groß und **fast vollständig deploy-gated auf #198** (Live-Cutover). Entscheidung mit User: nur die **sicheren, deploy-gated Code-/Migrations-/Test-Teile** jetzt bauen; destruktive Prod-Schritte erst nach #198.
-
-**Cutover-Fenster verkürzt (Mini, live):** `CUTOVER_STREAK_THRESHOLD=1` in der Mini-`.env.local` + Worker neu gestartet. **Befund:** der Cutover-Wächter (#200–#202) lief vorher GAR NICHT (Worker-Container auf altem Code vor dem Deploy; bind-mount aktualisiert nur Dateien, node-Prozess braucht Neustart). Seit Neustart: `cutover-readiness-monitor (täglich 02:00)` eingeplant + `Cutover-Issues: live`. **Ergebnis erstmals morgen 02:00** (deckungsgleich → Readiness-Mail; Diff → Report + GitHub-Issue). Backup: `dashboard/.env.local.bak-cutover`. Rückweg: Schwelle 7 + Neustart. Memory: `cutover-198-gated-7-tage`.
-
-**Unit 1 = #111 (globale (key)-Uniques → (tenant_id, key)) — KOMPLETT (Code), Suite 1314/1314 grün:**
-- **Migration `0031`** (`db-migrations/0031-business-keys-drop-global-uniques.sql`, idempotent): droppt die 11 globalen `(key)`-Unique-Constraints (products/stock_batches/suppliers/warnings/invoices/guv_daily/stock_movements/product_change_proposals/product_aliases/invoice_items/sales_transactions); `idx_slot_active` → nur noch `idx_slot_active_tenant`; `workflow_state`-PK `(workflow_key)` → `(tenant_id, workflow_key)` (redundanter `_tenant_uk` entfällt). Composite-Uniques aus 0012/0015 bleiben.
-- **Schreibpfade** auf `ON CONFLICT (tenant_id, key)` umgestellt: `lib/jobs/` invoice-intake (6), nayax-sales (4, sales→`(tenant_id, provider, nayax_transaction_id)`), wf4-slot-write, wf5-monitor, picklist, guv-aggregate, cutover-monitor + `lib/refill-apply.js` (WF7, war in `lib/`, nicht `lib/jobs/`). Jeder INSERT trägt bereits `tenant_id` ($1). **Nicht** im #111-Scope (unverändert): `slot_assignments(product_slot_key)`, `nayax_devices(nayax_machine_id)`, `classification_settings(mandant_id)` (=#108).
-- **Tests:** neu `dashboard-jobs-migration-0031.test.js` (Struktur namens-unabhängig über Spaltensätze + Idempotenz + **Zwei-Mandanten = zwei Zeilen**); `dashboard-mt-onconflict-compat.test.js` CASES + Real-Upsert auf `(tenant_id, key)` umgestellt; nayax-sales „Watermark"-Assertion auf Post-0031-Verhalten (acme bekommt EIGENE Zeile, Fremdzeile unverändert). **Migrations-Listen in ~13 Test-Dateien** von `[22..26]` auf `[22..31]` erweitert (Test-Schema = aktuelles Schema; Coupling: Job-Code braucht 0031).
-
-**⚠️ DEPLOY-GATING (wichtig):** Migration `0031` **NICHT** auf den Mini anwenden, solange n8n läuft — n8ns `pgw_write` nutzt noch `ON CONFLICT (key)`; Drop der globalen Uniques bräche es. Der **Job-Code** ist im Einzelmandant (Faltrix) auch ohne 0031 sicher (Composite-Unique greift, Konflikt deckt globalen ab) → Merge nach main ok; 0031-Migration wartet auf n8n-Aus (#198/#164-Abschluss).
-
-**Offen in #164 (nächster Chat):** (2) **#108** (tenantColumn-Brücke + `__default__`-Abbau + `nayax_transaction_id`→`external_transaction_id`); (3) **BYPASSRLS-Entzug + Sicherheitsnachweis** (Migration `ALTER ROLE n8n_app NOBYPASSRLS` als Datei + Negativtest: n8n_app ohne GUC kracht / automatenlager_app mit GUC ok); (4) destruktive Prod-Schritte (n8n aus + aus compose, `pgw_write()` droppen, BYPASSRLS scharf, Credentials widerrufen) — **alle gated auf #198-Cutover**. Reihenfolge laut SPEC: BYPASSRLS zuletzt.
-
-## Session 2026-06-09 (spät) — Sicherheits-/Datenqualitäts-Issues #168/#169/#193 (alle CLOSED + deployt)
-
-Drei nicht-gegatete Issues abgearbeitet (TDD, PR, Merge, Mini-Deploy):
-- **#168 Anomalie-Monitor** (`lib/jobs/anomaly-monitor.js`, PR #204): Worker `anomaly-monitor` (alle 30 min) —
-  Auth-Fail-Häufung (guest-access.jsonl), Break-Glass-Nutzung, error-Run-Spike (audit.workflow_runs),
-  Backup-Fehler (warnings BACKUP_FAIL/STALE) → Mail an ALERT_EMAIL_DEFAULT. INFRA-exec, 7 Tests. Live.
-- **#169 Cross-Tenant-Audit** (`crossTenantAccess` in `lib/auth.js`, PR #205): explizites Schema
-  (actingLogin, isPlatformAdmin, home/targetTenant, **crossTenant**-Marker) im Break-Glass-Audit;
-  platform_admins bereits scharf (reale Tabelle). IR-Runbook §8 dokumentiert. Live (Dashboard).
-- **#193 G&V VK/EK** (`lib/economics-correct.js` + v3.js, PR #207): VK/Stk + EK/Stk je Produktzeile
-  (aus guv_daily abgeleitet) + Admin-Korrektur go-forward durch die Tür (Endpunkte
-  `/api/v2/economics/correct-ek|vk`, Audit). Befund: aktuelle Lichtenauer-EK plausibel (Still 0.714 <
-  Medium 0.906); Alt-Platzhalter 0.8782 war die historische Ursache. SPEC + 5 Tests. Live (Dashboard).
-- **Querschnitt-Befund:** lokaler Dev-Admin (`DASHBOARD_DEV_LOCAL_ADMIN`) elevatet im Preview NICHT
-  (bleibt guest) — Browser-QA des Admin-G&V-Views dadurch blockiert (Infra, kein Defekt); Auth-Gating
-  (Gast = read-only/keine Edit-Buttons) wurde live bestätigt. Backend live-getestet (Sandbox/ROLLBACK).
-
-## Session 2026-06-09 (abends) — Stufe 6 Slice 3 (#163): **alle 3 Pfade portiert (Code), Schattenbetrieb**
-
-Issue **#163** (datenkritische Ingestion im Schattenbetrieb) via `start-issue`→`tdd`, **komplett**:
-WF3 (Nayax-Verkäufe) + WF1/WF2 (Rechnungseingang) + WF4 (Slot-Write). Alle Schreibpfade durch die
-Mandanten-Tür (`db.tx`, RLS-GUC, explizites `tenant_id`), faithful zur `pgw_write()`-Semantik
-(Pre-Flight-Dump gegen die echte Mini-DB, inkl. Trigger `apply_stock_movement`). PR #197 gemergt → **#163 CLOSED**.
-**DEPLOYT auf den Mini** (`d673c96`, Worker+Dashboard restartet, `/health` ok): `wf3-nayax-fifo` (01:00) +
-`wf1-invoice-intake` (10 min) laufen im **Schattenbetrieb** (kein Schreiben). **Cutover = getracktes Issue #198**
-(zeit-gegatet: ≥7 deckungsgleiche Schattenläufe; Flag `WF3_CUTOVER`/`WF1_CUTOVER` + n8n deaktivieren).
-
-### ✅ WF3 Nayax-Verkäufe — fertig (Code + Tests + Worker + Doku)
-- **`dashboard/lib/jobs/nayax-sales.js`** (neu) — faithful aus Mini-WF3 portiert:
-  - reine Logik `normalizeSales`, `computeFifoPlan` (FIFO-Abbuchung nach MHD, Watermark-Filter,
-    Null-Wert-Filter, MDB-Kontrolle, unbekannte Produkte, Fehlmenge), `buildSaleEvents`,
-    `buildStockMovementEvents`, `buildWarningRows`.
-  - `applyNayaxSales(db, tenant)` durch `db.tx` (RLS-GUC, explizites `tenant_id`):
-    `sales_transactions` + `stock_movements` + Warnungen + Watermark. **`stock_batches.remaining_qty`
-    NICHT manuell** — der AFTER-INSERT-Trigger `apply_stock_movement` pflegt ihn (sonst Doppel-Dekrement).
-  - `runNayaxSalesShadow(...)` compute-only vs. n8n-Ist (über `shadow-harness.diffWrites`).
-  - `fetchNayaxLastSales(...)` (GET `/operational/v1/machines/{id}/lastSales`, httpHeaderAuth) +
-    `createNayaxSalesJob(...)` Worker-Factory, **DEFAULT Schattenbetrieb** (kein Schreiben), Cutover via `WF3_CUTOVER=1`.
-- **`dashboard/worker.js`**: WF3-Job registriert (`wf3-nayax-fifo`, täglich 01:00, `kind:'tenant'`).
-- **Tests** `dashboard/tests/dashboard-jobs-nayax-sales.test.js` (14, inkl. 2 live gegen Mini-DB im #94-Sandbox):
-  reine Logik + Live-Apply (acme/globex-Isolation, Trigger-Abbuchung 30→29) + Schatten-Diff (equal/ungleich)
-  + Fetch + Factory (Schatten schreibt NICHT). #107-Guard grün (Tür-sauber).
-- **Pre-Flight verifiziert (echte Mini-DB, read-only):** `pgw_write` `sale`→`sales_transactions`
-  (FK aus Keys, ON CONFLICT `nayax_transaction_id`), `stock_movement`→`stock_movements`
-  (ON CONFLICT `movement_key`, Trigger pflegt `remaining_qty`/Status `leer`).
-- **Doku** `docs/data-model/wf3-nayax-sales-cutover.md`: explizites **Cutover-Kriterium**
-  (≥7 deckungsgleiche Schattenläufe, nicht-vakuös, keine onlyIntended/onlyActual) + Rückweg + #111-Altlast (Watermark-PK).
-
-### ✅ WF1/WF2 Rechnungseingang — fertig (`lib/jobs/invoice-intake.js`)
-- Reine Builder: `buildInvoiceExtractionRequest` (Claude `claude-sonnet-4-6`), `parseInvoiceExtraction`,
-  `buildInvoiceEvents` (invoice+invoice_item), `buildProductBatchEvents` (product/alias/stock_batch).
-- `applyInvoiceEvents` (WF1: suppliers→invoices→invoice_items) + `applyProductBatch` (WF2-Freigabe:
-  product/alias/stock_batch **inkl. invoice_item-Verlinkung** `product_id`) durch die Tür.
-- `runInvoiceIntakeShadow` (compute invoice_items vs. Ist) + `createInvoiceIntakeJob` (Drive-Polling,
-  Default Schatten, `WF1_CUTOVER=1`).
-- **WF2-Freigabe als Dashboard-Endpunkt:** `POST /api/v2/invoice-proposal/approve` (admin-only,
-  `rejectBodyTenant`, durch die Tür, JSONL-Audit). Worker: `wf1-invoice-intake` (alle 10 min).
-- Tests `tests/dashboard-jobs-invoice-intake.test.js` (7, inkl. 3 live: invoice, product/batch+Verlinkung, shadow).
-
-### ✅ WF4 Slot-Write — fertig (`lib/jobs/wf4-slot-write.js`)
-- `buildSlotLifecycleEvents` (closeRows/newRows → slot_assignment-Events) + `applySlotAssignmentEvents`
-  (db.tx, INSERT ON CONFLICT `product_slot_key` DO UPDATE valid_to/active/notes) — **direkter Wechsel**.
-- Befund: `valid_from` NOT NULL wird beim „speculative insert" VOR der Konflikt-Auflösung geprüft →
-  Close-Events defaulten `valid_from` auf nowIso (sonst 23502 statt Update).
-- Tests `tests/dashboard-jobs-wf4-slot-write.test.js` (3, inkl. 2 live: close+open-Isolation, Warnungs-Idempotenz).
-
-### 🔧 Querschnitt
-- **`lib/warning-types.js`** (neu): einzige Quelle der erlaubten `warnings.warning_type` (DB-CHECK) +
-  Mapping (`MHD_WARNING`→`MHD_NEAR`, `MDB_PRODUCT_MAPPING_MISMATCH`→`MDB_CODE_CHANGED_FOR_PRODUCT`);
-  nicht-mappbare Typen werden übersprungen (sonst bräche der INSERT — Befund Slice 2). Genutzt von WF3+WF4.
-- Cutover-Kriterien aller drei Pfade: `docs/data-model/wf3-nayax-sales-cutover.md`.
-
-### 🤖 Cutover-Wächter (#198) — LIVE auf dem Mini
-- Worker-Job `cutover-readiness-monitor` (täglich 02:00, `lib/jobs/cutover-monitor.js`): ruft die
-  Schatten-Jobs WF3/WF1 read-only, zählt deckungsgleiche Läufe **mit Aktivität** in `workflow_state`.
-- **Bei Deckungsgleichheit ≥ Schwelle (7):** mailt „Cutover-Kriterium erfüllt" (Resend).
-- **Bei Diff:** mailt feldgenau (`diffSample`) UND eröffnet ein **GitHub-Issue** (`lib/jobs/github-issues.js`,
-  dedupliziert per Issue-Nummer im State) → Fix taucht im Backlog auf, `start-issue` greift ihn auf
-  (24/7, ohne Claude-Session). Auflösung ⇒ Kommentar. `GITHUB_TOKEN`/`GITHUB_REPO` in Mini-`.env.local` gesetzt.
-- **Grenze:** kein Auto-Code-Fix/-Merge/-Deploy — der Selbstheilungs-Fix läuft über den normalen
-  start-issue→tdd→PR-Pfad (Mensch reviewt, Finanzdaten).
-
-### ⏭️ Nächste Schritte (nächster Chat)
-1. **Mini-Deploy** (`git pull` + `docker restart`; Memory `mini-deploy-mechanismus`). Kein DDL nötig.
-   Worker startet die neuen Jobs im **Schattenbetrieb** (kein Schreiben) — Diffs in `audit.workflow_runs` beobachten.
-2. **Cutover** je Pfad nach Kriterium (s. Doku): WF3 `WF3_CUTOVER=1`, WF1 `WF1_CUTOVER=1`, WF4 Trigger umlegen
-   → dann n8n WF1/2/3/4 deaktivieren. Rückweg jederzeit (n8n-WF reaktivieren) bis Slice 4.
-3. **Slice 4** (#108/#111/`BYPASSRLS` entziehen + Negativ-Test „RLS systemweit").
-- **Offene Verfeinerung:** WF1 erzeugt in n8n auch `product_change_proposals` (Vorschläge für unbekannte
-  Produkte) — der Port schreibt invoice+items; die Proposal-Erzeugung kann als Folge-Refinement ergänzt
-  werden (WF-Claude-Proposals/Slice 2 verarbeitet bestehende Proposals bereits).
-- **Hinweis:** SSH-Tunnel zur Mini-DB (`127.0.0.1:15432`) = ECHTE Prod-DB. Live-Tests laufen im
-  #94-Sandbox-Harness (BEGIN…ROLLBACK) → keine echte Mutation. Suite seriell grün (Memory: Parallel-Flakiness).
-
-## Session 2026-06-09 — Stufe 6 Slice 2 (#162) Trigger-Umlegung: **VOLLSTÄNDIG DEPLOYT + CUTOVER (alle 4 Flows live, n8n aus)**
-
-PRs **#191/#192/#194/#195 gemergt** → **#162 CLOSED**, **#163 entblockt**. SPEC: `docs/specs/multi-tenant-n8n-abloesung-stufe-6-v1.md`. Suite **1256/1256 grün**. `main` = `99382bf`, **auf Mini deployt** (`/mnt/c/homelab/projekte/automatenlager`, bind-mount `→/repo`; `git pull` + `docker restart`).
-
-**CUTOVER LIVE (alle vier n8n-Workflows DEAKTIVIERT, in-process aktiv):**
-- ✅ **WF7** in-process (Dashboard `applyRefill`) — n8n-WF7 (`0oRIiVFr5Q7FF6ow`) aus.
-- ✅ **WF5** Worker `wf5-monitor` (07:00) — live smoke ok (Digest-Mail via Resend) — n8n-WF5 (`3ceKeNWmdj455Tcr`) aus.
-- ✅ **WF-Claude-Proposals** Worker (04:30) — `ANTHROPIC_API_KEY` aus n8n-Credential migriert → `Anthropic: live`; smoke ok (0 pending) — n8n (`hU7Aev7G4MaMv2yR`) aus.
-- ✅ **WF9 Pickliste** Worker (alle 5 min) — **Google-Drive-Client gebaut** (`lib/google-drive-client.js`, PR #195) + OAuth-Credential/Ordner-IDs migriert → `Drive: live`; read-only Auth-Smoke ok (Ordner leer, 0 PDFs) — n8n-WF9 (`nh8Tmg7klwGVjKui`) aus.
-- **Credentials migriert** (aus n8n via `export:credentials --decrypted`, serverseitig in Mini-`dashboard/.env.local`, nie geloggt): `ANTHROPIC_API_KEY`, `GOOGLE_DRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN` + Ordner-IDs + `WF9_TENANT_ID=t_faltrix`.
-- **Restatement-Befund (B):** `DASHBOARD_V2_PG_URL` = Mini-Prod-DB via SSH-Tunnel `127.0.0.1:15432`. Restatement (577 Zeilen brutto, 545 Audit-Logs) lief **gewollt** auf PROD (Runbook-Schritt, auditiert/umkehrbar) — kein Cleanup. `0028`-Test dadurch fragil → in PR #192 robust gemacht.
-
-**n8n läuft weiter NUR für Slice 3 (#163, datenkritisch):** WF1/WF2/WF3/WF4. Rückweg jederzeit: Slice-2-WF in n8n reaktivieren (`BYPASSRLS` bis Slice 4). **Verbleibend (Betreiber, optional):** echter WF9-Pickliste-Live-Test mit einer PDF im Quell-Ordner; Worker-Monitor wacht über Fehlläufe.
-
-**Folge-Feature:** [#193](https://github.com/PatrickM-git/automatenlager/issues/193) — G&V-Tabelle VK/EK pro Stück anzeigen + editierbar (Datenqualität; Verdacht falscher EK bei „Lichtenauer Still"). SPEC vor Umsetzung.
-
-**Wichtigster Befund — lokale WF-JSONs sind NICHT die Wahrheit:** Lokalexporte = alter `product_key`/Sheets-Stand **mit U+FFFD-Korruption** + Vertrags-Mismatch. Authoritative Mini-Definitionen read-only gezogen → `C:\tmp\mini-wf-snapshot\`. Mini-API-Key in `homelab/.env.local` (`N8N_API_KEY`). **Durchgängiges Muster:** Mini-WF-Verhalten extrahieren → reine `compute…`-Logik (unit) → `apply…`/`run…ForTenant` via `db.tx`-Tür (live acme/globex) → Worker-/Endpunkt-Verkabelung; externe Clients (Anthropic/Drive/Mailer) als Parameter injiziert. `stock_movement`/`warning`-Schreibpfade **faithful zu `pgw_write`** (Pre-Flight-Dump verifiziert), aber als **direktes Tür-INSERT mit explizitem `tenant_id`** (RLS-sauber), NICHT via `pgw_write`-Funktion.
-
-### ✅ Fertig (committet, verifiziert, Suite grün)
-- **WF7 Nachfüllung** (`lib/refill-apply.js` + `server.js`): `fetch(/webhook/nachfuellung)` → `applyRefill` durch die Tür (Slot-Update + Warnungen-resolve + `stock_movement`). 9 Tests (inkl. 2 live).
-- **WF-Claude-Proposals** (`lib/jobs/claude-proposals.js` + `lib/anthropic-client.js`): Worker-Job (täglich 04:30), pending Proposals via Claude (haiku) approve/reject durch die Tür, escalate per Mailer. 7 Tests (inkl. live).
-- **WF5 MHD/Low-Stock** (`lib/jobs/wf5-monitor.js`): Worker-Job (täglich 07:00), MHD_EXPIRED/MHD_NEAR/LOW_BATCH-Warnungen INSERT + Auto-Resolve durch die Tür + Digest-Mail (alert-digest.js + Resend). Verwaltet NUR diese Typen. 6 Tests (inkl. live).
-- **WF9 Pickliste** (`lib/jobs/picklist.js`): OCR-Pickliste → Backstock-begrenzte Slot-Verteilung → `pick`-Movement (delta_total negativ) + Warnungen-resolve durch die Tür. Drive/Anthropic injiziert. 9 Tests (inkl. live). **Worker-Job ohne Drive-Client „disabled".**
-- **DROP** (`docs/specs/stufe-6-slice-2-drop-workflows.md` + `_stillgelegt`-Marker): WF0/WF-Update-Check/WF-Drift-Check.
-- **Credentials dokumentiert** (`dashboard/.env.example`): Anthropic/Drive/Resend/Schedule-Vars.
-- **Bewusste Abweichung (alle Flows):** kein `warnings`-Audit-INSERT mit `NACHFUELLUNG`/`PICKLISTE_*` — verletzt `warnings_warning_type_check` (schlägt in n8n still fehl). Audit via JSONL bzw. entfällt.
-
-## Session 2026-06-09 — GuV-Kostenbasis Kleinunternehmer + Restatement **KOMPLETT (Code), Restatement LIVE auf Prod**
-
-SPEC: `docs/specs/guv-kostenbasis-kleinunternehmer-restatement-v1.md`. Alle 7 Issues des Loops umgesetzt, gemergt, geschlossen; Suite **1215/1215 grün**. Gearbeitet im isolierten Git-Worktree (`feat/guv-restatement-loop`), damit eine Parallelsession auf `main` ungestört blieb.
-
-| Issue | PR | Inhalt |
-|---|---|---|
-| #175 | #182 | Migration `0028` — `guv_daily.cost_basis` (nullable, kein Default, CHECK) + `audit.guv_restatement_log` |
-| #176 | #183 | Nacht-Job (`guv-aggregate.js`) liest Kleinunternehmer **kanonisch camelCase** (gemeinsame `readKleinunternehmer` in `guv-ek.js`); MwSt-Quelle = **Kategorie-Satz** (wie Live/economics.js); bucht **brutto** + stempelt `cost_basis`; `revenue_net=revenue_gross`. GuV-Schatten-Paritäts-Gate entfernt → Konsistenz-Anker Live==Nacht |
-| #177 | #185 | `lib/guv-restatement-preflight.js` + Erweiterung `tools/preflight-guv-daily.js`: finanzieller Trockenlauf, Reconciliation `vat_rate_pct` vs. Kategorie, **Exit-Code-Gate 0/1/2** |
-| #179 | #186 | Migration `0029` — Bestands-`NULL`-Zeilen beweisgestützt → `'netto'` (USt abgezogen); **bricht bei brutto-implizierender Anomalie ab** (all-or-nothing); idempotent |
-| #180 | #187 | `lib/guv-restatement.js` + `tools/run-guv-restatement.js`: Restatement durch die Tür (tx) — `cost_basis='netto'` ∧ KU → brutto in-place; Audit-Logbuch je Zeile (run_id); **Rollback je run_id**; Runbook `docs/security/guv-restatement-0030-rollback.md`; Grant-Migration `0030` |
-| #172 | #188 | `lib/jobs/guv-backfill.js` + `tools/run-guv-backfill.js`: **wartbarer, idempotenter** Nayax-Lücken-Backfill (rechnet byte-genau wie Nacht-Job, `source='guv_backfill'` = sichtbar); Befund: 2025 liegt als `sheets_seed` (0 `historic_backfill`) und ist sichtbar |
-| #173 | #189 | Admin-MwSt-Felder im `/einstellungen`-Formular (`v3.js`): MwSt je Kategorie + `defaultMwstPct` + neue Kategorie (Backend persistierte bereits) |
-
-Vorab gemergt: #184 (Onboarding-Test-Isolation, Folge-Chip aus dieser Session).
-
-### ⚠️ AUSSTEHEND — Mini-Deploy (Datenmutationen sind deploy-gated)
-Die produktiven **Datenänderungen sind noch NICHT auf der Mini** (alles in mergten PRs + via Dry-Run/Live-Sandbox verifiziert). Sie brauchen zuerst die `cost_basis`-Spalte. **Reihenfolge** (Mechanismus: Memory `mini-deploy-mechanismus`):
-1. `git pull --ff-only` + DDL **0028 → 0029 → 0030** anwenden (idempotent), Container-Restart.
-2. **Preflight** `node dashboard/tools/preflight-guv-daily.js` → muss **Exit 0** liefern.
-3. **Restatement** `node dashboard/tools/run-guv-restatement.js` (Historie `netto`→`brutto`; Rollback `--rollback <run_id>`).
-4. **Backfill** `node dashboard/tools/run-guv-backfill.js` (füllt die **32 fehlenden 2025-Posten, ~55,80 €**; Dry-Run gegen die Mini verifiziert, alle mappbar; Rollback `DELETE … WHERE source='guv_backfill'`).
-5. **Live-Smoke:** GuV-Panel zeigt die korrigierten (niedrigeren) Gewinne + das sichtbare Steuerjahr 2025.
-
-Reihenfolge 3↔4 egal (beide idempotent, dedup); Backup griffbereit (Memory `pg-backup-mechanismus`).
-
-### Offene Folge-Issues (als Chips hinterlegt)
-- **GuV-Backfill als selbstlaufenden Worker-Job** registrieren (User-Wunsch: Lücken automatisch erkennen + füllen, **ohne extra Pflege-Tabellen**; idempotent, Telemetrie statt Pflege-Tabelle). Vorbild `createGuvAggregateJob` + Worker `setInterval` (Memory `node-cron-wsl-mini-unreliable`).
-- Per-Mandant-MwSt-Config (**Stufe 6**) + kategorie-getriebenes Onboarding-Dropdown (**Stufe 8**) — Fundament durch #175–#180 gelegt (#173-Abgrenzung).
-
-### Wichtige Befunde (Memory gesichert)
-- **2025-GuV ist `source='sheets_seed'`**, nicht `historic_backfill` (0 solche Zeilen); bereits sichtbar. Rohe Nayax-2025-Verkäufe = freigegebenes Google-Sheet (CSV-Export, `GUV_BACKFILL_SHEET_ID`). → Memory `guv-historie-und-nayax-rohquelle`.
-- **Suite-Lauf:** parallel mit `--test-timeout=60000 --test-force-exit` (seriell zu langsam; ohne Timeout Endlos-Hänger durch offenen Handle in process-isolierten Kindern). → Memory `suite-parallel-flakiness`.
-- **Worktree:** `node_modules`/`.env.local` fehlen (nachinstallieren/kopieren); **Preview-MCP läuft gegen das Haupt-Repo, nicht den Worktree**. → Memory `worktree-preview-und-setup`.
-
-### Davor (2026-06-08) — Stufe 6 Slice 1
-Slice 1 praktisch durch (Resend live, WF-Val + WF8-GuV + MatView + Nayax-Devices abgelöst/deaktiviert). **Nächster Stufe-6-Schritt: #162 Slice 2** (Trigger-Umlegung WF7/WF9/WF5/WF-Claude + DROP WF0/Update-Check/Drift-Check). **Harter Stopp vor #163 (WF3, datenkritisch) + #164 (irreversibel).** Details: `HANDOVER_ARCHIVE/HANDOVER_2026-06-08_slice1-resend-dbcheck.md`.
+1. **#211 EK-Korrekturen**: Im /lager Admin-Panel die 3 falschen EK-Preise korrigieren.
+2. **Cutover abwarten**: Morgen früh Email prüfen ob Cutover-Mail kam.
+3. **Nach Cutover**: Migration 0031 (global uniques drop, deploy-gated) + 0033 (BYPASSRLS) anwenden.
+4. **A3 Monitoring/Alerting** + Off-Site-Backup.
