@@ -42,7 +42,7 @@ test('#193 validateCorrection: gültig vs. fehlerhaft', () => {
 test('#193 applyEkCorrection LIVE: aktive Charge des Produkts korrigiert; globex unberührt', async (t) => {
   await inSandbox(t, async (client) => {
     const { acme, globex } = await seedAcmeGlobex(client);
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
     const res = await ec.applyEkCorrection(db, 'acme', { productId: acme.productId, unitCostNet: 0.71 });
@@ -61,7 +61,7 @@ test('#193 applyEkCorrection LIVE: aktive Charge des Produkts korrigiert; globex
 test('#193 applyVkCorrection LIVE: aktive Preiszeile der aktiven Slots korrigiert; globex unberührt', async (t) => {
   await inSandbox(t, async (client) => {
     const { acme, globex } = await seedAcmeGlobex(client);
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     // aktive Preiszeile je Mandant auf dem Seed-Slot anlegen
     for (const ten of [acme, globex]) {
       await client.query(

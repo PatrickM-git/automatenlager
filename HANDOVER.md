@@ -3,6 +3,38 @@
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 > Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-09_slice2-cutover.md`.
 
+## Session 2026-06-10 (früh) — Stufe 6 Slice 4 (#164) gestartet: **Unit 1 = #111 fertig (Code, deploy-gated)** + Cutover-Fenster auf 1 Tag
+
+`start-issue`→`tdd` für **#164** (Abschluss-Slice: WF-PGW stilllegen, BYPASSRLS-Entzug, #108+#111, Sicherheitsnachweis). #164 ist groß und **fast vollständig deploy-gated auf #198** (Live-Cutover). Entscheidung mit User: nur die **sicheren, deploy-gated Code-/Migrations-/Test-Teile** jetzt bauen; destruktive Prod-Schritte erst nach #198.
+
+**Cutover-Fenster verkürzt (Mini, live):** `CUTOVER_STREAK_THRESHOLD=1` in der Mini-`.env.local` + Worker neu gestartet. **Befund:** der Cutover-Wächter (#200–#202) lief vorher GAR NICHT (Worker-Container auf altem Code vor dem Deploy; bind-mount aktualisiert nur Dateien, node-Prozess braucht Neustart). Seit Neustart: `cutover-readiness-monitor (täglich 02:00)` eingeplant + `Cutover-Issues: live`. **Ergebnis erstmals morgen 02:00** (deckungsgleich → Readiness-Mail; Diff → Report + GitHub-Issue). Backup: `dashboard/.env.local.bak-cutover`. Rückweg: Schwelle 7 + Neustart. Memory: `cutover-198-gated-7-tage`.
+
+**Unit 1 = #111 (globale (key)-Uniques → (tenant_id, key)) — KOMPLETT (Code), Suite 1314/1314 grün:**
+- **Migration `0031`** (`db-migrations/0031-business-keys-drop-global-uniques.sql`, idempotent): droppt die 11 globalen `(key)`-Unique-Constraints (products/stock_batches/suppliers/warnings/invoices/guv_daily/stock_movements/product_change_proposals/product_aliases/invoice_items/sales_transactions); `idx_slot_active` → nur noch `idx_slot_active_tenant`; `workflow_state`-PK `(workflow_key)` → `(tenant_id, workflow_key)` (redundanter `_tenant_uk` entfällt). Composite-Uniques aus 0012/0015 bleiben.
+- **Schreibpfade** auf `ON CONFLICT (tenant_id, key)` umgestellt: `lib/jobs/` invoice-intake (6), nayax-sales (4, sales→`(tenant_id, provider, nayax_transaction_id)`), wf4-slot-write, wf5-monitor, picklist, guv-aggregate, cutover-monitor + `lib/refill-apply.js` (WF7, war in `lib/`, nicht `lib/jobs/`). Jeder INSERT trägt bereits `tenant_id` ($1). **Nicht** im #111-Scope (unverändert): `slot_assignments(product_slot_key)`, `nayax_devices(nayax_machine_id)`, `classification_settings(mandant_id)` (=#108).
+- **Tests:** neu `dashboard-jobs-migration-0031.test.js` (Struktur namens-unabhängig über Spaltensätze + Idempotenz + **Zwei-Mandanten = zwei Zeilen**); `dashboard-mt-onconflict-compat.test.js` CASES + Real-Upsert auf `(tenant_id, key)` umgestellt; nayax-sales „Watermark"-Assertion auf Post-0031-Verhalten (acme bekommt EIGENE Zeile, Fremdzeile unverändert). **Migrations-Listen in ~13 Test-Dateien** von `[22..26]` auf `[22..31]` erweitert (Test-Schema = aktuelles Schema; Coupling: Job-Code braucht 0031).
+
+**⚠️ DEPLOY-GATING (wichtig):** Migration `0031` **NICHT** auf den Mini anwenden, solange n8n läuft — n8ns `pgw_write` nutzt noch `ON CONFLICT (key)`; Drop der globalen Uniques bräche es. Der **Job-Code** ist im Einzelmandant (Faltrix) auch ohne 0031 sicher (Composite-Unique greift, Konflikt deckt globalen ab) → Merge nach main ok; 0031-Migration wartet auf n8n-Aus (#198/#164-Abschluss).
+
+**Offen in #164 (nächster Chat):** (2) **#108** (tenantColumn-Brücke + `__default__`-Abbau + `nayax_transaction_id`→`external_transaction_id`); (3) **BYPASSRLS-Entzug + Sicherheitsnachweis** (Migration `ALTER ROLE n8n_app NOBYPASSRLS` als Datei + Negativtest: n8n_app ohne GUC kracht / automatenlager_app mit GUC ok); (4) destruktive Prod-Schritte (n8n aus + aus compose, `pgw_write()` droppen, BYPASSRLS scharf, Credentials widerrufen) — **alle gated auf #198-Cutover**. Reihenfolge laut SPEC: BYPASSRLS zuletzt.
+
+## Session 2026-06-09 (spät) — Sicherheits-/Datenqualitäts-Issues #168/#169/#193 (alle CLOSED + deployt)
+
+Drei nicht-gegatete Issues abgearbeitet (TDD, PR, Merge, Mini-Deploy):
+- **#168 Anomalie-Monitor** (`lib/jobs/anomaly-monitor.js`, PR #204): Worker `anomaly-monitor` (alle 30 min) —
+  Auth-Fail-Häufung (guest-access.jsonl), Break-Glass-Nutzung, error-Run-Spike (audit.workflow_runs),
+  Backup-Fehler (warnings BACKUP_FAIL/STALE) → Mail an ALERT_EMAIL_DEFAULT. INFRA-exec, 7 Tests. Live.
+- **#169 Cross-Tenant-Audit** (`crossTenantAccess` in `lib/auth.js`, PR #205): explizites Schema
+  (actingLogin, isPlatformAdmin, home/targetTenant, **crossTenant**-Marker) im Break-Glass-Audit;
+  platform_admins bereits scharf (reale Tabelle). IR-Runbook §8 dokumentiert. Live (Dashboard).
+- **#193 G&V VK/EK** (`lib/economics-correct.js` + v3.js, PR #207): VK/Stk + EK/Stk je Produktzeile
+  (aus guv_daily abgeleitet) + Admin-Korrektur go-forward durch die Tür (Endpunkte
+  `/api/v2/economics/correct-ek|vk`, Audit). Befund: aktuelle Lichtenauer-EK plausibel (Still 0.714 <
+  Medium 0.906); Alt-Platzhalter 0.8782 war die historische Ursache. SPEC + 5 Tests. Live (Dashboard).
+- **Querschnitt-Befund:** lokaler Dev-Admin (`DASHBOARD_DEV_LOCAL_ADMIN`) elevatet im Preview NICHT
+  (bleibt guest) — Browser-QA des Admin-G&V-Views dadurch blockiert (Infra, kein Defekt); Auth-Gating
+  (Gast = read-only/keine Edit-Buttons) wurde live bestätigt. Backend live-getestet (Sandbox/ROLLBACK).
+
 ## Session 2026-06-09 (abends) — Stufe 6 Slice 3 (#163): **alle 3 Pfade portiert (Code), Schattenbetrieb**
 
 Issue **#163** (datenkritische Ingestion im Schattenbetrieb) via `start-issue`→`tdd`, **komplett**:

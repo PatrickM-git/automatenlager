@@ -162,7 +162,7 @@ test('#162 applyRefill LIVE: Slot-Update + Warnung-resolve + stock_movement durc
       );
     }
     // RLS scharf schalten (Stufe 5) — wie die Slice-1-Live-Tests.
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
 
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
@@ -222,7 +222,7 @@ test('#162 applyRefill LIVE: Slot-Update + Warnung-resolve + stock_movement durc
 test('#162 applyRefill LIVE: unbekannter Slot ⇒ SLOT_NOT_FOUND, kein Schreibzugriff', async (t) => {
   await inSandbox(t, async (client) => {
     const { acme } = await seedAcmeGlobex(client);
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
     const res = await applyRefill(db, 'acme', {
       machineKey: 'vm_acme', mdbCode: 999, productId: acme.productId, qty: 5, nowIso: NOW,

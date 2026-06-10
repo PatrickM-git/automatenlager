@@ -173,7 +173,7 @@ async function applyPicklist(db, tenant, { items = [], fileName = '', nowIso } =
                  LEFT JOIN automatenlager.slot_assignments sa ON sa.product_slot_key = $4 AND sa.tenant_id = $1
                 WHERE sb.batch_key = $3 AND sb.tenant_id = $1
                 LIMIT 1
-               ON CONFLICT (movement_key) DO NOTHING`,
+               ON CONFLICT (tenant_id, movement_key) DO NOTHING`,
         params: [d.movement_key, d.batch_key, d.product_slot_key, d.movement_type,
           d.quantity_delta_total, d.quantity_delta_slot, d.reason, d.source, d.occurred_at],
       });

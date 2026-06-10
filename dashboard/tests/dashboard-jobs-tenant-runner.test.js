@@ -84,7 +84,7 @@ test('#160 Runner: ein fehlschlagender Mandanten-Lauf isoliert die anderen (per-
 test('#160 Runner LIVE: pro-Mandant durch die Tür isoliert (acme≠globex, nicht-vakuös, RLS aktiv)', async (t) => {
   await inSandbox(t, async (client) => {
     await seedAcmeGlobex(client);                       // beide Mandanten tragen Produkte
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n); // RLS scharf
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n); // RLS scharf
     await client.query('SET ROLE automatenlager_app');  // eingeengte App-Rolle (kein BYPASSRLS)
     try {
       const db = doorForClient(client);

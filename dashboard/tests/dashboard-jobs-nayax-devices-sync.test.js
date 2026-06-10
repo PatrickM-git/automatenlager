@@ -69,7 +69,7 @@ test('#161 createNayaxDevicesSyncJob: skip ohne Token bzw. ohne eindeutigen Mand
 test('#161 Nayax-Sync LIVE: Upsert für EINEN Mandanten, isoliert + idempotent (RLS aktiv)', async (t) => {
   await inSandbox(t, async (client) => {
     await seedAcmeGlobex(client); // jeder Mandant hat bereits nayax-Gerät nx_<tid>
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     await client.query('SET ROLE automatenlager_app');
     try {
       const db = createTenantDb({ pool: sandboxTxPool(client) });

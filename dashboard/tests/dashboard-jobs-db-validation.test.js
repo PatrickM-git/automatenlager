@@ -65,7 +65,7 @@ test('#161 DB-Validierung LIVE: Isolation + LOW_BATCH ausgenommen, WORKFLOW_ERRO
          VALUES ($1, 'LOW_BATCH', $2, 'warning', 'wf5', $3, now() - INTERVAL '10 days', FALSE)`,
         [`lowbatch_${tid}`, `Skittles ${tid}: nur noch 4`, tid]);
     }
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     await client.query('SET ROLE automatenlager_app');
     try {
       const db = createTenantDb({ pool: sandboxTxPool(client) });

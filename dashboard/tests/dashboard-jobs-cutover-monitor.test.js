@@ -121,7 +121,7 @@ test('#198 createCutoverMonitorJob: Cutover-/skip-Ergebnis wird nicht als Streak
 test('#198 readStreak/writeStreak LIVE: Roundtrip durch die Tür (workflow_state.state_json)', async (t) => {
   await inSandbox(t, async (client) => {
     await seedAcmeGlobex(client);
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
     assert.deepEqual(await cm.readStreak(db, 'acme', 'CUTOVER_STREAK_TEST'), { streak: 0, alerted: false }, 'Default ohne Zeile');

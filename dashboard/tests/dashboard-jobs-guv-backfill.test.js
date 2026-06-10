@@ -82,7 +82,7 @@ test('#172 LIVE: Backfill füllt fehlende Posten (brutto, cost_basis, source guv
        ON CONFLICT (mandant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
       [JSON.stringify({ kleinunternehmerAktiv: true })]);
 
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     await client.query('SET ROLE automatenlager_app');
     try {
       const db = createTenantDb({ pool: sandboxTxPool(client) });
@@ -122,7 +122,7 @@ test('#172 LIVE: dryRun rechnet, schreibt NICHT', async (t) => {
          VALUES ('__default__', $1::jsonb, now())
        ON CONFLICT (mandant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
       [JSON.stringify({ kleinunternehmerAktiv: true })]);
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     await client.query('SET ROLE automatenlager_app');
     try {
       const db = createTenantDb({ pool: sandboxTxPool(client) });

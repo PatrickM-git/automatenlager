@@ -107,7 +107,7 @@ const WF4_WARNING_INSERT_SQL = `
     FROM (SELECT 1) x
     LEFT JOIN automatenlager.machines m ON m.machine_key = $5 AND m.tenant_id = $1
     LEFT JOIN automatenlager.products p ON p.product_key = $6 AND p.tenant_id = $1
-  ON CONFLICT (warning_key) DO NOTHING`;
+  ON CONFLICT (tenant_id, warning_key) DO NOTHING`;
 
 /**
  * Slot-Zuordnungs-Events transaktional durch die Tür anwenden (close alt / open neu).

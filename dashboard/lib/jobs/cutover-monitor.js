@@ -95,11 +95,12 @@ function buildReadinessMail(label, streak, threshold) {
 
 const STREAK_READ_SQL = `
   SELECT state_json FROM automatenlager.workflow_state WHERE tenant_id = $1 AND workflow_key = $2`;
-// mandantensicher (globale PK workflow_key, #111): DO UPDATE nur für die eigene Zeile.
+// mandantensicher: seit #111 (0031) ist der PK (tenant_id, workflow_key); DO UPDATE
+// trifft genau die eigene Zeile (WHERE bleibt als Defense-in-depth).
 const STREAK_UPSERT_SQL = `
   INSERT INTO automatenlager.workflow_state (workflow_key, state_json, updated_at, tenant_id)
   VALUES ($2, $3::jsonb, now(), $1)
-  ON CONFLICT (workflow_key) DO UPDATE
+  ON CONFLICT (tenant_id, workflow_key) DO UPDATE
     SET state_json = EXCLUDED.state_json, updated_at = now()
     WHERE workflow_state.tenant_id = $1`;
 

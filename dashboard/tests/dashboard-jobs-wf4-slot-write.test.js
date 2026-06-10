@@ -43,7 +43,7 @@ test('#163 buildSlotLifecycleEvents: closeRows→active=false+valid_to; newRows�
 test('#163 applySlotAssignmentEvents LIVE: schließt alten Slot + öffnet neuen durch die Tür; globex isoliert', async (t) => {
   await inSandbox(t, async (client) => {
     const { acme } = await seedAcmeGlobex(client);
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
     // Seed: 'slot_acme' aktiv (valid_to NULL). Wechsel: alten schließen + neuen 'slot_acme_v2' öffnen.
@@ -91,7 +91,7 @@ test('#163 applySlotAssignmentEvents LIVE: schließt alten Slot + öffnet neuen 
 test('#163 applySlotAssignmentEvents LIVE: schreibt WF4-Warnungen mit deterministischem Schlüssel (idempotent)', async (t) => {
   await inSandbox(t, async (client) => {
     const { acme } = await seedAcmeGlobex(client);
-    for (const n of [22, 23, 24, 25, 26]) await applyMigration(client, n);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
     const db = createTenantDb({ pool: sandboxTxPool(client) });
 
     const warnings = [{ type: 'MDB_PRODUCT_MAPPING_MISMATCH', severity: 'warning', machine_id: 'vm_acme', product_key: 'p_acme', message: 'WF4 Test-Warnung' }];

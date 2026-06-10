@@ -130,7 +130,7 @@ async function syncWf5Warnings(db, tenant, warnings = [], { nowIso } = {}) {
         text: `INSERT INTO automatenlager.warnings
                  (warning_key, warning_type, severity, message, product_id, source_workflow, resolved, created_at, tenant_id)
                VALUES ($2, $3, $4, $5, $6, 'wf5', FALSE, NOW(), $1)
-               ON CONFLICT (warning_key) DO NOTHING`,
+               ON CONFLICT (tenant_id, warning_key) DO NOTHING`,
         params: [w.warning_key, w.warning_type, w.severity, w.message, w.product_id || null],
       });
       inserted += (r.rowCount || 0);
