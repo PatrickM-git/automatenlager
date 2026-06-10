@@ -90,3 +90,4 @@ Thumbs.db
 
 # Test-Artefakte
 .tmp-hook-test
+.claude/worktrees/
