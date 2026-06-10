@@ -2745,6 +2745,7 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, {
           ok: true,
           is_admin: viewer.role === 'admin',
+          canTriggerActions: viewer.canTriggerActions,
           batches: result.rows.map((r) => ({
             batch_key:    String(r.batch_key || ''),
             batch_id:     Number(r.batch_id),

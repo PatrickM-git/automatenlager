@@ -1018,13 +1018,11 @@
       return Promise.all([
         fetchJson('/api/v2/inventory-mhd'),
         fetchJson('/api/v2/assortment-slots').catch(function () { return {}; }),
-        fetchJson('/api/dashboard').catch(function () { return {}; }),
         fetchJson('/api/v2/batches').catch(function () { return {}; }), // #209: EK-Chargen (Admin)
       ]).then(function (results) {
         var res     = results[0];
-        var viewer  = (results[2] && results[2].viewer) || {};
-        var batchEk = results[3]; // { ok, is_admin, batches }
-        _lagerCanEdit = !!viewer.canTriggerActions;
+        var batchEk = results[2]; // { ok, is_admin, canTriggerActions, batches }
+        _lagerCanEdit = !!(batchEk && batchEk.canTriggerActions);
         var batches = (res && res.data && res.data.allBatches) || [];
         var ekBatches = (batchEk && batchEk.ok && batchEk.batches) || [];
         if (batches.length === 0 && ekBatches.length === 0) { return { status: 'empty' }; }
