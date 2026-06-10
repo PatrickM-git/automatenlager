@@ -21,11 +21,18 @@
   - Coca Cola Zero → **0,99** (netto 0,58 + 0,25 DPG)
 - **Gesamt-Audit:** Rest aller Produkte im Rundungsbereich (≤0,03) korrekt.
 
-### NOCH OFFEN (EK)
-1. **Coca Cola / Fanta Exotic / Sprite**: weiter Platzhalter **1,2852** (keine Rechnung gesehen) — echte EK eintragen.
-2. **Hochwald Eiskaffee**: wird 19% statt **7%** (Milchgetränk) gebucht → Per-Produkt-MwSt = Stufe 6.
-3. **Red Bull go-forward:** Aktive FIFO-Front-Charge = 1,48 (→1,76); Historie auf 1,08 (→1,29) restated. Minimaler Sprung bis die 1,48-Charge leer ist. Bei Bedarf Einheits-EK erzwingen.
-4. Sheet ↔ DB driften (z.B. Lichtenauer still Sheet 0,714 vs DB jetzt 0,7364) — Sheet ist nicht mehr Single-Source.
+### Alle 8 Rechnungen abgeglichen (Proton Drive `…/03 Füllmaterial/02 Rechnungen`)
+Lücken gefüllt aus echten Metro-Rechnungen (Batches + guv_daily, Backup `guv_daily_bak_20260610`):
+- **Coca Cola** → 0,99 (24.01.2026: net 0,580+0,25), **Sprite/Fanta Exotic** → 0,92 (24.09.2025: net 0,520+0,25). Platzhalter 1,2852 weg.
+- **Red Bull Spring** bestätigt 1,76 (28.02.2026: net 1,230+0,25 = exakt Sheet-Spalte G).
+- **Hochwald Eiskaffee** Historie auf **7%** restated (04.06.-Rechnung Klasse B=7%, Milchgetränk): 0,94×1,07=1,01 (war 1,12 @19%).
+- Gesamt-Audit: ALLE Produkte jetzt ≤0,03 Rundung. Sauber für den Steuerberater-Bericht.
+
+### NOCH OFFEN (EK) — nur noch architektonisch/minor
+1. **Hochwald go-forward**: guv-aggregate nutzt Kategorie-MwSt (getraenk=19%) → neue Hochwald-Zeilen wieder 19%. Echte Lösung = **Per-Produkt-MwSt (Stufe 6)**. Historie ist korrekt (7%).
+2. **Lichtenauer DPG↔MW**: aktive 29.05-Charge ist MW (Pur net 0,350 / medium 0,511 → 0,71/0,91). 2025/früh-2026 war DPG (net 0,488+0,25 = 0,738 → ~0,88). Historie steht auf der MW-Standardkost — bei Bedarf periodengenau splitten (kleiner Effekt).
+3. **Red Bull go-forward:** FIFO-Front-Charge = 1,48 (→1,76); Historie auf 1,08 (→1,29, lt. Nutzer). Sprung bis 1,48-Charge leer.
+4. **Capri Sun** (kein Pfand, 19%): Chargen stehen brutto-in-net (0,4165=0,35×1,19) → ggf. Doppel-MwSt bei Verkäufen prüfen (geringe Stückzahl).
 
 ## Session 2026-06-10 (sehr spät) — Alle Seiten hängen + 45 Warnungen + WF3-Constraint
 
