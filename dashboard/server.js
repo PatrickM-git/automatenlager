@@ -2182,6 +2182,12 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (parsed.pathname === '/api/v2/viewer') {
+      const viewer = getViewer(req);
+      sendJson(res, 200, { ok: true, viewer: viewerPublic(viewer) });
+      return;
+    }
+
     if (parsed.pathname === '/api/dashboard') {
       const viewer = getViewer(req);
       auditGuestAccess(viewer, 'dashboard_view');

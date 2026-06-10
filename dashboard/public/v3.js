@@ -1034,7 +1034,7 @@
     if (route.path === '/guv') {
       return Promise.all([
         loadGuvData(_guvQuery),
-        fetchJson('/api/dashboard').catch(function () { return {}; }),
+        fetchJson('/api/v2/viewer').catch(function () { return {}; }),
       ]).then(function (results) {
         var viewer = (results[1] && results[1].viewer) || {};
         _guvCanEdit = !!viewer.canTriggerActions; // #193: EK/VK-Korrektur nur für Admin
@@ -1045,7 +1045,7 @@
       return Promise.all([
         fetchJson('/api/v2/assortment-slots'),
         fetchJson('/api/v2/products/catalog?q='),
-        fetchJson('/api/dashboard').catch(function () { return {}; }),
+        fetchJson('/api/v2/viewer').catch(function () { return {}; }),
       ]).then(function (results) {
         var slots   = (results[0] && results[0].data && results[0].data.slots) || [];
         var lagerOhneSlot = (results[0] && results[0].data && results[0].data.lagerOhneSlot) || [];
@@ -1067,7 +1067,7 @@
       return Promise.all([
         fetchJson('/api/v2/monitoring'),
         fetchJson('/api/v2/correction-cases').catch(function () { return { cases: [] }; }),
-        fetchJson('/api/dashboard').catch(function () { return {}; }),
+        fetchJson('/api/v2/viewer').catch(function () { return {}; }),
       ]).then(function (results) {
         var mon    = (results[0] && results[0].data) ? results[0].data : {};
         var cases  = (results[1] && results[1].cases) || [];
@@ -1106,7 +1106,7 @@
     if (route.path === '/onboarding') {
       return Promise.all([
         fetchJson('/api/v2/onboarding'),
-        fetchJson('/api/dashboard').catch(function () { return {}; }),
+        fetchJson('/api/v2/viewer').catch(function () { return {}; }),
       ]).then(function (results) {
         var data   = (results[0] && results[0].data) || {};
         var viewer = (results[1] && results[1].viewer) || {};
@@ -4772,7 +4772,7 @@
     // #29: Erst die Fähigkeiten laden, dann die Nav nach Fähigkeit bauen. Bei
     // Fehler bleiben die Caps null (fail-open) — die Sicherheit liegt am Server.
     buildNav(); // sofort (fail-open), damit die Shell nie leer wirkt
-    fetchJson('/api/dashboard').catch(function () { return {}; }).then(function (res) {
+    fetchJson('/api/v2/viewer').catch(function () { return {}; }).then(function (res) {
       var v = (res && res.viewer) || {};
       if (v.capabilities) { setViewerCaps(v.capabilities); buildNav(); setActiveNav(activePath()); }
     });
