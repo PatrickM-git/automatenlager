@@ -2153,19 +2153,6 @@ const server = http.createServer(async (req, res) => {
     // #117: Health-Check — spiegelt die Bereitschaft der Mandanten-Registry.
     // Initialer Registry-Load-Fehler ⇒ 503 (fail-closed sichtbar); ohne PG (Dev/Test)
     // gilt die Registry als „nicht anwendbar" ⇒ gesund.
-    if (parsed.pathname === '/api/debug/headers') {
-      // TEMP DEBUG: zeigt welche Headers beim Dashboard ankommen (für Tailscale-Auth-Diagnose)
-      sendJson(res, 200, {
-        remoteAddress: req.socket && req.socket.remoteAddress,
-        tailscaleLogin: req.headers['tailscale-user-login'] || null,
-        tailscaleName: req.headers['tailscale-user-name'] || null,
-        tailscaleHeadersInfo: req.headers['tailscale-headers-info'] || null,
-        xForwardedFor: req.headers['x-forwarded-for'] || null,
-        host: req.headers['host'] || null,
-      });
-      return;
-    }
-
     if (parsed.pathname === '/health') {
       const healthy = tenantDirectoryHealthy();
       sendJson(res, healthy ? 200 : 503, {
