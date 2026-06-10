@@ -9,7 +9,7 @@
 
 ### Fixes
 1. **Suite war rot auf main:** `dashboard-v3-write-off.test.js` AC-WO1 prüfte das alte `/lager`-Gating (`viewer.canTriggerActions` via `/api/dashboard`); Code nutzt seit `5e11545`/`b8437ce` bewusst `batchEk.canTriggerActions` aus `/api/v2/batches`. Test an die gewollte Realität angepasst (Code unverändert).
-2. **RLS-fail-closed-Regression (Migration 0034 NEU):** 0032 hatte die `classification_settings`-Policies versehentlich mit `current_setting(..., true)` (missing_ok) neu angelegt — fehlender GUC lieferte still `__default__`-Zeilen statt Fehler 42704. **Entscheidung (gegen Code/Historie verifiziert):** kein Anwendungsfall — alle Leser gehen durch die Tür (GUC immer gesetzt), Migrationen/Refresh laufen über die Infra-Rolle; im selben Commit blieb 0026 einarmig ⇒ Versehen, keine Designentscheidung. `0034-classification-settings-fail-closed.sql` stellt die 0026-Form wieder her; Test `dashboard-mt-0034-classification-fail-closed.test.js` beweist LIVE (Sandbox): ohne GUC ⇒ 42704, mit GUC ⇒ nur eigener Mandant + `__default__`. **⚠️ DEPLOY AUSSTEHEND: 0034 auf dem Mini anwenden** (idempotent, reine Policy-Neuanlage, kein Risiko).
+2. **RLS-fail-closed-Regression (Migration 0034 NEU):** 0032 hatte die `classification_settings`-Policies versehentlich mit `current_setting(..., true)` (missing_ok) neu angelegt — fehlender GUC lieferte still `__default__`-Zeilen statt Fehler 42704. **Entscheidung (gegen Code/Historie verifiziert):** kein Anwendungsfall — alle Leser gehen durch die Tür (GUC immer gesetzt), Migrationen/Refresh laufen über die Infra-Rolle; im selben Commit blieb 0026 einarmig ⇒ Versehen, keine Designentscheidung. `0034-classification-settings-fail-closed.sql` stellt die 0026-Form wieder her; Test `dashboard-mt-0034-classification-fail-closed.test.js` beweist LIVE (Sandbox): ohne GUC ⇒ 42704, mit GUC ⇒ nur eigener Mandant + `__default__`. **✅ DEPLOYT:** 0034 auf der Mini-DB angewendet (pg_policies verifiziert einarmig).
 3. **Fetch-Timeouts (NEU `lib/fetch-timeout.js`):** alle 6 externen HTTP-Call-Sites (anthropic-client 120 s, google-drive-client, mailer/Resend, github-issues, nayax-devices-sync, nayax-sales je 30 s; Override `EXTERNAL_FETCH_TIMEOUT_MS`) bekommen `AbortSignal.timeout` — vorher konnte ein hängender Dienst einen Worker-Job bis zu den undici-Defaults (~300 s) blockieren. Aufrufer-Signal hat Vorrang; Timeout landet als normaler Job-Fehler in der Telemetrie.
 
 ### Doku-Sync (war ~8 Wochen hinter dem Code)
@@ -22,10 +22,13 @@
 - **Fehlalarme geprüft und verworfen:** worker.js `runOnStart` (tick fängt intern), „disabled Sheets-Nodes" (= dokumentierter Sollzustand Stufe 6), `workflow-actions-view.js` (existiert), 0029-Kommentar (Kopfblock ist präzise).
 - 0031-PK-Vergleich via `string_agg` funktional korrekt, nur kosmetisch fragil — nicht angefasst (deployte Migration).
 
+### Mini-Deploy ✅ (gleiche Session)
+`git pull --ff-only` auf `a0afa91` (Repo-Pfad Mini: `C:\homelab\projekte\automatenlager`, via WSL-git) + Migration 0034 über den Tunnel angewendet (Policies verifiziert) + `docker restart homelab-dashboard homelab-worker`. Verifiziert: `/health` = ok/tenantDirectoryReady/tenantDbReady/pgConfigured, Schema-Contract 146 Spalten-Refs/25 Relationen grün, Worker hat alle 9 Jobs geplant und läuft.
+
 ### Nächste Schritte
-1. **Mini-Deploy:** `git pull --ff-only` + Migration **0034** anwenden + Container-Restart (Dashboard + Worker).
-2. WF3-Constraint-Fix aus der Vorsession weiterhin offen (Mini war offline) — siehe unten.
-3. Cutover #198 beobachten (`cutover-monitor`), danach n8n WF3/WF1 deaktivieren → WF2/WF4 → Migration 0033.
+1. WF3-Constraint-Fix aus der Vorsession weiterhin offen — siehe unten (n8n-seitig, unabhängig vom Dashboard-Deploy).
+2. Cutover #198 beobachten (`cutover-monitor`), danach n8n WF3/WF1 deaktivieren → WF2/WF4 → Migration 0033.
+3. Ops-Empfehlung aus dem Audit: `DASHBOARD_INTERNAL_PEER_CIDR` auf dem Mini setzen (#78), spätestens vor dem zweiten Kunden.
 
 ## Session 2026-06-10 (Nachmittag) — Cutover-Guard-Fix + EK/Pfand-Kostenbasis-Reconciliation
 
