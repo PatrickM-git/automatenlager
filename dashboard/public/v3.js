@@ -2538,7 +2538,7 @@
   function guvUnitCell(r, field) {
     var val = field === 'vk' ? r.vk_per_unit : r.ek_per_unit;
     var disp = (val == null) ? '–' : fmtEuro(val);
-    if (!_guvCanEdit || !r.product_id) { return '<td class="v3-guv-table__num">' + disp + '</td>'; }
+    if (!_guvCanEdit || !r.product_id || field === 'ek') { return '<td class="v3-guv-table__num">' + disp + '</td>'; }
     return '<td class="v3-guv-table__num">' +
       '<button type="button" class="v3-guv-edit" data-guv-edit="' + field + '" data-product-id="' + r.product_id +
       '" data-current="' + (val == null ? '' : val) + '" data-name="' + esc(r.product_name) +
