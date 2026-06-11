@@ -101,3 +101,58 @@ test('#163 applySlotAssignmentEvents LIVE: schreibt WF4-Warnungen mit determinis
     assert.equal(r2.warningsWritten, 0, 'idempotent (gleicher warning_key, ON CONFLICT DO NOTHING)');
   });
 });
+
+// ── n8n-Ablösung 2026-06-11: applySlotChange (Dashboard /slots, ersetzt n8n WF4) ──
+test('applySlotChange LIVE: Produktwechsel = close(alt)+open(neu) atomar; unbekanntes Produkt ⇒ PRODUCT_NOT_FOUND', async (t) => {
+  await inSandbox(t, async (client) => {
+    await seedAcmeGlobex(client);
+    for (const n of [22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) await applyMigration(client, n);
+    const db = createTenantDb({ pool: sandboxTxPool(client) });
+
+    // Fixture: zweites Produkt als Wechselziel + slot_assignment_id des aktiven Slots.
+    const p2 = await client.query(
+      `INSERT INTO automatenlager.products (product_key, name, category, vat_rate_pct, tenant_id)
+         VALUES ('p_acme_neu', 'Acme Neu', 'snack', 19, 'acme') RETURNING product_id`);
+    const sa = await client.query(
+      `SELECT slot_assignment_id FROM automatenlager.slot_assignments
+        WHERE tenant_id = 'acme' AND product_slot_key = 'slot_acme'`);
+
+    const res = await wf4.applySlotChange(db, 'acme', {
+      slot_assignment_id: sa.rows[0].slot_assignment_id,
+      new_product_id: p2.rows[0].product_id,
+      new_qty: 5,
+      start_date: '2026-06-11',
+    }, { nowIso: NOW });
+
+    assert.equal(res.upserts, 2, 'close + open angewandt');
+    assert.equal(res.closed, 'slot_acme');
+    assert.equal(res.opened, 'PS_vm_acme_10_p_acme_neu_20260611T000000Z');
+
+    // alter Slot zu, neuer offen mit Wechselmenge + neuem Produkt
+    const oldRow = await db.read({
+      tenant: 'acme', tables: ['slot_assignments'],
+      text: `SELECT active, valid_to FROM automatenlager.slot_assignments WHERE tenant_id = $1 AND product_slot_key = 'slot_acme'`,
+    });
+    assert.equal(oldRow.rows[0].active, false, 'alter Slot inaktiv');
+    assert.ok(oldRow.rows[0].valid_to, 'valid_to gesetzt');
+    const neu = await db.read({
+      tenant: 'acme', tables: ['slot_assignments', 'products'],
+      text: `SELECT sa.active, sa.current_machine_qty, p.product_key
+               FROM automatenlager.slot_assignments sa
+               JOIN automatenlager.products p ON p.product_id = sa.product_id AND p.tenant_id = sa.tenant_id
+              WHERE sa.tenant_id = $1 AND sa.product_slot_key = 'PS_vm_acme_10_p_acme_neu_20260611T000000Z'`,
+    });
+    assert.equal(neu.rows.length, 1, 'neuer Slot existiert');
+    assert.equal(neu.rows[0].active, true);
+    assert.equal(Number(neu.rows[0].current_machine_qty), 5);
+    assert.equal(neu.rows[0].product_key, 'p_acme_neu');
+
+    // unbekanntes Produkt ⇒ klare Fehlerkennung, nichts geschrieben (tx rollt zurück)
+    await assert.rejects(
+      () => wf4.applySlotChange(db, 'acme', {
+        slot_assignment_id: sa.rows[0].slot_assignment_id, new_product_id: 999999, new_qty: 1, start_date: '2026-06-11',
+      }, { nowIso: NOW }),
+      (e) => e.code === 'SLOT_NOT_FOUND' || e.code === 'PRODUCT_NOT_FOUND',
+      'unbekanntes Ziel wird abgewiesen');
+  });
+});

@@ -151,10 +151,77 @@ async function applySlotAssignmentEvents(db, tenant, { events = [], warnings = [
   });
 }
 
+// ── Produktwechsel (Dashboard /slots) — n8n-Ablösung 2026-06-11 ───────────────
+// Ersetzt den SLOT_CHANGE_WEBHOOK_URL-Pfad (n8n WF4): close(alt) + open(neu)
+// atomar in EINER Transaktion durch die Tür, faithful zur WF4-Lifecycle-Logik
+// (qty nur beim INSERT des neuen Schlüssels; ON CONFLICT ändert nur valid_to/active).
+
+const SLOT_CHANGE_READ_SQL = `
+  SELECT sa.product_slot_key, sa.mdb_code, sa.valid_from, sa.target_stock,
+         sa.machine_capacity, m.machine_key,
+         p_old.product_key AS old_product_key,
+         p_new.product_key AS new_product_key
+    FROM automatenlager.slot_assignments sa
+    JOIN automatenlager.machines m ON m.machine_id = sa.machine_id AND m.tenant_id = sa.tenant_id
+    LEFT JOIN automatenlager.products p_old ON p_old.product_id = sa.product_id AND p_old.tenant_id = sa.tenant_id
+    LEFT JOIN automatenlager.products p_new ON p_new.product_id = $3 AND p_new.tenant_id = $1
+   WHERE sa.tenant_id = $1 AND sa.slot_assignment_id = $2 AND sa.active = TRUE
+   LIMIT 1`;
+
+function compactStamp(iso) {
+  return String(iso).replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+}
+
+async function applySlotChange(db, tenant, { slot_assignment_id, new_product_id, new_qty, start_date } = {}, { nowIso } = {}) {
+  if (!slot_assignment_id) throw new TypeError('applySlotChange: slot_assignment_id erforderlich');
+  if (!new_product_id) throw new TypeError('applySlotChange: new_product_id erforderlich');
+  const at = nowIso || new Date().toISOString();
+  return db.tx(tenant, async (door) => {
+    const r = await door.read({
+      tables: ['slot_assignments', 'machines', 'products'],
+      text: SLOT_CHANGE_READ_SQL,
+      params: [slot_assignment_id, new_product_id],
+    });
+    const old = r.rows[0];
+    if (!old) { const e = new Error('Aktiver Slot nicht gefunden.'); e.code = 'SLOT_NOT_FOUND'; throw e; }
+    if (!old.new_product_key) { const e = new Error('Neues Produkt nicht gefunden.'); e.code = 'PRODUCT_NOT_FOUND'; throw e; }
+    const validFrom = /^\d{4}-\d{2}-\d{2}$/.test(String(start_date || '')) ? `${start_date}T00:00:00.000Z` : at;
+    const newKey = `PS_${old.machine_key}_${old.mdb_code}_${old.new_product_key}_${compactStamp(validFrom)}`;
+    const batchRunId = `wf4_${at.slice(0, 10)}`;
+    const events = [
+      rowToSlotEvent({
+        product_slot_key: old.product_slot_key, machine_key: old.machine_key, mdb_code: old.mdb_code,
+        product_key: old.old_product_key,
+        valid_from: old.valid_from instanceof Date ? old.valid_from.toISOString() : old.valid_from,
+        valid_to: at, active: false,
+      }, batchRunId, at),
+      rowToSlotEvent({
+        product_slot_key: newKey, machine_key: old.machine_key, mdb_code: old.mdb_code,
+        product_key: old.new_product_key, valid_from: validFrom, active: true,
+        current_machine_qty: new_qty ?? 0,
+        target_stock: old.target_stock, machine_capacity: old.machine_capacity,
+      }, batchRunId, at),
+    ];
+    let upserts = 0;
+    for (const ev of events) {
+      const d = ev.data;
+      const w = await door.write({
+        tables: ['slot_assignments', 'machines', 'products'],
+        text: SLOT_ASSIGNMENT_UPSERT_SQL,
+        params: [d.product_slot_key, d.product_key, d.mdb_code, d.valid_from, d.valid_to,
+          d.active, d.current_machine_qty, d.target_stock, d.machine_capacity, d.notes, d.machine_key],
+      });
+      upserts += (w.rowCount || 0);
+    }
+    return { closed: old.product_slot_key, opened: newKey, upserts };
+  });
+}
+
 module.exports = {
   WF4_SLOT_WRITE_KEY,
   buildSlotLifecycleEvents,
   rowToSlotEvent,
   applySlotAssignmentEvents,
+  applySlotChange,
   SLOT_ASSIGNMENT_UPSERT_SQL,
 };

@@ -103,3 +103,49 @@ test('#162 buildDriveFromEnv: ohne Token ⇒ disabled', () => {
   assert.equal(live.kind, 'live');
   assert.ok(live.drive && typeof live.drive.listNew === 'function');
 });
+
+// ── n8n-Ablösung 2026-06-11: Drive-Upload + Invoice-Ordnerpaar ────────────────
+
+const { buildInvoiceDriveFromEnv } = require('../lib/google-drive-client.js');
+
+test('Drive.upload: multipart/related mit Metadata (parents=SRC) + base64-Body, gibt id zurück', async () => {
+  const f = fakeFetch([
+    { body: { access_token: 'AT', expires_in: 3600 } },
+    { body: { id: 'up1', name: 'rechnung.pdf' } },
+  ]);
+  const drive = createGoogleDriveClient({
+    clientId: 'c', clientSecret: 's', refreshToken: 'r',
+    sourceFolderId: 'SRC', processedFolderId: 'DST', fetchImpl: f.impl,
+  });
+  const res = await drive.upload('rechnung.pdf', Buffer.from('PDFDATA'), 'application/pdf');
+  assert.equal(res.id, 'up1');
+  const call = f.calls.find((c) => c.url.includes('/upload/drive/v3/files'));
+  assert.ok(call, 'Upload-Endpoint aufgerufen');
+  assert.match(call.url, /uploadType=multipart/);
+  assert.match(String(call.init.headers['content-type']), /multipart\/related; boundary=/);
+  const body = call.init.body.toString('utf8');
+  assert.match(body, /"parents":\["SRC"\]/, 'Datei landet im Quell-Ordner');
+  assert.match(body, /content-transfer-encoding: base64/);
+  assert.ok(body.includes(Buffer.from('PDFDATA').toString('base64')), 'Inhalt base64-kodiert');
+});
+
+test('Drive.upload: HTTP-Fehler wirft (nicht still verschluckt)', async () => {
+  const f = fakeFetch([
+    { body: { access_token: 'AT', expires_in: 3600 } },
+    { ok: false, status: 403, body: { error: 'nope' } },
+  ]);
+  const drive = createGoogleDriveClient({
+    clientId: 'c', clientSecret: 's', refreshToken: 'r',
+    sourceFolderId: 'SRC', processedFolderId: 'DST', fetchImpl: f.impl,
+  });
+  await assert.rejects(() => drive.upload('x.pdf', Buffer.from('X'), 'application/pdf'), /drive\.upload 403/);
+});
+
+test('buildInvoiceDriveFromEnv: disabled ohne Invoice-Ordner; live mit eigenem Ordnerpaar', () => {
+  const base = { GOOGLE_DRIVE_CLIENT_ID: 'c', GOOGLE_DRIVE_CLIENT_SECRET: 's', GOOGLE_DRIVE_REFRESH_TOKEN: 'r' };
+  // Picklisten-Ordner reichen NICHT (eigenes Paar Pflicht — sonst pollt WF1 wieder die Pickliste)
+  assert.equal(buildInvoiceDriveFromEnv({ ...base, GOOGLE_DRIVE_PICKLIST_FOLDER_ID: 'P', GOOGLE_DRIVE_PROCESSED_FOLDER_ID: 'Q' }).kind, 'disabled');
+  const live = buildInvoiceDriveFromEnv({ ...base, GOOGLE_DRIVE_INVOICE_FOLDER_ID: 'INV', GOOGLE_DRIVE_INVOICE_PROCESSED_FOLDER_ID: 'DONE' });
+  assert.equal(live.kind, 'live');
+  assert.ok(live.drive && typeof live.drive.upload === 'function');
+});

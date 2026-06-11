@@ -81,6 +81,49 @@ async function fetchNayaxMachines({ token, headerName = 'Authorization', baseUrl
   return [];
 }
 
+/**
+ * Nayax machineProducts je Automat (n8n-Ablösung 2026-06-11, ersetzt den
+ * WF-Nayax-Abgleich-Preview-Fetch). Ergänzt je Item den Produktnamen über
+ * GET /operational/v1/products/{NayaxProductID} — tolerant gegen Fehler
+ * (faithful zum n8n-Knoten mit onError: continueRegularOutput), Details je
+ * Produkt-ID nur EINMAL geholt (Cache).
+ */
+async function fetchNayaxMachineProducts({ token, headerName = 'Authorization', baseUrl = 'https://lynx.nayax.com', machineId, fetchImpl, withDetails = true } = {}) {
+  const doFetch = typeof fetchImpl === 'function' ? fetchImpl : (typeof fetch === 'function' ? fetch : null);
+  if (!doFetch) throw new TypeError('nayax-machine-products: kein fetch verfügbar — fetchImpl injizieren');
+  if (!machineId) throw new TypeError('nayax-machine-products: machineId erforderlich');
+  const headers = { [headerName]: token, accept: 'application/json' };
+  const res = await doFetch(`${baseUrl}/operational/v1/machines/${encodeURIComponent(machineId)}/machineProducts`, withTimeout({ method: 'GET', headers }));
+  if (!res.ok) throw new Error(`nayax machineProducts HTTP ${res.status}`);
+  const data = await res.json();
+  let items = [];
+  if (Array.isArray(data)) items = data;
+  else for (const k of ['Data', 'data', 'Items', 'items']) { if (data && Array.isArray(data[k])) { items = data[k]; break; } }
+  if (!withDetails) return items;
+  const nameCache = new Map();
+  for (const it of items) {
+    const pid = it && (it.NayaxProductID ?? it.ProductId);
+    if (pid == null || String(pid).trim() === '') {
+      // Ohne Produkt-ID kein detail-Call — aber der DEX-Name bleibt als Fallback
+      // (faithful zur n8n-Map-Node: name = detail || it.DEXProductName).
+      if (it && !it.ProductName && it.DEXProductName) it.ProductName = it.DEXProductName;
+      continue;
+    }
+    const key = String(pid).trim();
+    if (!nameCache.has(key)) {
+      try {
+        const dRes = await doFetch(`${baseUrl}/operational/v1/products/${encodeURIComponent(key)}`, withTimeout({ method: 'GET', headers }));
+        const dJson = dRes.ok ? await dRes.json() : null;
+        nameCache.set(key, (dJson && (dJson.ProductName || dJson.DEXProductName)) || '');
+      } catch { nameCache.set(key, ''); }
+    }
+    const detName = nameCache.get(key);
+    if (detName) it.ProductName = detName;
+    else if (!it.ProductName && it.DEXProductName) it.ProductName = it.DEXProductName;
+  }
+  return items;
+}
+
 /** Upsert der Geräte für EINEN Mandanten durch die Tür (db.tx, explizites tenant_id). */
 async function upsertDevices(db, tenant, rows) {
   if (!rows.length) return { upserted: 0 };
@@ -146,6 +189,7 @@ module.exports = {
   normalizeAuthValue,
   resolveNayaxTenant,
   fetchNayaxMachines,
+  fetchNayaxMachineProducts,
   upsertDevices,
   WORKFLOW_KEY,
   NAYAX_MACHINES_URL,

@@ -22,12 +22,11 @@
 - Mandantenfähigkeit **Stufe 0–5 LIVE** (RLS-Backstop, Lesen+Schreiben). Suite **1332/1332**.
 - **SQL-only** (Google Sheets abgelöst), Dashboard v3, Inline-Inventur, **tägliches PG-Backup
   auf externe Platte (Restore erprobt)**.
-- Läuft auf dem **Heim-Mini**, **1 echter Kunde** (Faltrix). **Stufe 6 weit fortgeschritten
-  (Stand 2026-06-11):** WF5/7/8/9 + Hilfs-WFs laufen als Worker-Jobs; **WF3 ist über den
-  Cutover** (Backend schreibt, n8n-WF3 + WF-Monitor deaktiviert). Auf n8n verbleiben nur
-  noch **WF1 (wegen Upload-Webhook), WF2, WF4 (Forms), WF-PGW, WF-Nayax-Abgleich,
-  WF-Drift-Check, WF-Migrate** — danach Migration 0033 (BYPASSRLS-Entzug).
-- Reifegrad **~65/100** (Code/Sicherheit/Tests stark; Betrieb/Infra ist der Engpass).
+- Läuft auf dem **Heim-Mini**, **1 echter Kunde** (Faltrix). **Stufe 6 KOMPLETT
+  (2026-06-11):** alle 18 n8n-Workflows deaktiviert, jede Logik als Backend-Code
+  (Worker-Jobs + Dashboard-Endpunkte durch die Tür); Migration 0033 angewendet ⇒
+  **RLS systemweit ohne Bypass**. Protokoll: `docs/audit/n8n-abloesung-abschluss-2026-06-11.md`.
+- Reifegrad **~70/100** (Code/Sicherheit/Tests stark; Betrieb/Infra ist der Engpass).
 
 ---
 
@@ -41,11 +40,11 @@ Ziel: cloud-portabel **+** mehrkundenfähig **+** Kunden handlungsfähig.
   −74 %) + **ETag/Conditional-GET** (Repeat-Navigation = 304, kein Neudownload). Transparent,
   Suite 1089/1089. Offen (optional, kleiner Mini-lokaler Gewinn): config/thresholds-Reads je
   Endpunkt bündeln/cachen.
-- **A2 — Stufe 6: n8n-Ablösung** (= dein „n8n weg"-Ziel + Cloud-Voraussetzung + Backstop
-  systemweit dicht): WF3 (FIFO/Bestand), WF7 (Nachfüllung), WF1/WF2 (Rechnungseingang/
-  Produktauswahl), WF5 (MHD-Überwachung), WF8 (GuV-Aggregat), WF9 → schrittweise durch
-  **Backend-Code + geplante Jobs** ersetzen. Danach: **#108** (tenantColumn-Brücke +
-  `__default__`-Abbau), **#111** (globale Uniques droppen → `ON CONFLICT (tenant_id,key)`).
+- **A2 — Stufe 6: n8n-Ablösung — ✅ KOMPLETT (2026-06-11):** alle 18 Workflows
+  deaktiviert; WF1/3/5/8/9 + Hilfs-WFs als Worker-Jobs, WF2/WF4/WF7/Abgleich als
+  Dashboard-Endpunkte durch die Tür; Migration 0033 (BYPASSRLS-Entzug) live ⇒ RLS
+  systemweit. #108/#111 waren bereits in den Slices erledigt (Migrationen 0031/0032).
+  Abschlussprotokoll + Rückweg: `docs/audit/n8n-abloesung-abschluss-2026-06-11.md`.
 - **A3 — Betriebsreife:** Monitoring/Alerting + Statusseite + Error-Tracking (z. B. Sentry);
   **Off-Site-/Cloud-Backup + Alarm bei Backup-Fehlern** (lokal vorhanden).
 - **A4 — Self-Service-Schicht (Kunden unabhängig machen):**

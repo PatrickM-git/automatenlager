@@ -1,25 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-11_wf3-cutover-marketing.md`.
-
-## Session 2026-06-11 (Fortsetzung) — n8n-ABLÖSUNG KOMPLETT (Stufe 6 abgeschlossen)
-
-**Alle 18 n8n-Workflows deaktiviert, Migration 0033 (BYPASSRLS-Entzug) angewendet ⇒ RLS systemweit ohne Ausnahme.** Vollständiges Abschlussprotokoll inkl. Ersatz-Tabelle, Validierung, Rückweg und Folgearbeiten: **`docs/audit/n8n-abloesung-abschluss-2026-06-11.md`** (der maßgebliche Ort).
-
-### Die drei Code-Ports dieser Session
-1. **WF1-Upload:** `google-drive-client.js` kann jetzt `upload()` (multipart files.create); neuer Builder `buildInvoiceDriveFromEnv` (EIGENES Ordnerpaar `GOOGLE_DRIVE_INVOICE_*` — vorher pollte der Intake-Job fälschlich den Picklisten-Ordner!); Upload-Endpunkt legt Rechnungs-PDFs direkt im Drive-Rechnungseingang ab (Webhook nur noch Fallback). Mini-Env: Invoice-Ordner-IDs (aus dem WF1-Export: `15_5fY…`/`1pzIB…`) + `WF1_TENANT_ID=t_faltrix` (**fehlte — der WF1-Schatten lief deshalb immer „skipped"**) + `WF1_CUTOVER=1`.
-2. **WF4-Produktwechsel:** `applySlotChange()` in `wf4-slot-write.js` (close+open atomar via db.tx, LIVE-getestet inkl. Isolation); `slot-change/confirm` bucht direkt durch die Tür — `SLOT_CHANGE_WEBHOOK_URL` obsolet.
-3. **Nayax-Abgleich:** `fetchNayaxMachineProducts()` (direkt Nayax-API, Namens-Anreicherung per product-detail mit Cache + Fehlertoleranz — faithful zur n8n-Map-Node); Apply wendet die pgw-fertigen Events via `applySlotAssignmentEvents()` durch die Tür an — `NAYAX_ABGLEICH_WEBHOOK_URL` obsolet. WF2 war bereits in-process (`invoice-proposal/approve`) — n8n-Form nur noch Alt-Eingang, deaktiviert.
-
-### Deaktivierte n8n-Workflows (IDs für den Rückweg)
-WF1 `wnGAwHhgfXq2ATM8` · WF2 `X2RU2cHm78rkIWMf` · WF3 `wbOhFKXQqBpJWB1w` · WF4 `6tOZnWsxBNzHaVqA` · WF-PGW `Sajezv8tJll0CLIv` · WF-Nayax-Abgleich `JiBefpG7ufgqPSKF` · WF-Monitor `EdgUfv1lMcE25Z3K` · WF-Drift-Check `0jSwjm74Bna7FSqr` · WF-Migrate `rjR0orV1gcPF342O` (Rest war schon inaktiv).
-
-### Nächste Schritte
-1. Erste echte Rechnung über den neuen Upload schicken und Verarbeitung beobachten (`wf1-invoice-intake` in audit.workflow_runs).
-2. ROADMAP: A2 ✅ → als Nächstes **A3 Betriebsreife** (Off-Site-Backup, Monitoring), dann A4 Self-Service.
-3. Aufräum-Backlog (siehe Abschlussprotokoll §Folgearbeiten): n8n-Container stilllegen, cutover-monitor aus dem Schedule, Webhook-Fallbacks entfernen.
-4. Ops: `DASHBOARD_INTERNAL_PEER_CIDR` (#78) vor zweitem Kunden.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-10_projekt-vollaudit.md`.
 
 ## Session 2026-06-11 — WF3-CUTOVER VOLLZOGEN + Marketing/Pricing-Konzept
 

@@ -18,6 +18,8 @@ const { availableBatchStatusSqlList } = require('./lib/stock-status.js');
 const { validateWriteOff, buildWriteOffAuditEntry, writeOffBatchPg } = require('./lib/write-off.js'); // #138: writeOffBatchPg geht durch die Tür
 const { validateInventoryCount, buildInventoryCountAuditEntry, setBatchCountPg } = require('./lib/inventory-count.js'); // #152: Inline-Inventur (Chargenrest setzen)
 const { buildSlotChangePreview, validateSlotChange, buildSlotChangePayload, buildSlotChangeAuditEntry } = require('./lib/slot-change.js');
+const { applySlotChange, applySlotAssignmentEvents } = require('./lib/jobs/wf4-slot-write.js');
+const { fetchNayaxMachineProducts, normalizeAuthValue: normalizeNayaxAuth } = require('./lib/jobs/nayax-devices-sync.js');
 const { buildProductOnboardingData, queryProductOnboardingPg } = require('./lib/product-onboarding.js');
 const { buildReportCsv, buildReportFilename } = require('./lib/reports.js');
 const { buildGuvPdf } = require('./lib/pdf-report.js');
@@ -146,6 +148,18 @@ const dashboardV2UploadTargets = {
     workflowName: /^WF9 - Pickliste verarbeiten$/i,
   },
 };
+
+// Lazy gebauter Drive-Client für den Rechnungs-Upload (n8n-Ablösung). Einmal
+// gebaut und gecacht, damit der OAuth-Token-Cache im Client wirkt. Prozess-Env
+// hat Vorrang vor .env.local (gleiche Regel wie beim Webhook-Override).
+let invoiceDriveCache = null;
+function getInvoiceDrive() {
+  if (!invoiceDriveCache) {
+    const { buildInvoiceDriveFromEnv } = require('./lib/google-drive-client.js');
+    invoiceDriveCache = buildInvoiceDriveFromEnv({ ...loadLocalEnv(), ...process.env });
+  }
+  return invoiceDriveCache;
+}
 
 function parseEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {};
@@ -562,30 +576,39 @@ function mergeSettingsOverride(current = {}, incoming = {}) {
   return out;
 }
 
+// Nayax-API-Zugang für den Vollabgleich (n8n-Ablösung 2026-06-11): Token/Basis
+// direkt aus der Env — die n8n-Credential-Indirektion (NAYAX_ABGLEICH_WEBHOOK_URL)
+// ist abgelöst. Prozess-Env hat Vorrang vor .env.local.
+function nayaxApiSettings() {
+  const fileEnv = loadLocalEnv();
+  const pick = (k) => clean(process.env[k] !== undefined ? process.env[k] : fileEnv[k]);
+  return {
+    token: normalizeNayaxAuth(pick('NAYAX_API_TOKEN')),
+    baseUrl: pick('NAYAX_BASE_URL') || 'https://lynx.nayax.com',
+    headerName: pick('NAYAX_HEADER_NAME') || 'Authorization',
+  };
+}
+
 // Vollabgleich-Diff (Slotbelegung + Füllstand) Nayax -> PG, read-only.
-// Holt die Nayax-Items vom Mini-WF (mode=preview, Credential liegt in n8n),
-// liest PG (aktive Slots + Nayax-Aliase + Produktnamen) und baut den Diff über
-// die getestete reine Logik in lib/nayax-abgleich.js. Wirft bei Webhook-/PG-
-// Fehlern (mit err.code) -> der Aufrufer mappt auf HTTP-Status.
-async function computeNayaxAbgleichDiff(db, tenant, webhookUrl, machineKey) {
-  const wfResp = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildAbgleichPreviewPayload(machineKey)),
-  });
-  if (!wfResp.ok) {
-    const text = await wfResp.text().catch(() => '');
-    const err = new Error(`Nayax-Webhook antwortete ${wfResp.status}: ${text.slice(0, 200)}`);
-    err.code = 'NAYAX_WEBHOOK_ERROR';
+// Holt die Nayax-Items DIREKT von der Nayax-API (machineProducts + Namens-
+// Anreicherung; früher via Mini-WF-Webhook), liest PG (aktive Slots + Nayax-
+// Aliase + Produktnamen) und baut den Diff über die getestete reine Logik in
+// lib/nayax-abgleich.js. Wirft bei Nayax-/PG-Fehlern (mit err.code).
+async function computeNayaxAbgleichDiff(db, tenant, machineKey) {
+  const { token, baseUrl, headerName } = nayaxApiSettings();
+  if (!token) {
+    const err = new Error('NAYAX_API_TOKEN nicht gesetzt.');
+    err.code = 'NAYAX_UNCONFIGURED';
     throw err;
   }
-  let wfJson;
-  try { wfJson = await wfResp.json(); } catch { wfJson = {}; }
-  const rawItems = wfJson.nayax_items
-    || wfJson.items
-    || (wfJson.data && (wfJson.data.nayax_items || wfJson.data.items))
-    || (Array.isArray(wfJson.data) ? wfJson.data : null)
-    || [];
+  let rawItems;
+  try {
+    rawItems = await fetchNayaxMachineProducts({ token, headerName, baseUrl, machineId: machineKey });
+  } catch (e) {
+    const err = new Error(`Nayax-API: ${e.message}`);
+    err.code = 'NAYAX_API_ERROR';
+    throw err;
+  }
   const nayaxItems = normalizeNayaxItems(Array.isArray(rawItems) ? rawItems : []);
 
   // #127: 4 Reads durch die Mandanten-Tür (tenant_id-Filter in den Buildern, Mandant=$1).
@@ -2938,26 +2961,28 @@ const server = http.createServer(async (req, res) => {
       // der Eingabe-Validierung (malformte Requests ⇒ 400, kein Mandanten-Lookup;
       // 400 leakt nichts über Objekt-Existenz). machine_id ist hier garantiert da.
       if (!(await requireMachineAccess(viewer, machine_id, res, 'idor:slot-change'))) return;
+      if (!slot_assignment_id) {
+        sendJson(res, 400, { ok: false, error: { code: 'MISSING_FIELDS', message: 'slot_assignment_id erforderlich.' } });
+        return;
+      }
       const slotRow = { slot_assignment_id, machine_id, mdb_code: Number(mdb_code), product_id: 0 };
       const payload = buildSlotChangePayload(slotRow, { new_product_id, new_qty: Number(new_qty ?? 0), start_date });
-      const webhookUrl = process.env.SLOT_CHANGE_WEBHOOK_URL;
-      let wfResult = { ok: true, status_ref: `sc-${Date.now()}`, message: 'Payload protokolliert.' };
-      if (webhookUrl) {
-        try {
-          const wfResponse = await fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...payload, triggered_by: viewer.login }),
-          });
-          const wfText = await wfResponse.text();
-          wfResult = {
-            ok: wfResponse.ok,
-            status_ref: `sc-${Date.now()}`,
-            message: wfResponse.ok ? 'Webhook erfolgreich.' : `Webhook antwortete ${wfResponse.status}: ${wfText.slice(0, 200)}`,
-          };
-        } catch (err) {
-          wfResult = { ok: false, status_ref: null, message: `Webhook nicht erreichbar: ${err.message}` };
-        }
+      // n8n-Ablösung (2026-06-11): Produktwechsel läuft als close(alt)+open(neu)
+      // atomar DURCH die Tür (db.tx) — der frühere SLOT_CHANGE_WEBHOOK_URL-Pfad
+      // (n8n WF4) ist abgelöst.
+      let wfResult;
+      try {
+        const r = await applySlotChange(tenantDb, viewer.tenantId, {
+          slot_assignment_id, new_product_id, new_qty: Number(new_qty ?? 0), start_date,
+        });
+        wfResult = {
+          ok: true,
+          status_ref: `sc-${Date.now()}`,
+          message: `Produktwechsel gebucht (geschlossen: ${r.closed}, neu: ${r.opened}).`,
+        };
+      } catch (err) {
+        const status = err.code === 'SLOT_NOT_FOUND' || err.code === 'PRODUCT_NOT_FOUND' ? 404 : 502;
+        wfResult = { ok: false, status: status, status_ref: null, message: `Produktwechsel fehlgeschlagen: ${err.message}` };
       }
       const auditEntry = buildSlotChangeAuditEntry(viewer, payload, wfResult);
       const auditPath = path.join(__dirname, 'logs', 'slot-change-actions.jsonl');
@@ -2965,11 +2990,11 @@ const server = http.createServer(async (req, res) => {
         fs.mkdirSync(path.dirname(auditPath), { recursive: true });
         fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
       } catch { /* audit write failure must not block response */ }
-      sendJson(res, wfResult.ok ? 200 : 502, {
+      sendJson(res, wfResult.ok ? 200 : (wfResult.status || 502), {
         ok: wfResult.ok,
         status_ref: auditEntry.status_ref,
         message: wfResult.message,
-        ...(wfResult.ok ? {} : { error: { code: 'WEBHOOK_ERROR', message: wfResult.message } }),
+        ...(wfResult.ok ? {} : { error: { code: 'SLOT_CHANGE_FAILED', message: wfResult.message } }),
       });
       return;
     }
@@ -3093,6 +3118,54 @@ const server = http.createServer(async (req, res) => {
           },
         });
         return;
+      }
+
+      // n8n-Ablösung (2026-06-11): Rechnungs-Uploads gehen DIREKT in den
+      // Drive-Ordner Rechnungseingang (GOOGLE_DRIVE_INVOICE_*); der Worker-Job
+      // wf1-invoice-intake pollt ihn. Der Webhook-Pfad darunter bleibt nur als
+      // Fallback, solange kein Invoice-Drive konfiguriert ist.
+      if (routeTarget === 'invoice') {
+        const inv = getInvoiceDrive();
+        if (inv && inv.drive) {
+          try {
+            const uploaded = await inv.drive.upload(validatedFile.fileName, validatedFile.data, validatedFile.mimeType);
+            sendJson(res, 200, {
+              ok: true,
+              viewer,
+              target: routeTarget,
+              upload: {
+                fileName: validatedFile.fileName,
+                mimeType: validatedFile.mimeType,
+                sizeBytes: validatedFile.sizeBytes,
+              },
+              workflow: {
+                id: null,
+                name: 'Rechnungseingang (Drive direkt, Worker-Intake)',
+                method: 'DRIVE',
+                webhookPath: '(drive)',
+                status: 'accepted',
+                driveFileId: uploaded.id,
+              },
+              error: null,
+            });
+          } catch (error) {
+            sendJson(res, 502, {
+              ok: false,
+              viewer,
+              target: routeTarget,
+              upload: {
+                fileName: validatedFile.fileName,
+                mimeType: validatedFile.mimeType,
+                sizeBytes: validatedFile.sizeBytes,
+              },
+              error: {
+                code: 'DRIVE_UPLOAD_FAILED',
+                message: `Upload in den Drive-Ordner fehlgeschlagen: ${error.message}`,
+              },
+            });
+          }
+          return;
+        }
       }
 
       // Optionaler gezielter Override: postet die Datei direkt an einen festen
@@ -4109,17 +4182,16 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
         return;
       }
-      const webhookUrl = process.env.NAYAX_ABGLEICH_WEBHOOK_URL;
-      if (!webhookUrl) {
-        sendJson(res, 503, { ok: false, error: { code: 'NAYAX_WEBHOOK_UNCONFIGURED', message: 'NAYAX_ABGLEICH_WEBHOOK_URL nicht gesetzt.' } });
+      if (!nayaxApiSettings().token) {
+        sendJson(res, 503, { ok: false, error: { code: 'NAYAX_UNCONFIGURED', message: 'NAYAX_API_TOKEN nicht gesetzt.' } });
         return;
       }
       if (!tenantReadReady(res)) return;
       try {
-        const { diff } = await computeNayaxAbgleichDiff(tenantDb, viewer.tenantId, webhookUrl, machineKey);
+        const { diff } = await computeNayaxAbgleichDiff(tenantDb, viewer.tenantId, machineKey);
         sendJson(res, 200, { ok: true, ...diff });
       } catch (err) {
-        const code = err.code === 'NAYAX_WEBHOOK_ERROR' ? 502 : 503;
+        const code = err.code === 'NAYAX_API_ERROR' ? 502 : 503;
         sendJson(res, code, { ok: false, error: { code: err.code || 'PG_ERROR', message: err.message } });
       }
       return;
@@ -4161,14 +4233,13 @@ const server = http.createServer(async (req, res) => {
       // #33/#117 (IDOR): Automat muss real zum Mandanten des Viewers gehören. Nach
       // der Pflichtfeld-/PG-Prüfung; machineKey ist hier garantiert vorhanden.
       if (!(await requireMachineAccess(viewer, machineKey, res, 'idor:nayax-apply'))) return;
-      const webhookUrl = process.env.NAYAX_ABGLEICH_WEBHOOK_URL;
-      if (!webhookUrl) {
-        sendJson(res, 503, { ok: false, error: { code: 'NAYAX_WEBHOOK_UNCONFIGURED', message: 'NAYAX_ABGLEICH_WEBHOOK_URL nicht gesetzt.' } });
+      if (!nayaxApiSettings().token) {
+        sendJson(res, 503, { ok: false, error: { code: 'NAYAX_UNCONFIGURED', message: 'NAYAX_API_TOKEN nicht gesetzt.' } });
         return;
       }
       let plan; let diff; let events;
       try {
-        const result = await computeNayaxAbgleichDiff(tenantDb, viewer.tenantId, webhookUrl, machineKey);
+        const result = await computeNayaxAbgleichDiff(tenantDb, viewer.tenantId, machineKey);
         diff = result.diff;
         plan = buildApplyPlan(diff);
         const nowIso = new Date().toISOString();
@@ -4179,7 +4250,7 @@ const server = http.createServer(async (req, res) => {
           productKeyById: result.productKeyById,
         });
       } catch (err) {
-        const code = err.code === 'NAYAX_WEBHOOK_ERROR' ? 502 : 503;
+        const code = err.code === 'NAYAX_API_ERROR' ? 502 : 503;
         sendJson(res, code, { ok: false, error: { code: err.code || 'PG_ERROR', message: err.message } });
         return;
       }
@@ -4198,27 +4269,22 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const payload = buildAbgleichApplyPayload(plan, { triggered_by: viewer.login });
-      // pgw_write-fertige slot_assignment-Events (close alt + open neu) mitgeben;
-      // der Mini-WF reicht sie nur noch an WF-PGW durch (Logik bleibt getestet hier).
       payload.events = events;
-      let wfResult = { ok: true, status_ref: `abgl-${Date.now()}`, message: 'Payload protokolliert.' };
+      // n8n-Ablösung (2026-06-11): die pgw_write-fertigen slot_assignment-Events
+      // (close alt + open neu) werden DIREKT durch die Tür angewandt (db.tx, RLS) —
+      // der frühere Umweg über den Mini-WF + WF-PGW ist abgelöst. Semantik identisch
+      // (gleiche ON-CONFLICT-Upsert-Logik in lib/jobs/wf4-slot-write.js).
+      let wfResult;
       try {
-        const wfResponse = await fetch(webhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const wfText = await wfResponse.text();
-        let wfBody = null;
-        try { wfBody = JSON.parse(wfText); } catch { /* nicht-JSON Antwort */ }
+        const r = await applySlotAssignmentEvents(tenantDb, viewer.tenantId, { events });
         wfResult = {
-          ok: wfResponse.ok && (wfBody == null || wfBody.ok !== false),
-          status_ref: (wfBody && wfBody.status_ref) || `abgl-${Date.now()}`,
-          message: wfResponse.ok ? 'Abgleich übernommen.' : `Webhook antwortete ${wfResponse.status}: ${wfText.slice(0, 200)}`,
-          wf: wfBody,
+          ok: true,
+          status_ref: `abgl-${Date.now()}`,
+          message: `Abgleich übernommen (${r.upserts} Slot-Events angewandt).`,
+          wf: { upserts: r.upserts, skipped: r.skipped },
         };
       } catch (err) {
-        wfResult = { ok: false, status_ref: null, message: `Webhook nicht erreichbar: ${err.message}` };
+        wfResult = { ok: false, status_ref: null, message: `Abgleich fehlgeschlagen: ${err.message}` };
       }
       const auditEntry = buildAbgleichAuditEntry(viewer, payload, wfResult);
       const auditPath = path.join(__dirname, 'logs', 'nayax-abgleich-actions.jsonl');

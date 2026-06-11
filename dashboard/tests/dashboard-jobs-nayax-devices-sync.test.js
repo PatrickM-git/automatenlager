@@ -104,3 +104,58 @@ test('#161 Nayax-Sync LIVE: Upsert für EINEN Mandanten, isoliert + idempotent (
     }
   });
 });
+
+// ── n8n-Ablösung 2026-06-11: fetchNayaxMachineProducts (ersetzt WF-Nayax-Abgleich-Fetch) ──
+
+function fakeFetchSeq(responses) {
+  const calls = [];
+  return {
+    calls,
+    impl: async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      const r = responses.shift();
+      if (!r) throw new Error('fakeFetchSeq: keine Antwort mehr');
+      return {
+        ok: r.ok !== false,
+        status: r.status || 200,
+        json: async () => r.body,
+        text: async () => JSON.stringify(r.body || {}),
+      };
+    },
+  };
+}
+
+test('fetchNayaxMachineProducts: holt machineProducts + reichert Namen per product-detail an (Cache je ID)', async () => {
+  const f = fakeFetchSeq([
+    { body: [ // machineProducts: 2 Slots, gleiches Produkt → detail nur EINMAL
+      { MDBCode: 10, NayaxProductID: 77, PAR: 8, MissingStockByMDB: 3 },
+      { MDBCode: 11, NayaxProductID: 77, PAR: 6, MissingStockByMDB: 1 },
+      { MDBCode: 12, NayaxProductID: null, DEXProductName: 'DEX-Fallback', PAR: 4, MissingStockByMDB: 0 },
+    ] },
+    { body: { ProductName: 'Fanta Exotic' } }, // detail für 77 (einmal)
+  ]);
+  const items = await nx.fetchNayaxMachineProducts({ token: 'T', machineId: '457', fetchImpl: f.impl });
+  assert.equal(items.length, 3);
+  assert.equal(items[0].ProductName, 'Fanta Exotic', 'detail-Name angereichert');
+  assert.equal(items[1].ProductName, 'Fanta Exotic', 'Cache: gleiche ID, kein zweiter Call');
+  assert.equal(items[2].ProductName, 'DEX-Fallback', 'ohne ID: DEX-Name als Fallback');
+  const detailCalls = f.calls.filter((c) => c.url.includes('/operational/v1/products/'));
+  assert.equal(detailCalls.length, 1, 'product-detail je ID nur einmal');
+  assert.match(f.calls[0].url, /\/operational\/v1\/machines\/457\/machineProducts$/);
+  assert.equal(f.calls[0].init.headers.Authorization, 'T', 'Auth-Header gesetzt');
+});
+
+test('fetchNayaxMachineProducts: detail-Fehler tolerant (wie n8n onError:continue); HTTP-Fehler der Liste wirft', async () => {
+  const tolerant = fakeFetchSeq([
+    { body: { Data: [{ MDBCode: 10, NayaxProductID: 5, PAR: 2, MissingStockByMDB: 0 }] } }, // {Data:[…]}-Form
+    { ok: false, status: 500, body: {} }, // detail kaputt → Name bleibt leer, kein Throw
+  ]);
+  const items = await nx.fetchNayaxMachineProducts({ token: 'T', machineId: '1', fetchImpl: tolerant.impl });
+  assert.equal(items.length, 1);
+  assert.ok(!items[0].ProductName, 'kein Name, aber kein Abbruch');
+
+  const broken = fakeFetchSeq([{ ok: false, status: 401, body: {} }]);
+  await assert.rejects(
+    () => nx.fetchNayaxMachineProducts({ token: 'T', machineId: '1', fetchImpl: broken.impl }),
+    /machineProducts HTTP 401/);
+});

@@ -171,7 +171,7 @@ function buildWorker(env = process.env) {
   const { buildGithubIssuesFromEnv } = require('./lib/jobs/github-issues.js');
   const { buildMailerFromEnv } = require('./lib/jobs/mailer.js');
   const { buildAnthropicFromEnv } = require('./lib/anthropic-client.js');
-  const { buildDriveFromEnv } = require('./lib/google-drive-client.js');
+  const { buildDriveFromEnv, buildInvoiceDriveFromEnv } = require('./lib/google-drive-client.js');
 
   function loadLocalEnv() {
     // Minimaler .env.local-Leser (Projekt- + dashboard-Ebene), wie server.js.
@@ -261,7 +261,11 @@ function buildWorker(env = process.env) {
     : createPicklistPollJob({ drive: driveClient, anthropic });
   // WF1 Rechnungseingang (#163, Slice 3): Drive→Claude→invoice+items. Datenkritisch →
   // DEFAULT Schattenbetrieb (kein Schreiben); Cutover via WF1_CUTOVER=1. Ohne Drive disabled.
-  const invoiceIntakeJob = createInvoiceIntakeJob({ db: tenantDb, drive: driveClient, anthropic, env: runtimeEnv });
+  // Seit n8n-Ablösung (2026-06-11): EIGENES Ordnerpaar GOOGLE_DRIVE_INVOICE_* — vorher
+  // pollte der Job fälschlich den Picklisten-Ordner des geteilten Clients.
+  const { drive: invoiceDrive, kind: invoiceDriveKind } = buildInvoiceDriveFromEnv(runtimeEnv);
+  console.log(`[worker] Invoice-Drive: ${invoiceDriveKind}`);
+  const invoiceIntakeJob = createInvoiceIntakeJob({ db: tenantDb, drive: invoiceDrive, anthropic, env: runtimeEnv });
   // Cutover-Readiness-Wächter (#198): ruft die Schatten-Jobs read-only, zählt deckungsgleiche
   // aktive Läufe in workflow_state und mailt, sobald das Cutover-Kriterium erfüllt ist.
   const cutoverTenant = (runtimeEnv.NAYAX_TENANT_ID || runtimeEnv.WF1_TENANT_ID || runtimeEnv.WF9_TENANT_ID || '').trim();

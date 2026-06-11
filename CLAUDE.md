@@ -126,7 +126,14 @@ Read-Only guest access (Default-Deny seit #27, `dashboard/lib/auth.js` → `reso
 - Before committing any workflow JSON, search for `Bearer `, `apikey`, `password` and `secret` patterns and verify no real token is present.
 - If a real token is accidentally committed: revoke it immediately, replace with a placeholder, clean git history with `git filter-repo`, then force-push.
 
-## n8n Workflow Notes
+## n8n Workflow Notes (HISTORISCH — n8n ist seit 2026-06-11 vollständig abgelöst)
+
+**Stufe 6 ist KOMPLETT:** Alle 18 n8n-Workflows sind deaktiviert, jede Logik läuft
+als Backend-Code (Dashboard-Endpunkte + Worker-Jobs durch die Mandanten-Tür);
+`n8n_app` hat kein BYPASSRLS mehr (Migration 0033) ⇒ RLS systemweit. Details +
+Ersatz-Tabelle + Rückweg: `docs/audit/n8n-abloesung-abschluss-2026-06-11.md`.
+Der n8n-Container läuft nur noch als inertes Archiv. Die folgenden Hinweise
+gelten NUR noch, falls je ein n8n-Workflow reaktiviert werden muss:
 
 - **ALWAYS work on the HP Mini n8n instance — never the local one.** The production workflows (WF0–WF9) run 24/7 on the HP Mini at `https://hp-mini-server.tail573a13.ts.net`. A local n8n instance (`localhost:5678`) on the dev PC holds **outdated/inactive copies with different workflow IDs** — editing those is wasted work. Example WF1: Mini production = `wnGAwHhgfXq2ATM8` (published) vs. local = `dKNRRxkCPmVsArJ0` (inactive).
 - **Before any n8n change, verify the target instance.** Confirm the connection points at the Mini (not localhost) and that the workflow ID matches production via `get_workflow_details`. If the expected Mini ID returns "not found", the connection is on the wrong instance — switch it first. Connection details live in `dashboard/.env.connections` (template: `.env.connections.example`); the Mini n8n API key is in `C:\Users\patri\.n8n-api-key`.
