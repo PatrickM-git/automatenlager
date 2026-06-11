@@ -347,8 +347,10 @@ function buildWorker(env = process.env) {
   // Nachbuch-Reconciliation (#221): KONSERVATIV — nur eingeplant, wenn WORKER_RECONCILE_MS
   // explizit gesetzt ist (Korrektur-Job, der bestehende Zeilen verändert). Per-Mandant,
   // intervalMs (drift-immun). Idempotent (gross<=0-Guard) ⇒ häufige Läufe unschädlich.
-  if (nayaxReconcileJob && Number(env.WORKER_RECONCILE_MS) > 0) {
-    schedules.push({ name: nayaxReconcileJob.key, intervalMs: Number(env.WORKER_RECONCILE_MS), kind: 'tenant',
+  // runtimeEnv (nicht env): das Gate muss auch .env.local-Werte sehen — env ist nur
+  // process.env des Containers, dort fehlt die Variable (Deploy-Befund 2026-06-11).
+  if (nayaxReconcileJob && Number(runtimeEnv.WORKER_RECONCILE_MS) > 0) {
+    schedules.push({ name: nayaxReconcileJob.key, intervalMs: Number(runtimeEnv.WORKER_RECONCILE_MS), kind: 'tenant',
       run: () => nayaxReconcileJob.run() });
   }
   // WF-Claude-Proposals (n8n: cron 0 30 4 ⇒ täglich 04:30) → per Mandant, dailyAt.
