@@ -35,6 +35,7 @@ const { buildProductCatalog } = require('./lib/product-catalog.js');
 const { queryEconomicsScopePg } = require('./lib/automaten-view.js');
 const { queryEconomicsLivePg } = require('./lib/economics-live.js');
 const { resolveViewer, objectAccessAllowed, breakGlassDecision, crossTenantAccess } = require('./lib/auth.js');
+const { createAuditLogWriter, dbAuditEnabled } = require('./lib/audit-log.js'); // #213: Audit-Trail → DB (audit.access_log)
 const { createTenantDirectory } = require('./lib/tenant-directory.js');
 const { createTenantDb } = require('./lib/tenant-db.js');
 const { rejectBodyTenant } = require('./lib/write-guards.js');
@@ -78,7 +79,10 @@ const {
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = path.resolve(__dirname, '..');
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const CONFIG_FILE = path.join(__dirname, '.dashboard-config.json');
+// #213: per Env relozierbar (Cloud/Test-Isolation). Die Datei ist reine n8n-Legacy-
+// Laufzeit-Config (UI-gespeicherte N8N_*-Werte); Env-Variablen haben IMMER Vorrang
+// (siehe dashboardConfig) — auf flüchtigem Cloud-FS (Render) wird sie nicht gebraucht.
+const CONFIG_FILE = process.env.DASHBOARD_CONFIG_FILE || path.join(__dirname, '.dashboard-config.json');
 const LOCAL_ENV_FILES = [
   path.join(ROOT, '.env.local'),
   path.join(__dirname, '.env.local'),
@@ -197,7 +201,14 @@ function writeConfigFile(data) {
   const merged = { ...existing, ...data };
   // Never store empty string for apiKey — keep existing
   if (!merged.n8nApiKey) delete merged.n8nApiKey;
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2), 'utf8');
+  // #213: Disk-Schreiben ist BEST-EFFORT — auf flüchtigem/read-only Cloud-FS (Render)
+  // darf ein Schreibfehler den Request nie brechen. Maßgebliche Quelle sind die
+  // Env-Variablen (Vorrang in dashboardConfig); die Datei ist nur Dev-Komfort.
+  try {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('[config] Config-Datei nicht schreibbar (best-effort, Env bleibt maßgeblich):', err && err.message);
+  }
   return merged;
 }
 
@@ -307,13 +318,31 @@ function viewerPublic(viewer) {
   };
 }
 
-// #32 (Säule 5 — Audit-Trail): zentrales append-only JSONL-Audit für privilegierte
-// Aktionen. Hält wer/wann/was/Ergebnis fest — für ALLE Rollen (auch Admin/Auffüller)
-// und auch ABGEWIESENE Versuche (outcome='denied'). KEINE Secret-Werte: nur die vom
-// Aufrufer übergebenen, secret-freien `details`. Restriktive Dateirechte (0600);
-// Pfad konsistent zum Gast-Log, via DASHBOARD_AUDIT_LOG überschreibbar.
+// #32 (Säule 5 — Audit-Trail) + #213 (flüchtiges Cloud-FS): zentrales append-only
+// Audit für privilegierte Aktionen. Hält wer/wann/was/Ergebnis fest — für ALLE
+// Rollen (auch Admin/Auffüller) und auch ABGEWIESENE Versuche (outcome='denied').
+// KEINE Secret-Werte: nur die vom Aufrufer übergebenen, secret-freien `details`.
+//
+// MASSGEBLICHE Senke ist die DB-Tabelle audit.access_log (Migration 0035) über die
+// INFRA-Verbindung — Pipeline-Telemetrie OHNE tenant_id, analog audit.workflow_runs;
+// sie überlebt Container-Restarts (Render). Die JSONL-Datei (0600, Pfad via
+// DASHBOARD_AUDIT_LOG) bleibt best-effort-Fallback für lokale Dev. Beide Senken
+// sind im Writer gekapselt: Audit darf die Aktion NIE kippen (write() wirft nie).
+// Unter node:test bzw. DASHBOARD_AUDIT_DB=off bleibt die DB-Senke aus, damit
+// Test-Läufe die echte Telemetrie nicht fluten (falsche AUTH_FAIL_SPIKEs, #168).
+let auditLogWriterCache = null;
+function getAuditLogWriter() {
+  if (!auditLogWriterCache) {
+    auditLogWriterCache = createAuditLogWriter({
+      exec: (infraPgQuery && dbAuditEnabled(process.env)) ? infraPgQuery : null,
+      filePath: () => process.env.DASHBOARD_AUDIT_LOG || path.join(__dirname, 'logs', 'guest-access.jsonl'),
+      logger: (...a) => console.error('[audit]', ...a),
+    });
+  }
+  return auditLogWriterCache;
+}
+
 function auditAction(viewer, event, details = {}, outcome = 'ok') {
-  const auditPath = process.env.DASHBOARD_AUDIT_LOG || path.join(__dirname, 'logs', 'guest-access.jsonl');
   const entry = {
     timestamp: new Date().toISOString(),
     event,
@@ -324,10 +353,9 @@ function auditAction(viewer, event, details = {}, outcome = 'ok') {
     tenantId: viewer && viewer.tenantId,
     ...details,
   };
-  try {
-    fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-    fs.appendFileSync(auditPath, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: 0o600 });
-  } catch (_) { /* Audit darf die Aktion nie kippen */ }
+  // Fire-and-forget: write() fängt intern ALLES ab (DB UND Datei best-effort) und
+  // wirft nie — der Request wartet nicht auf die Telemetrie.
+  getAuditLogWriter().write(entry);
 }
 
 // #32: abgewiesene privilegierte Aktion (403) — für ALLE Rollen protokollieren.

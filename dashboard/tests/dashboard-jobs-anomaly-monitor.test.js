@@ -2,8 +2,9 @@
 
 /**
  * Audit-Log-Monitoring + Anomalie-Alarmierung (#168, IR #109 §8 / ROADMAP A3).
- * Reine Auswertung (evaluateAnomalies) + I/O (Audit-JSONL-Tail, error-Run-Zähler,
- * Backup-Warnungen) + Worker-Job mit Mail. Schwellwerte konfigurierbar.
+ * Reine Auswertung (evaluateAnomalies) + I/O (Audit-Quelle: DB audit.access_log
+ * maßgeblich [#213], JSONL-Tail nur Fallback; error-Run-Zähler, Backup-Warnungen)
+ * + Worker-Job mit Mail. Schwellwerte konfigurierbar.
  */
 
 const assert = require('node:assert/strict');
@@ -63,16 +64,56 @@ test('#168 readAuditTail: liest letzte N JSONL-Zeilen, überspringt kaputte', ()
 });
 
 // ── createAnomalyMonitorJob ──────────────────────────────────────────────────
-test('#168 createAnomalyMonitorJob: Anomalien ⇒ Mail; ruhig ⇒ keine Mail', async () => {
-  const tmp = path.join(os.tmpdir(), `audit-job-${process.pid}-${Date.now()}.jsonl`);
-  fs.writeFileSync(tmp, Array.from({ length: 8 }, () => JSON.stringify({ timestamp: new Date().toISOString(), outcome: 'denied' })).join('\n') + '\n');
+// #213: Die Audit-Quelle ist die DB-Tabelle audit.access_log (maßgeblich, überlebt
+// Container-Restarts); die JSONL-Datei ist nur noch Fallback bei DB-Lesefehler.
+test('#213 createAnomalyMonitorJob: liest Auth-Fails aus der DB (audit.access_log) ⇒ Mail', async () => {
   const sent = [];
   const mailer = { send: async (m) => { sent.push(m); } };
-  const exec = async (sql) => (/stock_movements|workflow_runs/i.test(sql) ? { rows: [{ n: 0 }] } : { rows: [] });
-  try {
-    const job = am.createAnomalyMonitorJob({ exec, mailer, env: { ALERT_EMAIL_DEFAULT: 'ops@x.z' }, auditPath: tmp, thresholds: { authFailThreshold: 5 } });
-    const r = await job.run();
-    assert.ok(r.alerts.find((a) => a.type === 'AUTH_FAIL_SPIKE'));
-    assert.equal(sent.length, 1, 'Mail bei Anomalie');
-  } finally { fs.unlinkSync(tmp); }
+  const deniedRows = Array.from({ length: 8 }, (_, i) => ({
+    ts: new Date(), event: 'capability_denied', outcome: 'denied',
+    login: 'gast@example.test', role: 'guest', request_id: `r-${i}`, details: null,
+  }));
+  const exec = async (sql) => {
+    if (/audit\.access_log/i.test(sql)) return { rows: deniedRows };
+    if (/workflow_runs/i.test(sql)) return { rows: [{ n: 0 }] };
+    return { rows: [] };
+  };
+  const job = am.createAnomalyMonitorJob({ exec, mailer, env: { ALERT_EMAIL_DEFAULT: 'ops@x.z' }, thresholds: { authFailThreshold: 5 } });
+  const r = await job.run();
+  assert.equal(r.auditSource, 'db', 'DB ist die maßgebliche Audit-Quelle');
+  assert.ok(r.alerts.find((a) => a.type === 'AUTH_FAIL_SPIKE'));
+  assert.equal(sent.length, 1, 'Mail bei Anomalie');
+});
+
+test('#213 createAnomalyMonitorJob: DB ruhig ⇒ keine Mail (Datei wird NICHT mehr primär gelesen)', async (t) => {
+  const tmp = path.join(os.tmpdir(), `audit-job-${process.pid}-${Date.now()}-ruhig.jsonl`);
+  // Datei voller denied-Events — aber die DB (maßgeblich) ist leer ⇒ keine Anomalie.
+  fs.writeFileSync(tmp, Array.from({ length: 8 }, () => JSON.stringify({ timestamp: new Date().toISOString(), outcome: 'denied' })).join('\n') + '\n');
+  t.after(() => fs.rmSync(tmp, { force: true }));
+  const sent = [];
+  const mailer = { send: async (m) => { sent.push(m); } };
+  const exec = async (sql) => (/workflow_runs/i.test(sql) ? { rows: [{ n: 0 }] } : { rows: [] });
+  const job = am.createAnomalyMonitorJob({ exec, mailer, env: { ALERT_EMAIL_DEFAULT: 'ops@x.z' }, auditPath: tmp, thresholds: { authFailThreshold: 5 } });
+  const r = await job.run();
+  assert.equal(r.auditSource, 'db');
+  assert.equal(r.alerts.length, 0, 'leere DB ⇒ ruhig, Datei zählt nicht mehr primär');
+  assert.equal(sent.length, 0);
+});
+
+test('#213 createAnomalyMonitorJob: DB-Lesefehler ⇒ Datei-Fallback (Verhalten/Schwellen unverändert)', async (t) => {
+  const tmp = path.join(os.tmpdir(), `audit-job-${process.pid}-${Date.now()}-fb.jsonl`);
+  fs.writeFileSync(tmp, Array.from({ length: 8 }, () => JSON.stringify({ timestamp: new Date().toISOString(), outcome: 'denied' })).join('\n') + '\n');
+  t.after(() => fs.rmSync(tmp, { force: true }));
+  const sent = [];
+  const mailer = { send: async (m) => { sent.push(m); } };
+  const exec = async (sql) => {
+    if (/audit\.access_log/i.test(sql)) throw new Error('relation "audit.access_log" does not exist');
+    if (/workflow_runs/i.test(sql)) return { rows: [{ n: 0 }] };
+    return { rows: [] };
+  };
+  const job = am.createAnomalyMonitorJob({ exec, mailer, env: { ALERT_EMAIL_DEFAULT: 'ops@x.z' }, auditPath: tmp, thresholds: { authFailThreshold: 5 } });
+  const r = await job.run();
+  assert.equal(r.auditSource, 'file', 'Fallback auf die JSONL-Datei bei DB-Lesefehler');
+  assert.ok(r.alerts.find((a) => a.type === 'AUTH_FAIL_SPIKE'));
+  assert.equal(sent.length, 1, 'Mail bei Anomalie (Schwellen unverändert)');
 });
