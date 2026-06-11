@@ -5,19 +5,26 @@
 //
 // Baut die AUTOMATIK zu den im IR-Runbook (docs/security/incident-response-runbook.md
 // §2/§8) manuell beschriebenen Indikatoren. Überwacht:
-//   - Häufung abgewiesener Auth (outcome='denied' im guest-access.jsonl) → AUTH_FAIL_SPIKE
+//   - Häufung abgewiesener Auth (outcome='denied' im Audit-Trail) → AUTH_FAIL_SPIKE
 //   - Break-Glass-Nutzung (X-Support-Tenant ⇒ targetTenant gesetzt) → BREAK_GLASS_USED (immer)
 //   - Häufung fehlgeschlagener Läufe (audit.workflow_runs status=error) → ERROR_RATE_SPIKE
 //   - Backup-Fehler (warnings BACKUP_FAIL/BACKUP_STALE, unresolved) → BACKUP_ALERT
 //
 // Lauf-/Backup-Telemetrie ist SYSTEM-weit (kein tenant_id für den Ops-Blick) ⇒ INFRA-
 // Executor (injizierter `exec`, wie monitor.js/workflow-runs.js), NICHT die Mandanten-
-// Tür. KEIN rohes pg (#107-rein). Der Audit-Trail ist eine Datei (fs, kein pg).
+// Tür. KEIN rohes pg (#107-rein).
+//
+// #213 (flüchtiges Cloud-FS): Die Audit-Quelle ist die DB-Tabelle audit.access_log
+// (Migration 0035, maßgeblich — überlebt Container-Restarts); der JSONL-Tail
+// (guest-access.jsonl) ist nur noch FALLBACK bei DB-Lesefehler (z. B. Migration
+// noch nicht angewendet / lokale Dev ohne Tabelle). Verhalten/Schwellen unverändert.
 // Alert über den provider-agnostischen Mailer. Schwellwerte konfigurierbar.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const fs = require('node:fs');
 const path = require('node:path');
+
+const { readAuditEventsDb } = require('../audit-log.js');
 
 const ANOMALY_MONITOR_KEY = 'anomaly-monitor';
 const DEFAULTS = Object.freeze({ windowMin: 60, authFailThreshold: 10, errorRunThreshold: 5, tailLines: 2000 });
@@ -120,7 +127,8 @@ async function readBackupWarnings(exec) {
  * @param {(sql:string,params:any[])=>Promise<{rows:any[]}>} deps.exec  INFRA-Executor.
  * @param {{send:Function}} [deps.mailer]
  * @param {object} [deps.env]
- * @param {string} [deps.auditPath]  Default: DASHBOARD_AUDIT_LOG oder logs/guest-access.jsonl.
+ * @param {string} [deps.auditPath]  FALLBACK-JSONL (#213: DB ist primär).
+ *                                   Default: DASHBOARD_AUDIT_LOG oder logs/guest-access.jsonl.
  * @param {object} [deps.thresholds]
  * @param {()=>Date} [deps.now]
  * @returns {{key:string, run:()=>Promise<any>}}
@@ -137,7 +145,17 @@ function createAnomalyMonitorJob({ exec, mailer, env = process.env, auditPath, t
   return {
     key: ANOMALY_MONITOR_KEY,
     run: async () => {
-      const auditEvents = readAuditTail(file, DEFAULTS.tailLines);
+      // #213: DB primär (audit.access_log überlebt Restarts); JSONL-Tail nur als
+      // Fallback bei DB-Lesefehler. evaluateAnomalies filtert das Fenster ohnehin
+      // selbst ⇒ identische Auswertung/Schwellen für beide Quellen.
+      let auditEvents;
+      let auditSource = 'db';
+      try {
+        auditEvents = await readAuditEventsDb(exec, { windowMin: opts.windowMin, limit: DEFAULTS.tailLines });
+      } catch {
+        auditSource = 'file';
+        auditEvents = readAuditTail(file, DEFAULTS.tailLines);
+      }
       const errorRunCount = await readErrorRunCount(exec, opts.windowMin);
       const backupWarnings = await readBackupWarnings(exec);
       const { alerts } = evaluateAnomalies({ auditEvents, errorRunCount, backupWarnings }, { ...opts, now: clock() });
@@ -147,7 +165,7 @@ function createAnomalyMonitorJob({ exec, mailer, env = process.env, auditPath, t
         const mail = buildAnomalyMail(alerts, clock().toISOString());
         if (mail) { await mailer.send({ to, subject: mail.subject, text: mail.text, html: mail.html }); mailed = true; }
       }
-      return { auditEventsScanned: auditEvents.length, errorRunCount, backupWarnings: backupWarnings.length, alerts, mailed };
+      return { auditEventsScanned: auditEvents.length, auditSource, errorRunCount, backupWarnings: backupWarnings.length, alerts, mailed };
     },
   };
 }
