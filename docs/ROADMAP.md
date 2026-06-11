@@ -84,7 +84,8 @@ Voraussetzung: **A2 (n8n abgelöst)** + cloud-agnostischer Code.
 - **C4 — DE-Compliance-Vertiefung:** DATEV-Export, GoBD-konforme unveränderliche
   Aufzeichnungen (Leerungsprotokoll je Automat — BFH-Pflicht; TSE gilt für Warenautomaten
   NICHT, § 1 KassenSichV).
-- **C5 — Marketing & Vertrieb** (Konzept: `docs/business/marketing-vertrieb-pricing-v1.md`):
+- **C5 — Marketing & Vertrieb** (Konzept: `docs/business/marketing-vertrieb-pricing-v1.md`;
+  umsetzungsreifes Funnel-Playbook mit Contents/Creatives: `docs/business/funnel-playbook-v1.md`):
   Positionierung („deutsches Betriebssystem für Automatenbetreiber — steuerfest, MHD-sicher,
   ohne Hardware-Zwang"); **Preismodell** Start 0 € / Betreiber 39 €/Mt / Flotte 129 €/Mt
   (+Staffel je Automat); **Funnels:** SEO-Content (Compliance-Themen), Free-Tools (Rechner),

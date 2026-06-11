@@ -88,6 +88,9 @@ Kleinunternehmer-Grenze 25.000/100.000 € seit 2025 mit unterjährigem Sofort-W
 
 ## 6. Funnels (skalierbar)
 
+> **Umsetzungsreife Ausarbeitung — konkrete Artikel, E-Mail-Texte, Reel-Skripte,
+> Ad-Motive, Partner-Pitches, KPIs und Zeitplan: `docs/business/funnel-playbook-v1.md`.**
+
 1. **SEO-/Content-Funnel** (Kanal mit dem besten Fit, weil erklärungsbedürftige
    Compliance): Ratgeber-Artikel exakt auf die recherchierten Fragen
    („Kassensturzfähigkeit Automaten", „7 oder 19 % am Snackautomat",
