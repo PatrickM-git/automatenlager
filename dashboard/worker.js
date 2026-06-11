@@ -318,10 +318,15 @@ function buildWorker(env = process.env) {
     schedules.push({ name: nayaxDevicesSyncJob.key, dailyAt: env.WORKER_NAYAX_AT || '04:20', kind: 'infra',
       run: () => nayaxDevicesSyncJob.run() });
   }
-  // WF3 Nayax-Verkäufe (n8n: täglich 01:00) → ein Token/Mandant, dailyAt. Default Schatten
-  // (kein Schreiben); erst nach bewiesener Deckungsgleichheit Cutover via WF3_CUTOVER=1.
+  // WF3 Nayax-Verkäufe: in n8n lief der Schedule-Trigger ALLE 5 MINUTEN
+  // (WF3-Export: `minutesInterval: 5`) — das ist der „Live"-Motor, der
+  // `sales_transactions` tagsüber füllt (#38 Live-Umsätze ~2 Min Polling,
+  // idempotent via processedTxIds-Dedup). Der Stufe-6-Port hatte daraus
+  // versehentlich `dailyAt 01:00` gemacht ⇒ Live-Kachel + GuV blieben tagsüber
+  // leer (Regression). Zurück auf intervalMs (drift-immun), per WORKER_WF3_MS
+  // überschreibbar. FIFO-Schreiben erst nach Cutover via WF3_CUTOVER=1.
   if (nayaxSalesJob) {
-    schedules.push({ name: nayaxSalesJob.key, dailyAt: env.WORKER_WF3_AT || '01:00', kind: 'tenant',
+    schedules.push({ name: nayaxSalesJob.key, intervalMs: Number(env.WORKER_WF3_MS) || 5 * 60 * 1000, kind: 'tenant',
       run: () => nayaxSalesJob.run() });
   }
   // WF-Claude-Proposals (n8n: cron 0 30 4 ⇒ täglich 04:30) → per Mandant, dailyAt.
