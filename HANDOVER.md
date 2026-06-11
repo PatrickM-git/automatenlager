@@ -32,6 +32,18 @@
 - **Deployt** (Mini `9fdd337`, 0035 angewendet, `/health` alle `true`); **live verifiziert:**
   Gast-Request → 403 → Zeile `capability_denied` in `audit.access_log`. Keine `[audit]`-Fehler.
 
+### #222 — Live-Füllstand-Sync MERGED & DEPLOYT (neu)
+- Auf Wunsch: `slot_assignments.current_machine_qty` („Im Automaten") wird jetzt **alle 5 Min
+  live aus Nayax** fortgeschrieben, statt nur beim manuellen Abgleich.
+- Von **Fable** (Sub-Agent) mit TDD implementiert, von Opus reviewt/verifiziert.
+- **Kern-Sicherheit:** nur `diff.qty_changes` via **direktem `UPDATE current_machine_qty`** durch
+  die Tür (kein close/open ⇒ keine slot_assignments-History-Wucherung); `assignment_changes`
+  (Slot-Umbelegung = WF4-Hoheit) werden NUR gezählt/gemeldet, NIE auto-geschrieben (bleibt
+  manueller Admin-Abgleich). 10/10 Tests inkl. Kern-Sicherheitstest, acme/globex-Isolation.
+- **Deployt** (Mini `e74e14c`, Worker plant `nayax-filllevel-sync` alle 300s); Sofortlauf
+  aktualisierte **14 Slot-Füllstände**, 0 Umbelegungen angefasst. `lib/jobs/nayax-filllevel-sync.js`,
+  Env `WORKER_NAYAX_FILL_MS`.
+
 ### Cloud-Phase-Issues (aus der Planungssession)
 - **#212–#219** offen (6 Slices), Label `cloud-migration`. **#213 = #213 oben erledigt** (war als
   „FS-Fix" Teil von Slice 3). Startklar ohne Blocker: **#212** (Slice 0 Fundament/Domain).
