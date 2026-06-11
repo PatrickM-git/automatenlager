@@ -1,41 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-10_projekt-vollaudit.md`.
-
-## Session 2026-06-11 — WF3-CUTOVER VOLLZOGEN + Marketing/Pricing-Konzept
-
-### Diagnose (Auslöser: „WF5 läuft seit 46h nicht" + keine Cutover-Mail)
-- **WF5-Warnung war Fehlalarm des n8n-WF-Monitors:** Der (jetzt deaktivierte) n8n-WF-Monitor überwachte die **absichtlich deaktivierten n8n-WF5/WF8** — wachsende SCHEDULE_GAP-Warnungen (26h→42h→46h) waren Migrations-Rauschen. Der **Worker-WF5 lief normal** (täglich 07:00, audit.workflow_runs success).
-- **Cutover-Diff war Vergleichs-Artefakt, keine Datenabweichung:** streak=0 wegen (a) bereits verarbeiteter Verkäufe im Fenster (intended überspringt sie korrekt → erscheinen als onlyActual) und (b) `movementBaseKey`-Datums-Normalisierung, die legitime Ein-Zeile-pro-Tag-Movements über Tage hinweg kollidieren lässt (5× quantity-mismatch). **Geprüft: keine Duplikate (sales/movements), keine negativen Bestände.**
-- **n8n-WF3 war der eigentlich Kranke:** Auth-Fehler bei manuellen Läufen (06-10 15:45), dabei Watermark `WF3_NAYAX_FIFO` auf `null` zerstört; WF-PGW-Fehlerhistorie (926 kumuliert, Sturm 06-02–06-05).
-
-### Cutover ausgeführt (alles verifiziert)
-1. **n8n WF3 deaktiviert** (`wbOhFKXQqBpJWB1w`) + **n8n WF-Monitor deaktiviert** (`EdgUfv1lMcE25Z3K`, Rauschquelle; Rest-Monitoring: worker `wf-worker-monitor` + `anomaly-monitor` via audit.workflow_runs).
-2. **`WF3_CUTOVER=1`** in Mini `dashboard/.env.local` (Zeile 22) + `docker restart homelab-worker` (worker.js liest .env.local selbst → restart genügt).
-3. **Live-Validierung** per `docker exec … node worker.js --run wf3-nayax-fifo`: `mode:cutover`, 200 Sales gefetcht, **salesWritten 0 / movementsWritten 0** (Dedup über processedTxIds griff perfekt — kein Doppelbuchen trotz zerstörter n8n-Watermark), Watermark wieder konsistent (`2026-06-10T13:10:47Z`).
-4. **9 Stale-Warnungen resolved** (`resolved_by='cutover-2026-06-11'`): SCHEDULE_GAP wf5/wf8 + WF3-WORKFLOW_ERROR/AUTH_ERROR/DAILY_FAIL.
-
-### n8n-Restbestand (Plan zur vollständigen Ablösung)
-| Noch auf n8n | Warum noch | Ablöseweg |
-|---|---|---|
-| **WF1** (aktiv) | Upload-Webhook `wf1-rechnung-upload` legt PDF in Drive ab — Dashboard-Upload hängt daran; Backend-`invoice-intake` pollt Drive nur | Drive-**Upload** in `google-drive-client.js` ergänzen (files.create multipart), Upload-Endpunkt in server.js umhängen → dann n8n WF1 deaktivieren + `WF1_CUTOVER=1` |
-| **WF2 + WF4** (aktiv, Forms) | Nutzer-getriggerte n8n-Forms | UI-Ersatz im Dashboard (WF4-Schreibport `wf4-slot-write.js` existiert; WF2-Freigabe-UI = claude-proposals/approve-Endpunkt ausbauen) |
-| **WF-PGW** (aktiv) | Schreib-Durchreicher für WF2/WF4 | fällt mit WF2/WF4 |
-| **WF-Nayax-Abgleich** (aktiv) | `/slots`-Knopf nutzt `NAYAX_ABGLEICH_WEBHOOK_URL` | als Job/Endpunkt portieren |
-| **WF-Drift-Check, WF-Migrate** (aktiv) | Infra-Helfer | obsolet machen/portieren |
-| Danach | — | **Migration 0033** (n8n_app BYPASSRLS-Entzug) + n8n-Container stilllegen |
-- `cutover-readiness-monitor` ist für WF3 jetzt gegenstandslos (kein Schatten mehr) — beim WF1-Cutover wiederverwenden oder stilllegen.
-
-### Marketing/Vertrieb/Pricing (neuer Auftrag)
-- **Neues Doc `docs/business/marketing-vertrieb-pricing-v1.md`** (2 Web-Recherchen mit Quellen): Wettbewerbs-Pricing (VendSoft $19–199-Staffeln; Nayax ~14 €/Gerät DE; Televend 12 €/Automat; 4Vending 8.900 € on-prem), Marktlücke „deutscher 1–50-Automaten-Betreiber: Cloud+Compliance+fairer Preis", Preismodell-Vorschlag (Start 0 € / Betreiber 39 €/Mt / Flotte 129 €/Mt + Automaten-Staffel), Feature-Gating-Entscheidung (**jetzt nur `tenants.plan`-Anker, Durchsetzung erst mit C1/Stripe**), 7 USP-Features (GoBD-Leerungsprotokoll, Schwund-Radar, MHD-Geld-Ampel, Kleinunternehmer-Grenzwächter, Provisionsabrechnung, Standort-P&L, Prekitting), 5 Funnels, Kaltakquise-Playbook („Automaten-Finanz-Check" als Hook).
-- **ROADMAP.md:** Stand aktualisiert (WF3 über den Cutover), neue Punkte **C5 Marketing & Vertrieb** + **C6 USP-Features**, Backlog ergänzt.
-
-### Nächste Schritte
-1. **WF1-Cutover vorbereiten:** Drive-Upload portieren (siehe Tabelle) — danach ist der Rechnungs-Pfad n8n-frei.
-2. WF2/WF4-Form-Ersatz als eigene SPEC (`grill-me` → `spec-to-issue`).
-3. Morgen prüfen: nächtlicher WF3-Lauf (01:00) in audit.workflow_runs (`mode:cutover`, plausible Zahlen).
-4. Ops: `DASHBOARD_INTERNAL_PEER_CIDR` setzen (#78) vor zweitem Kunden.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-10_ek-pfand-reconciliation.md`.
 
 ## Session 2026-06-10 (Abend) — Projekt-Vollaudit + Sofortfixes
 

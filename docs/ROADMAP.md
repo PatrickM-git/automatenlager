@@ -19,12 +19,15 @@
 
 ## Stand heute
 
-- Mandantenfähigkeit **Stufe 0–5 LIVE** (RLS-Backstop, Lesen+Schreiben). Suite **1089/1089**.
+- Mandantenfähigkeit **Stufe 0–5 LIVE** (RLS-Backstop, Lesen+Schreiben). Suite **1332/1332**.
 - **SQL-only** (Google Sheets abgelöst), Dashboard v3, Inline-Inventur, **tägliches PG-Backup
   auf externe Platte (Restore erprobt)**.
-- Läuft auf dem **Heim-Mini**, **1 echter Kunde** (Faltrix). n8n macht noch WF1/2/3/5/7/8/9
-  (im BYPASS, außerhalb des Backstops).
-- Reifegrad **~60/100** (Code/Sicherheit/Tests stark; Betrieb/Infra ist der Engpass).
+- Läuft auf dem **Heim-Mini**, **1 echter Kunde** (Faltrix). **Stufe 6 weit fortgeschritten
+  (Stand 2026-06-11):** WF5/7/8/9 + Hilfs-WFs laufen als Worker-Jobs; **WF3 ist über den
+  Cutover** (Backend schreibt, n8n-WF3 + WF-Monitor deaktiviert). Auf n8n verbleiben nur
+  noch **WF1 (wegen Upload-Webhook), WF2, WF4 (Forms), WF-PGW, WF-Nayax-Abgleich,
+  WF-Drift-Check, WF-Migrate** — danach Migration 0033 (BYPASSRLS-Entzug).
+- Reifegrad **~65/100** (Code/Sicherheit/Tests stark; Betrieb/Infra ist der Engpass).
 
 ---
 
@@ -79,7 +82,20 @@ Voraussetzung: **A2 (n8n abgelöst)** + cloud-agnostischer Code.
   -Verträge**; Routen-/Fahrer-Management (+ offline-App); Maschinen-Telemetrie/Störungen/
   Alerts; Pfand-Handling; dynamische/Aktionspreise je Automat.
 - **C4 — DE-Compliance-Vertiefung:** DATEV-Export, GoBD-konforme unveränderliche
-  Aufzeichnungen, TSE/Kassensicherungsverordnung prüfen (v. a. Bargeld).
+  Aufzeichnungen (Leerungsprotokoll je Automat — BFH-Pflicht; TSE gilt für Warenautomaten
+  NICHT, § 1 KassenSichV).
+- **C5 — Marketing & Vertrieb** (Konzept: `docs/business/marketing-vertrieb-pricing-v1.md`):
+  Positionierung („deutsches Betriebssystem für Automatenbetreiber — steuerfest, MHD-sicher,
+  ohne Hardware-Zwang"); **Preismodell** Start 0 € / Betreiber 39 €/Mt / Flotte 129 €/Mt
+  (+Staffel je Automat); **Funnels:** SEO-Content (Compliance-Themen), Free-Tools (Rechner),
+  Händler-/Nayax-Distributoren-Affiliates, Steuerberater-Multiplikatoren, Community/Referral;
+  **Kaltakquise** über „Automaten-Finanz-Check" als Hook-Angebot; Beta-Programm mit
+  Gründungskunden-Rabatt. **Feature-Gating:** Entitlement-Anker (`tenants.plan` +
+  Capability-Hook) früh und billig verankern, Durchsetzung erst mit C1/Stripe.
+- **C6 — USP-Features aus der Pain-Point-Recherche** (Detail im Business-Doc §5):
+  GoBD-Leerungsprotokoll, Schwund-Radar (Soll-Ist je Fahrer/Route), MHD-Geld-Ampel,
+  Kleinunternehmer-Grenzwächter, Provisionsabrechnung Standortgeber, Standort-P&L-Scorecard,
+  Pickliste 2.0/Prekitting.
 
 ---
 
@@ -88,7 +104,9 @@ Voraussetzung: **A2 (n8n abgelöst)** + cloud-agnostischer Code.
 - **Auth/Sicherheit:** 2FA (TOTP), Login+Passwort-Reset, SSO (später), externe Security-Prüfung.
 - **Performance:** Seiten <3 s, Fetch-Parallelisierung, Indizes, MatView-Vorabberechnung.
 - **Self-Service/Onboarding:** Mandanten-Admin-UI, Onboarding-Wizard, Daten-VORHER-Automatik.
-- **Billing/Vertrieb:** Stripe/Paddle, Marketing-Website, Self-Signup, Preis-/Paketmodell.
+- **Billing/Vertrieb:** Stripe/Paddle, Marketing-Website, Self-Signup, Preis-/Paketmodell
+  (`docs/business/marketing-vertrieb-pricing-v1.md`), Entitlement-/Plan-Gating, Affiliates,
+  Beta-Programm, Free-Tools als Lead-Magneten.
 - **Vending-Features:** Par-Level, Bestellvorschläge, Bestellwesen, Provisionen, Routen/Fahrer-App,
   Telemetrie/Störungs-Alerts, Pfand, dynamische Preise.
 - **Compliance (DE):** DATEV, GoBD, TSE, DSGVO (AV, Export/Löschung).
