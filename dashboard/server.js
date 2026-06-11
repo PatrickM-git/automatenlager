@@ -28,6 +28,7 @@ const { buildCorrectionCases, queryCorrectionCasesPg } = require('./lib/correcti
 const { buildMachineProfile, getMachineOptions, queryMachineProfilesPg, upsertMachineProfilePg } = require('./lib/machine-profiles.js');
 const { buildMachineCreatePayload, createMachinePg, setMachineActivePg } = require('./lib/machine-create.js');
 const { queryNayaxDevicesPg, shapeNayaxDevices } = require('./lib/nayax-devices.js');
+const { readReconcileBacklog } = require('./lib/jobs/nayax-reconcile.js'); // #221: Arbeitsvorrat nachbuchungsbedürftiger Verkäufe
 const { buildProductSuggestion, validateCorrectionAction, buildCorrectionActionPayload, buildCorrectionActionAuditEntry } = require('./lib/correction-action.js');
 const { buildOnboardingStartPayload, validateOnboardingStart, buildOnboardingStartAuditEntry } = require('./lib/onboarding-start.js');
 const { buildSlotAssignPreview, validateSlotAssign, buildSlotAssignPayload, buildSlotAssignAuditEntry } = require('./lib/slot-assign-inline.js');
@@ -2289,6 +2290,29 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, { ok: true, results: buildProductCatalog(rows, q) });
       } catch (err) {
         sendJson(res, 503, { ok: false, results: [], error: { code: 'PG_ERROR', message: err.message } });
+      }
+      return;
+    }
+
+    // #221: Arbeitsvorrat — nachbuchungsbedürftige Verkäufe (gross=0) auffindbar machen.
+    // Admin-only (operativer Vorrat); tenant-scoped durch die Tür.
+    if (parsed.pathname === '/api/v2/reconcile/backlog' && req.method === 'GET') {
+      const viewer = getViewer(req);
+      if (!viewer.canTriggerActions) {
+        auditDenied(viewer, 'reconcile_backlog_denied', {});
+        sendJson(res, 403, { ok: false, error: { code: 'READ_ONLY_FORBIDDEN', message: 'Nur Admins sehen den Nachbuch-Arbeitsvorrat.' } });
+        return;
+      }
+      if (!tenantDb) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_UNCONFIGURED', message: 'PostgreSQL nicht konfiguriert.' } });
+        return;
+      }
+      if (!tenantReadReady(res)) return;
+      try {
+        const backlog = await readReconcileBacklog(tenantDb, viewer.tenantId);
+        sendJson(res, 200, { ok: true, backlog });
+      } catch (err) {
+        sendJson(res, 503, { ok: false, error: { code: 'PG_ERROR', message: err.message } });
       }
       return;
     }

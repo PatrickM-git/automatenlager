@@ -167,6 +167,7 @@ function buildWorker(env = process.env) {
   const { createPicklistPollJob } = require('./lib/jobs/picklist.js');
   const { createNayaxSalesJob } = require('./lib/jobs/nayax-sales.js');
   const { createNayaxFillLevelSyncJob } = require('./lib/jobs/nayax-filllevel-sync.js');
+  const { createNayaxReconcileJob } = require('./lib/jobs/nayax-reconcile.js');
   const { createInvoiceIntakeJob } = require('./lib/jobs/invoice-intake.js');
   const { createCutoverMonitorJob } = require('./lib/jobs/cutover-monitor.js');
   const { buildGithubIssuesFromEnv } = require('./lib/jobs/github-issues.js');
@@ -252,6 +253,9 @@ function buildWorker(env = process.env) {
   // Live-Füllstand-Sync (#222): current_machine_qty alle ~5 Min aus Nayax — NUR Mengen
   // (qty_changes, direktes UPDATE), NIE Slot-Umbelegungen (bleiben beim manuellen Abgleich).
   const nayaxFillLevelSyncJob = (tenantDb && directory) ? createNayaxFillLevelSyncJob({ db: tenantDb, directory, env: runtimeEnv }) : null;
+  // Nachbuch-Reconciliation (#221): holt unvollständig gelieferte Verkäufe (gross=0)
+  // erneut von Nayax und bucht FIFO nach, sobald Preis UND Bestand verfügbar sind.
+  const nayaxReconcileJob = (tenantDb && directory) ? createNayaxReconcileJob({ db: tenantDb, directory, env: runtimeEnv }) : null;
   // WF-Claude-Proposals (#162, Slice 2): alte pending Proposals von Claude vorentscheiden.
   const claudeProposalsJob = tenantRunner ? createClaudeProposalsJob({ tenantRunner, anthropic, mailer, env: runtimeEnv }) : null;
   // WF5 (#162, Slice 2): MHD/Low-Stock-Warnungen synchronisieren + Digest-Mail (Resend).
@@ -339,6 +343,13 @@ function buildWorker(env = process.env) {
   if (nayaxFillLevelSyncJob) {
     schedules.push({ name: nayaxFillLevelSyncJob.key, intervalMs: Number(env.WORKER_NAYAX_FILL_MS) || 5 * 60 * 1000, kind: 'tenant',
       run: () => nayaxFillLevelSyncJob.run() });
+  }
+  // Nachbuch-Reconciliation (#221): KONSERVATIV — nur eingeplant, wenn WORKER_RECONCILE_MS
+  // explizit gesetzt ist (Korrektur-Job, der bestehende Zeilen verändert). Per-Mandant,
+  // intervalMs (drift-immun). Idempotent (gross<=0-Guard) ⇒ häufige Läufe unschädlich.
+  if (nayaxReconcileJob && Number(env.WORKER_RECONCILE_MS) > 0) {
+    schedules.push({ name: nayaxReconcileJob.key, intervalMs: Number(env.WORKER_RECONCILE_MS), kind: 'tenant',
+      run: () => nayaxReconcileJob.run() });
   }
   // WF-Claude-Proposals (n8n: cron 0 30 4 ⇒ täglich 04:30) → per Mandant, dailyAt.
   if (claudeProposalsJob) {
