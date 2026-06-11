@@ -39,11 +39,21 @@
 - Migration **0033 bedingt** machen (`n8n_app` existiert auf Supabase nicht).
 - **Flüchtiges Render-Dateisystem** → Audit-/Guest-Access-Log + `.dashboard-config.json` in die DB/Env.
 
+### Issues geschnitten (`spec-to-issue`, diese Session) — #212–#219
+- **#212** Slice 0 — Cloud-Fundament & Domain (blocked by: —)
+- **#213** Flüchtiges-FS-Fix: Audit-/Guest-Access-Log + Config → DB (blocked by: —, parallel früh)
+- **#214** Slice 1 — DB → Supabase (Schema/RLS/Rollen/GUC/Daten) (blocked by #212)
+- **#215** Slice 2 — Auth-Naht: Supabase Auth → Mandanten-Tür + minimaler Login (blocked by #214)
+- **#216** Off-Site-Backup: pg_dump + Alarm (blocked by #214)
+- **#217** Slice 3 — Backend + Jobs → Render (+ Sentry + Gratis-Cron) (blocked by #214, #213, #215)
+- **#218** Slice 4 — Frontend → Cloudflare (blocked by #217)
+- **#219** Slice 5 — Cutover-Abschluss: Statusseite + DNS-Cutover + Rollback-Runbooks (blocked by #216, #217, #218)
+- Label-Gruppe `cloud-migration` angelegt.
+
 ### Nächste Schritte
-1. **Issues schneiden:** `spec-to-issue` auf `docs/specs/cloud-migration-3-schichten-phase-b-v1.md` (in dieser Session begonnen).
-2. Danach `start-issue` → `tdd` (Umsetzung durch Fable), Slice 0 zuerst (Cloud-Fundament + Domain).
-3. Unabhängig laufende Daten-Bugs **#210/#211** (EK/MwSt im GuV-Wareneinsatz) **nicht** in die Migration mitziehen.
-4. Aufräum-Backlog aus der n8n-Ablösung (n8n-Container stilllegen, Webhook-Fallbacks, cutover-monitor) bleibt offen.
+1. **Neuer Chat → `start-issue` → `tdd`** (Umsetzung durch Fable). Startbar ohne Blocker: **#212** (Slice 0) und **#213** (FS-Fix).
+2. Unabhängig laufende Daten-Bugs **#210/#211** (EK/MwSt im GuV-Wareneinsatz) **nicht** in die Migration mitziehen.
+3. Aufräum-Backlog aus der n8n-Ablösung (n8n-Container stilllegen, Webhook-Fallbacks, cutover-monitor) bleibt offen.
 
 ## Session 2026-06-11 (Fortsetzung) — n8n-ABLÖSUNG KOMPLETT (Stufe 6 abgeschlossen)
 
