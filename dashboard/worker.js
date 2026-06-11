@@ -166,6 +166,7 @@ function buildWorker(env = process.env) {
   const { createWf5MonitorJob } = require('./lib/jobs/wf5-monitor.js');
   const { createPicklistPollJob } = require('./lib/jobs/picklist.js');
   const { createNayaxSalesJob } = require('./lib/jobs/nayax-sales.js');
+  const { createNayaxFillLevelSyncJob } = require('./lib/jobs/nayax-filllevel-sync.js');
   const { createInvoiceIntakeJob } = require('./lib/jobs/invoice-intake.js');
   const { createCutoverMonitorJob } = require('./lib/jobs/cutover-monitor.js');
   const { buildGithubIssuesFromEnv } = require('./lib/jobs/github-issues.js');
@@ -248,6 +249,9 @@ function buildWorker(env = process.env) {
   // WF3 Nayax-Verkäufe (#163, Slice 3): datenkritisch → DEFAULT Schattenbetrieb (rechnet +
   // vergleicht, schreibt NICHT); Cutover erst per WF3_CUTOVER=1, nachdem die Diffs leer sind.
   const nayaxSalesJob = (tenantDb && directory) ? createNayaxSalesJob({ db: tenantDb, directory, env: runtimeEnv }) : null;
+  // Live-Füllstand-Sync (#222): current_machine_qty alle ~5 Min aus Nayax — NUR Mengen
+  // (qty_changes, direktes UPDATE), NIE Slot-Umbelegungen (bleiben beim manuellen Abgleich).
+  const nayaxFillLevelSyncJob = (tenantDb && directory) ? createNayaxFillLevelSyncJob({ db: tenantDb, directory, env: runtimeEnv }) : null;
   // WF-Claude-Proposals (#162, Slice 2): alte pending Proposals von Claude vorentscheiden.
   const claudeProposalsJob = tenantRunner ? createClaudeProposalsJob({ tenantRunner, anthropic, mailer, env: runtimeEnv }) : null;
   // WF5 (#162, Slice 2): MHD/Low-Stock-Warnungen synchronisieren + Digest-Mail (Resend).
@@ -328,6 +332,13 @@ function buildWorker(env = process.env) {
   if (nayaxSalesJob) {
     schedules.push({ name: nayaxSalesJob.key, intervalMs: Number(env.WORKER_WF3_MS) || 5 * 60 * 1000, kind: 'tenant',
       run: () => nayaxSalesJob.run() });
+  }
+  // Live-Füllstand-Sync (#222): alle 5 Min (drift-immun, intervalMs; Override
+  // WORKER_NAYAX_FILL_MS). Idempotent (Diff: gleiche Menge ⇒ kein UPDATE) —
+  // häufige Läufe sind unschädlich; 1 Nayax-Call/Maschine/Lauf (withDetails:false).
+  if (nayaxFillLevelSyncJob) {
+    schedules.push({ name: nayaxFillLevelSyncJob.key, intervalMs: Number(env.WORKER_NAYAX_FILL_MS) || 5 * 60 * 1000, kind: 'tenant',
+      run: () => nayaxFillLevelSyncJob.run() });
   }
   // WF-Claude-Proposals (n8n: cron 0 30 4 ⇒ täglich 04:30) → per Mandant, dailyAt.
   if (claudeProposalsJob) {
