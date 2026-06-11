@@ -3,6 +3,49 @@
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 > Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-11_n8n-abloesung-komplett.md`.
 
+## Session 2026-06-11 (Umsetzung/Deploy) — Live-Umsatz-Regression gefixt + #213 deployt
+
+> Im Anschluss an die Planungssession: zwei Prod-Deploys (beide live verifiziert) + erstes
+> Cloud-Phase-Issue umgesetzt. Diagnose durchgehend read-only gegen die Prod-DB (SSH-Tunnel
+> `127.0.0.1:15432`, Infra-Rolle `homelab`).
+
+### #220 — Live-Umsatz-Regression GEFIXT & DEPLOYT (Mini)
+- **Befund:** Die Live-Umsatz-Kachel (`/api/v2/economics/live`, filtert auf „heute") war tot,
+  weil **WF3 (Nayax-Import) seit der n8n-Ablösung nur 1×/Tag lief**. Smoking Gun: im n8n-Export
+  `WF3 …FIFO…json` stand `minutesInterval: 5` (alle 5 Min), der Stufe-6-Worker-Port machte daraus
+  fälschlich `dailyAt:'01:00'`. Der Code-Kommentar „n8n: täglich 01:00" war schlicht falsch.
+- **Ausgeschlossen (verifiziert):** Daten/RLS/Tür gesund — App-Rolle liest `guv_daily` mit GUC
+  `t_faltrix` (78 Juni-Zeilen, €147 brutto), `tenant_users`-Mapping korrekt, Jobs laufen.
+- **Fix (`worker.js`):** `wf3-nayax-fifo` von `dailyAt:'01:00'` → `intervalMs` (Default 300000 =
+  5 Min, `WORKER_WF3_MS`). Idempotent via `processedTxIds`-Dedup. **Deployt** (Mini auf `9fdd337`,
+  Worker plant „alle 300s"); Sofortlauf importierte **10 heutige Verkäufe** — Live-Kachel lebt.
+- Folge-Issue **#221** (Nachbuchung unvollständiger Verkäufe: 77 Zeilen `gross_amount=0`, Status
+  `INSUFFICIENT_BATCH_STOCK`/`SKIPPED_BEFORE_CUTOVER` — periodisch komplett neu von Nayax holen
+  & re-buchen). Issue für Fable angelegt.
+
+### #213 — Audit-/Guest-Access-Log + Config → DB (Cloud-FS-Fix) MERGED & DEPLOYT
+- Von **Fable als Sub-Agent** implementiert (lief vor Abschluss ins Session-Limit); von Opus
+  reviewt, getestet, finalisiert: **volle Suite 1350/1350 grün**.
+- Migration **0035** `audit.access_log` (idempotent, KEIN `tenant_id` = Infra-Telemetrie analog
+  `audit.workflow_runs`, Schreiben über die **Infra-Verbindung** `infraPgQuery` ⇒ keine GRANTs
+  nötig); `lib/audit-log.js` (DB-Sink + Datei-Fallback); server.js/anomaly-monitor umgestellt.
+- **Deployt** (Mini `9fdd337`, 0035 angewendet, `/health` alle `true`); **live verifiziert:**
+  Gast-Request → 403 → Zeile `capability_denied` in `audit.access_log`. Keine `[audit]`-Fehler.
+
+### Cloud-Phase-Issues (aus der Planungssession)
+- **#212–#219** offen (6 Slices), Label `cloud-migration`. **#213 = #213 oben erledigt** (war als
+  „FS-Fix" Teil von Slice 3). Startklar ohne Blocker: **#212** (Slice 0 Fundament/Domain).
+
+### Mini-Deploy-Falle (neu gelernt)
+- `ssh miniserver "wsl -d Ubuntu-24.04 git … fetch && git … reset"` bricht: das `&&` läuft im
+  **Windows**-Teil (kein git im PATH) ⇒ nur der erste Befehl landet in WSL. **Jeden** Befehl als
+  eigene `wsl -d Ubuntu-24.04 …`-Invocation absetzen (oder `wsl … bash -c '…'`).
+
+### Nächste Schritte
+1. Cloud-Phase regulär starten: neuer Chat → `start-issue` (Fable), **#212** zuerst.
+2. **#221** Nachbuchung umsetzen (Fable, TDD).
+3. WF3-5-Min-Takt morgen beobachten: tagsüber wachsende `sales_transactions` + Live-Kachel.
+
 ## Session 2026-06-11 (Planung) — NÄCHSTE PHASE GEPLANT: Cloud-Migration (Phase B) + Betriebsreife (A3)
 
 > Reine **Planungssession** (kein Code). Auslöser: A2/Stufe 6 (n8n-Ablösung) ist abgeschlossen
