@@ -332,6 +332,34 @@ Schreibpfade je Event-Typ · Worker **schreibt** Lauf-Telemetrie (Ersatz für `e
 
 ---
 
+## Cloud-Migration (3-Schichten) & Betriebsreife (Phase B + A3) *(neu)*
+
+> Quelle: SPEC `docs/specs/cloud-migration-3-schichten-phase-b-v1.md` (gegen **echten Code** verifiziert).
+> Inkrementeller Umzug Heim-Mini → Cloud; das cloud-agnostische Fundament (Mandanten-Tür, GUC, RLS,
+> SQL-only) **zieht direkt mit** — der harte Teil ist die **Auth-Naht** und die **Plattform-Verkabelung**
+> (Rollen-Abbildung, GUC-Vorregistrierung, Cron, flüchtiges FS). Setzt die n8n-Ablösung (Stufe 6) voraus.
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **3-Schichten-Cloud** | Die Zielplattform: **Supabase** (Postgres + RLS + Auth) · **Render** (Backend + Jobs) · **Cloudflare** (Frontend + Domain). Eine Schicht je Anbieter. | „die Cloud" pauschal; Anbieter als Synonym der Schicht |
+| **Auth-Naht** | Der Austausch des **Identitäts-Eingangs**: ein verifiziertes **Supabase-JWT** ersetzt den wegfallenden `Tailscale-User-Login`-Header — die **Mandanten-Tür und das RLS-Modell bleiben unverändert**, nur die Identitätsquelle wechselt. | „Auth neu bauen"; „Login-Umbau" (es ist nur der Eingang) |
+| **Identitäts-Eingang** | Die eine Stelle, an der die Roh-Identität ins System kommt (heute Header, künftig JWT) und in einen `Viewer` mündet; davon getrennt bleibt die **Autorisierung** (Rollen/Fähigkeiten) und der **Datenzugriff** (RLS-Tür). | Identität und Autorisierung vermischen |
+| **Rollen-Abbildung (Supabase)** | Der Stufe-5-Rollen-Split auf Supabase: **Infra-Pool** → RLS-umgehende Rolle (`service_role`-Äquivalent, da Custom-`BYPASSRLS` auf Supabase verboten ist) · **App-Pool** → `automatenlager_app`-Äquivalent (RLS-unterworfen). | „BYPASSRLS-Rolle anlegen" (geht auf Supabase nicht) |
+| **GUC-Vorregistrierung** | Pflichtschritt auf Supabase: den Custom-GUC `automatenlager.current_tenant` als DB-Default vorregistrieren (`ALTER DATABASE … SET`), sonst wirft jede einarmige Policy `current_setting(...)` Fehler **42704**. **Fail-closed bleibt erhalten.** | „GUC funktioniert schon"; missing_ok als Workaround |
+| **Gratis-Stufen-Cron** | Auslöser der Nachtjobs **ohne** Render-Cron (Gratis): geschützte Trigger-Endpunkte, angestoßen von **Supabase `pg_cron`** oder **Cloudflare Cron Trigger**. Die Job-Logik (`lib/jobs/*`) bleibt identisch — nur der **Auslöser** wird cloud-tauglich. | „Render-Cron" (auf Gratis nicht vorhanden) |
+| **Flüchtiges Dateisystem** | Eigenschaft der Cloud-Container (Render): lokal geschriebene Dateien überleben einen Neustart **nicht** → **Audit-/Guest-Access-Log** und `.dashboard-config.json` müssen in die **DB/Env** wandern. | „Logdatei schreiben" wie auf dem Mini |
+| **Off-Site-Backup** | Geplanter externer `pg_dump` der Supabase-DB **mit Alarm bei Fehler** (Resend/Sentry), Restore real geprobt — ersetzt das auf Gratis fehlende Supabase-Auto-Backup; löst das A3-Backup-Ziel cloud-nativ. | „Backup" pauschal; auf Supabase-Auto-Backup vertrauen (Gratis hat keins) |
+| **Migrations-Slice (Cloud)** | Eine **einzeln deploybare, live-verifizierbare, rückwegsfähige** Stufe des Umzugs (Fundament/Domain → DB → Auth-Naht → Backend → Frontend → Betriebsreife/Cutover). Erbt das Slice-Prinzip aus Stufe 3–6. | „Big-Bang-Umzug"; „alles auf einmal" |
+| **Rückfall-Option (Mini)** | Der Heim-Mini läuft **parallel** weiter, bis die Cloud verifiziert ist; Rollback je Slice = **DNS/Env zurückdrehen**. | „Mini sofort abschalten" |
+
+Beziehungen: 3-Schichten-Cloud **trägt** das unveränderte cloud-agnostische Fundament · Auth-Naht **ersetzt** nur den
+Identitäts-Eingang (Tür/RLS bleiben) · Rollen-Abbildung **reproduziert** den Infra-/App-Split ohne Custom-`BYPASSRLS` ·
+GUC-Vorregistrierung **ist Vorbedingung**, sonst kracht jede Tür-Query (42704) · Gratis-Stufen-Cron **löst** dieselben
+`lib/jobs/*` aus wie der Worker-Dienst · flüchtiges Dateisystem **zwingt** Audit-Log/Config in die DB · Off-Site-Backup
+**ersetzt** das fehlende Auto-Backup · jede Migrations-Slice **ist** rückwegsfähig, solange die Rückfall-Option (Mini) steht.
+
+---
+
 ## GuV-Kostenbasis & Besteuerungsmodell (Kleinunternehmer) *(neu)*
 
 > Quelle: SPEC `docs/specs/guv-kostenbasis-kleinunternehmer-restatement-v1.md`. Das Besteuerungsmodell
@@ -481,7 +509,33 @@ Verkauf **ist eindeutig** je (Mandant, Anbieter, externe Transaktions-ID).
 > **Dev:** „Welchen MwSt-Satz nehme ich — den pro Produkt eingetragenen?"
 > **Domain Expert:** „Den **Kategorie-Satz** (Snack 7, Getränk 19). Der pro-Produkt-`vat_rate_pct` soll ihn nur spiegeln; der Preflight vergleicht beide und meldet Abweichungen als nachzupflegende Altdaten."
 
+## Beispiel-Dialog (Cloud-Migration / Phase B) *(neu)*
+
+> **Dev:** „In der Cloud baue ich die ganze Auth neu — Login, Rollen, Mandantenzuordnung, oder?"
+> **Domain Expert:** „Nein, nur die **Auth-Naht**. Es wechselt **allein der Identitäts-Eingang**: statt Tailscale-Header kommt ein verifiziertes **Supabase-JWT**. Die Mandanten-Tür, die Rollen und RLS bleiben **unverändert** — die Identität mündet wie heute in einen `Viewer`."
+> **Dev:** „Dann lege ich `automatenlager_app` auf Supabase einfach mit `BYPASSRLS` für die Infra-Sachen an."
+> **Domain Expert:** „Geht nicht — Custom-Rollen kriegen auf Supabase **kein** `BYPASSRLS`. **Rollen-Abbildung**: Infra-Pool auf das `service_role`-Äquivalent, App-Pool auf `automatenlager_app` **ohne** Bypass. Der Split bleibt, nur die Mittel ändern sich."
+> **Dev:** „Ich migriere das Schema, starte die App gegen Supabase — und die erste Query liefert leer."
+> **Domain Expert:** „Sie **kracht** sogar mit 42704 — du hast die **GUC-Vorregistrierung** vergessen. `automatenlager.current_tenant` muss als DB-Default gesetzt sein, sonst wirft jede einarmige Policy. Das ist Absicht: fail-closed, kein stilles Leck."
+> **Dev:** „Die Nachtjobs hänge ich an Render-Cron."
+> **Domain Expert:** „Auf der Gratis-Stufe gibt's keinen Render-Cron. **Gratis-Stufen-Cron**: `pg_cron` oder Cloudflare Cron stößt geschützte Trigger-Endpunkte an — die `lib/jobs/*` bleiben identisch, nur der Auslöser ist anders."
+> **Dev:** „Das Guest-Access-Log schreibe ich wie bisher als JSONL-Datei."
+> **Domain Expert:** „Nicht in der Cloud — **flüchtiges Dateisystem**. Beim nächsten Neustart ist die Datei weg, und die Anomalie-Erkennung liest ins Leere. Audit-Log und Config müssen in die **DB**. Und solange wir testen, bleibt der **Mini als Rückfall-Option** stehen."
+
 ## Markierte Unklarheiten *(neu)*
+
+- **Cloud-Slice-Reihenfolge & Übergangs-Schalter** (Phase B): ob der Doppelpfad Tailscale-Header **oder** JWT
+  per Env-Flag umschaltbar bleibt, bis alle Slices grün sind — Empfehlung: Flag, harter Stichtag erst nach Frontend-Cutover.
+- **`service_role`-Nutzung für den Infra-Pool** (Phase B): ob der Infra-Pool wirklich `service_role` nutzt oder eine
+  eigene erhöhte Rolle — in der Umsetzung gegen Supabases Rollenmodell fixieren; Bypass nur für Bootstrap/Migrationen/Refresh.
+- **GUC-Vorregistrierung vs. Default-Wert** (Phase B): `ALTER DATABASE … SET automatenlager.current_tenant = ''`
+  (leerer Default) muss mit dem **einarmigen** `current_setting` (fail-closed) verträglich bleiben — in der DB-Slice live verifizieren (leerer Mandant ⇒ keine Zeilen/Fehler).
+- **Cron-Quelle** (Phase B): Supabase `pg_cron` vs. Cloudflare Cron Trigger für die Nachtjobs — in Slice 0 festlegen;
+  Schutz der Trigger-Endpunkte über gemeinsames Secret in beiden Fällen.
+- **Persistenzziel für Audit-/Guest-Access-Log** (Phase B): eigene Tabelle unter Schema `audit` vs. bestehende
+  Telemetrie — Empfehlung: eigene `audit`-Tabelle, damit die Anomalie-Erkennung weiter eine Quelle hat.
+- **Mini-Abschalt-Kriterium** (Phase B): wie viele saubere Cloud-Tage (Nachtjobs in `audit.workflow_runs`) vor der
+  endgültigen Mini-Abschaltung — Empfehlung: mindestens ein voller Tag aller Nachtjobs grün, dann N Tage Parallelbetrieb.
 
 - **Slot-Zahl pro Automat** für die Latten-Ableitung (Umsatz-Norm ÷ Slot-Zahl): Quelle aus den
   Stammdaten ist in der Umsetzung (TDD) zu fixieren — Empfehlung: aktive Slots je `machine_id`.

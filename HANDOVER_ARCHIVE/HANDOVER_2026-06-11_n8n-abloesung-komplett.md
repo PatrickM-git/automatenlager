@@ -1,49 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-11_n8n-abloesung-komplett.md`.
-
-## Session 2026-06-11 (Planung) — NÄCHSTE PHASE GEPLANT: Cloud-Migration (Phase B) + Betriebsreife (A3)
-
-> Reine **Planungssession** (kein Code). Auslöser: A2/Stufe 6 (n8n-Ablösung) ist abgeschlossen
-> (Commit `2ff12e9`) → die Voraussetzung für die Cloud-Migration ist erfüllt. Ablauf:
-> `grill-me` → `write-a-stack` → `ubiquitous-language`. **Umsetzung übernimmt das Model Fable**
-> (bewusst gröber/slice-orientiert geplant).
-
-### Ergebnis
-- **Neue SPEC:** `docs/specs/cloud-migration-3-schichten-phase-b-v1.md` — inkrementeller Umzug
-  Heim-Mini → **Supabase** (DB+RLS+**Auth**) · **Render** (Backend+Jobs) · **Cloudflare** (Frontend+Domain)
-  in **6 Slices** (Fundament/Domain → DB → Auth-Naht → Backend → Frontend → Betriebsreife/Cutover).
-  Betriebsreife (A3: Sentry, Off-Site-Backup+Alarm, Statusseite) cloud-nativ inklusive. Gegen den
-  **echten Code** verifiziert (Explore-Pass), nicht gegen Doku-Annahmen.
-- **CLAUDE.md:** Abschnitt „Current Next Step" aktualisiert — A2/Stufe 6 als ✅ erledigt vermerkt
-  (alle 18 n8n-WF deaktiviert, Migration 0033, RLS systemweit), Cloud-Phase als nächster Schritt.
-- **UBIQUITOUS_LANGUAGE.md:** neuer Cluster „Cloud-Migration (3-Schichten) & Betriebsreife" (10 Begriffe:
-  3-Schichten-Cloud, Auth-Naht, Identitäts-Eingang, Rollen-Abbildung, GUC-Vorregistrierung, Gratis-Stufen-Cron,
-  Flüchtiges Dateisystem, Off-Site-Backup, Migrations-Slice, Rückfall-Option) + Beispiel-Dialog + 6 Unklarheiten.
-
-### Kernentscheidungen (aus dem grill-me-Interview)
-1. **Cloud so schnell wie möglich** → Betriebsreife (A3) nicht mehr auf dem Mini bauen, sondern
-   **cloud-nativ** in Phase B (Supabase-Backups/Render-Monitoring/Sentry statt Mini-Wegwerf-Arbeit).
-2. **Login = Supabase Auth** (E-Mail/Passwort + Reset + 2FA mitgeliefert). Zentrale Aufgabe = **Auth-Naht**:
-   verifiziertes Supabase-JWT ersetzt den `Tailscale-User-Login`-Header; **Mandanten-Tür + RLS bleiben unverändert**.
-3. **Start komplett auf Gratis-Stufen** (eigener Testkunde Faltrix), Hochstufen erst zum Marktstart.
-   Folge: kein Render-Cron → **pg_cron/Cloudflare Cron**; kein Supabase-Auto-Backup → eigener **pg_dump + Alarm**.
-4. **Neue Domain** via Cloudflare Registrar (eigener Schritt). **Kurzes Wartungsfenster** ok → keine Zero-Downtime-Technik.
-   **Inkrementell** (DB→Backend→Frontend), **Mini bleibt als Rückfall-Option** bis Cloud verifiziert.
-5. **Login-Design bewusst minimal** — ordentliches Design = **technische Schuld für Phase C** (Marketing), in SPEC vermerkt.
-
-### Verifizierte Supabase-Fallstricke (in der SPEC adressiert)
-- Custom-GUC `automatenlager.current_tenant` **vorregistrieren** (`ALTER DATABASE … SET`), sonst RLS-Fehler 42704.
-- **Kein Custom-BYPASSRLS** auf Supabase → Infra-Pool = `service_role`-Äquiv., App-Pool = `automatenlager_app`-Äquiv.
-- Migration **0033 bedingt** machen (`n8n_app` existiert auf Supabase nicht).
-- **Flüchtiges Render-Dateisystem** → Audit-/Guest-Access-Log + `.dashboard-config.json` in die DB/Env.
-
-### Nächste Schritte
-1. **Issues schneiden:** `spec-to-issue` auf `docs/specs/cloud-migration-3-schichten-phase-b-v1.md` (in dieser Session begonnen).
-2. Danach `start-issue` → `tdd` (Umsetzung durch Fable), Slice 0 zuerst (Cloud-Fundament + Domain).
-3. Unabhängig laufende Daten-Bugs **#210/#211** (EK/MwSt im GuV-Wareneinsatz) **nicht** in die Migration mitziehen.
-4. Aufräum-Backlog aus der n8n-Ablösung (n8n-Container stilllegen, Webhook-Fallbacks, cutover-monitor) bleibt offen.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-11_wf3-cutover-marketing.md`.
 
 ## Session 2026-06-11 (Fortsetzung) — n8n-ABLÖSUNG KOMPLETT (Stufe 6 abgeschlossen)
 
