@@ -158,6 +158,18 @@ function createAnomalyMonitorJob({ exec, mailer, env = process.env, auditPath, t
       }
       const errorRunCount = await readErrorRunCount(exec, opts.windowMin);
       const backupWarnings = await readBackupWarnings(exec);
+      // #216: ausbleibender Supabase-Backup-Lauf ⇒ synthetische BACKUP_STALE-
+      // Warnung über denselben kritischen BACKUP_ALERT-Mail-Pfad. Nur aktiv,
+      // wenn das Backup konfiguriert ist (sonst Dev-Fehlalarme).
+      try {
+        const { backupConfig, evaluateBackupStaleness, readLastBackupOk } = require('./backup-supabase.js');
+        const bcfg = backupConfig(env);
+        if (bcfg.configured) {
+          const lastOk = await readLastBackupOk(exec);
+          const stale = evaluateBackupStaleness({ configured: true, lastOkAt: lastOk, now: clock(), maxAgeH: bcfg.maxAgeH });
+          if (stale) backupWarnings.push(stale);
+        }
+      } catch { /* Staleness-Check best effort — Monitor-Lauf nie abbrechen */ }
       const { alerts } = evaluateAnomalies({ auditEvents, errorRunCount, backupWarnings }, { ...opts, now: clock() });
       let mailed = false;
       const to = (env.ALERT_EMAIL_DEFAULT && String(env.ALERT_EMAIL_DEFAULT).trim()) || null;

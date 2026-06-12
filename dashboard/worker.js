@@ -238,6 +238,13 @@ function buildWorker(env = process.env) {
   const workerMonitorJob = infraRunner ? createWorkerHealthMonitorJob({ exec: infraRunner.exec, mailer, env: runtimeEnv }) : null;
   // Sicherheits-/Anomalie-Monitor (#168): Auth-Fail-Häufung, Break-Glass, error-Run-Spike, Backup-Fehler.
   const anomalyMonitorJob = infraRunner ? createAnomalyMonitorJob({ exec: infraRunner.exec, mailer, env: runtimeEnv }) : null;
+  // Off-Site-Backup der Supabase-DB (#216): geplanter pg_dump + Alarm. Nur aktiv,
+  // wenn SUPABASE_PG_URL_SESSION + SUPABASE_BACKUP_DIR konfiguriert sind (runtimeEnv —
+  // .env.local-Werte zählen, #227-Lektion).
+  const { createSupabaseBackupJob, backupConfig: supabaseBackupConfig } = require('./lib/jobs/backup-supabase.js');
+  const supabaseBackupJob = (infraRunner && supabaseBackupConfig(runtimeEnv).configured)
+    ? createSupabaseBackupJob({ exec: infraRunner.exec, mailer, env: runtimeEnv })
+    : null;
   // Per-Mandant-Jobs (durch die Tür, GUC je Mandant). WF8 GuV + DB-Validierung (Slice 1).
   const guvAggregateJob = tenantRunner ? createGuvAggregateJob({ tenantRunner }) : null;
   // GuV-Backfill (Issue #172): füllt GuV-Lücken aus dem freigegebenen Nayax-Roh-Export
@@ -382,6 +389,12 @@ function buildWorker(env = process.env) {
   }
   // Worker-Job-Health-Monitor (audit.workflow_runs) → intervalMs. KEIN runOnStart
   // (erst nach den ersten Job-Läufen prüfen, sonst NO_SUCCESS-Fehlalarm).
+  // #216: tägliches Supabase-Backup (Cron-Quelle = Worker wie alle Nachtjobs;
+  // mit #217 wird der Auslöser auf pg_cron→Trigger-Endpunkt umgehängt).
+  if (supabaseBackupJob) {
+    schedules.push({ name: supabaseBackupJob.key, dailyAt: runtimeEnv.WORKER_BACKUP_AT || '03:15', kind: 'infra',
+      run: () => supabaseBackupJob.run() });
+  }
   if (anomalyMonitorJob) {
     schedules.push({ name: anomalyMonitorJob.key, intervalMs: Number(env.WORKER_ANOMALY_MS) || 30 * 60 * 1000, kind: 'infra',
       run: () => anomalyMonitorJob.run() });
