@@ -1,0 +1,11 @@
+# #218 Cloudflare Pages — Sicherheits-/Cache-Header für die statischen Assets.
+# Das Backend (Render) setzt seine eigenen Header (inkl. CORS); hier nur das
+# Frontend. config.js darf NIE gecacht werden (sonst klebt eine alte API-Basis).
+/config.js
+  Cache-Control: no-store
+/*.html
+  Cache-Control: no-cache
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+/*
+  X-Content-Type-Options: nosniff

@@ -37,6 +37,7 @@ const { queryEconomicsScopePg } = require('./lib/automaten-view.js');
 const { queryEconomicsLivePg } = require('./lib/economics-live.js');
 const { resolveViewer, objectAccessAllowed, breakGlassDecision, crossTenantAccess } = require('./lib/auth.js');
 const { resolveAuthMode, extractBearerToken, identityLogin, verifySupabaseJwt } = require('./lib/supabase-auth.js'); // #215: Auth-Naht (Doppelpfad)
+const { parseAllowedOrigins, corsHeadersFor, isPreflight } = require('./lib/cors.js'); // #218: CORS (Cloudflare→Render)
 const { createAuditLogWriter, dbAuditEnabled } = require('./lib/audit-log.js'); // #213: Audit-Trail → DB (audit.access_log)
 const { createTenantDirectory } = require('./lib/tenant-directory.js');
 const { createTenantDb } = require('./lib/tenant-db.js');
@@ -2263,6 +2264,16 @@ function handleInternalJobTrigger(req, res, jobKey) {
   return internalJobTrigger(req, res, jobKey);
 }
 
+// #218: erlaubte CORS-Origins (Cloudflare-Frontend-Domains). Prozess-Umgebung
+// hat Vorrang vor .env.local; leer ⇒ CORS inert (Mini/same-origin).
+function corsAllowedOrigins() {
+  const pe = process.env;
+  const fromEnv = Object.prototype.hasOwnProperty.call(pe, 'DASHBOARD_CORS_ORIGINS')
+    ? String(pe.DASHBOARD_CORS_ORIGINS || '')
+    : String((loadLocalEnv() || {}).DASHBOARD_CORS_ORIGINS || '');
+  return parseAllowedOrigins(fromEnv);
+}
+
 const server = http.createServer(async (req, res) => {
   req._requestId = crypto.randomUUID(); // #117: per-Request-id für Audit-Korrelation (#118)
   // #215 (Auth-Naht): Identitäts-Quelle EINMAL pro Request bestimmen, VOR jedem
@@ -2283,6 +2294,17 @@ const server = http.createServer(async (req, res) => {
   res._ifNoneMatch = req.headers['if-none-match'] || null;
   const parsed = url.parse(req.url, true);
   try {
+    // #218 (Cloud-Slice 4): CORS für das Cloudflare-Frontend → Render-Backend.
+    // Header werden früh via setHeader gesetzt (writeHead merged sie); eine
+    // Preflight-OPTIONS wird sofort mit 204 beantwortet. Leere Allowlist
+    // (Mini/same-origin) ⇒ inert. Origin-Echo nur für erlaubte Origins.
+    const corsAllow = corsAllowedOrigins();
+    if (corsAllow.length) {
+      const ch = corsHeadersFor(req.headers.origin, corsAllow);
+      for (const [k, v] of Object.entries(ch)) res.setHeader(k, v);
+      if (isPreflight(req)) { res.writeHead(Object.keys(ch).length ? 204 : 403); res.end(); return; }
+    }
+
     // #117: Health-Check — spiegelt die Bereitschaft der Mandanten-Registry.
     // Initialer Registry-Load-Fehler ⇒ 503 (fail-closed sichtbar); ohne PG (Dev/Test)
     // gilt die Registry als „nicht anwendbar" ⇒ gesund.

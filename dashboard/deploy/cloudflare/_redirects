@@ -1,0 +1,8 @@
+# #218 Cloudflare Pages — SPA-Routing (spiegelt den server.js-Fallback).
+# Deep-Links der v3-SPA und die Login-Seite auf ihre Einstiegsdateien mappen;
+# statische Assets (mit Datei-Endung) bleiben unberührt. 200 = Rewrite (keine
+# Adressänderung im Browser). Diese Datei gehört in das Pages-Output-Root.
+/login        /login.html   200
+/v3           /v3.html      200
+/v3/*         /v3.html      200
+/             /v3.html      200

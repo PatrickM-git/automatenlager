@@ -78,6 +78,7 @@
     </main>
   </div>
 
+  <script src="/config.js"></script>
   <script>
   (function () {
     'use strict';
@@ -113,7 +114,9 @@
       var i = kv.indexOf('='); if (i > 0) frag[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
     });
 
-    fetch('/api/v2/auth/config').then(function (r) { return r.json(); }).then(function (c) {
+    // #218: Backend-Calls gehen ans Render-Backend (window.__API_BASE__ via config.js); leer = same-origin (Mini).
+    var API_BASE = String(window.__API_BASE__ || '').replace(/\/+$/, '');
+    fetch(API_BASE + '/api/v2/auth/config').then(function (r) { return r.json(); }).then(function (c) {
       cfg = c;
       if (c.mode !== 'supabase' || !c.supabaseUrl) { location.replace('/v3'); return; }
       if (frag.type === 'recovery' && frag.access_token) show('form-recover');

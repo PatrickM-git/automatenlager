@@ -1,35 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-218-cloudflare.md`.
-
-## Session 2026-06-12 — #218 (Slice 4: Frontend → Cloudflare) CODE KOMPLETT
-
-> Runbook: `docs/cloud-migration/slice-4-frontend-cloudflare-runbook.md`.
-> **Code + lokaler Browser-QA fertig; das Cloudflare-Pages-Projekt + die
-> Domain-/CORS-Verdrahtung sind Betreiber-Schritte (hängen am #217-Render-Deploy).**
-
-### Was steht (verifiziert: Unit + Spawned + lokaler Browser-QA)
-- **Laufzeit-API-Basis** `public/config.js` (`window.__API_BASE__`): Mini leer
-  (same-origin), Cloudflare via `deploy/cloudflare/config.cloud.js` = Render-URL.
-  v3.html + login.html laden config.js vor ihrem Skript.
-- **Fetch-Shim (v3.js):** Backend-Pfade (/api,/health,/internal) → API_BASE +
-  Bearer-JWT; statische Assets same-origin. Leerer API_BASE = unverändert (Mini).
-- **CORS** `lib/cors.js` + server.js: exakte Allowlist (DASHBOARD_CORS_ORIGINS),
-  Preflight 204, KEINE Allow-Credentials (Bearer-JWT, nicht Cookies); leer = inert.
-- **Cloudflare-Artefakte:** `deploy/cloudflare/` (config.cloud.js, _redirects =
-  SPA-Fallback, _headers = config.js no-store, build.sh — lokal verifiziert).
-- **Browser-QA (lokal, supabase-Mode, CORS gesetzt):** /login lädt sauber
-  (config.js 304, auth/config 200, KEINE Konsolenfehler); Default-Deny-Redirect;
-  Login speichert Token; CORS-Preflight 204 für erlaubte Origin. Suite 1425/1426
-  (1 Windows-Spawned-Flake `dashboard-auth`, isoliert 19/19).
-
-### Offen (Betreiber, hängt an #217-Render-Deploy + Domain)
-1. Cloudflare Pages-Projekt (build.sh mit RENDER_BACKEND_URL, Output cf-dist).
-2. Custom Domain app.faltrix-solutions.de (TLS automatisch).
-3. Render: DASHBOARD_CORS_ORIGINS setzen. Supabase Auth URL-Configuration (SITE_URL
-   + Redirect) — schaltet auch den #215-Reset-Mail-Link scharf.
-4. Live-Browser-QA gegen die app-Domain.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-217-render.md`.
 
 ## Session 2026-06-12 — #217 (Slice 3: Backend + Jobs → Render) CODE KOMPLETT
 
@@ -133,15 +105,14 @@
    Passwortmanager). Referenz dokumentiert in `dashboard/.env.example`.
 
 ## Offene Issues (Stand Sessionende)
-- **#219** Cutover-Abschluss (Statusseite + DNS-Cutover + Rollback-Runbooks). #217/#218
-  Code fertig, Live-Deploy = Betreiber-Schritte. **#227**
+- **#218–#219** Cloud-Slices (Cloudflare → Cutover); #217 Render-Deploy = Betreiber-Schritt. **#227**
   Worker-env-Bug (klein). **#198/#206** WF3/WF1-Cutover-Reste. **#164** n8n-Abschluss-
   Cleanup. **#210/#211** GuV-EK/MwSt-Datenbugs. **#108/#111**.
 
 ## Nächster Schritt
-1. **#219 (Slice 5 — Cutover-Abschluss):** Statusseite/Health-Übersicht,
-   finaler DNS-Cutover, Rollback-Runbooks je Slice, Aufräumen der Mini-/
-   Tailscale-Reste. (Code-Teil; der finale DNS-Schwenk ist Betreiber-Schritt.)
-2. **Betreiber-Deploys (#217/#218):** Render-Blueprint + pg_cron, Cloudflare-Pages
-   + Domain + CORS, Supabase Auth URL-Config — Anleitungen in den Slice-Runbooks.
-3. **Beobachten:** `backup-supabase` (03:15) + `wf3-nayax-reconcile`.
+1. **#218 (Slice 4 — Frontend → Cloudflare):** public/v3.* über Cloudflare
+   Pages/Workers ausliefern; API-Calls auf die Render-Backend-Domain; CORS/TLS;
+   Supabase Auth URL-Configuration (SITE_URL/Redirect, hängt an der Domain).
+2. **#217 Render-Deploy (Betreiber):** Blueprint + pg_cron-Aktivierung (Runbook §Aktivierung).
+3. Danach #219 (Cutover).
+4. **Beobachten:** `backup-supabase` (03:15) + `wf3-nayax-reconcile`.

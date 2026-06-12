@@ -10,22 +10,31 @@
 
   var BASE = '/v3';
 
-  /* ---- #215 Auth-Naht (supabase-Mode): Token an alle same-origin-Calls ---- */
-  // Fetch-Shim: hängt das Supabase-Access-Token als Authorization-Header an
-  // jede same-origin-API-Anfrage. Im tailscale-Mode existiert kein Token im
-  // localStorage ⇒ der Shim ist ein No-op (Doppelpfad ohne Code-Stichtag).
+  /* ---- #215/#218 Auth-Naht + Cloud-API-Basis ---- */
+  // window.__API_BASE__ (von Cloudflare via /config.js gesetzt) zeigt aufs
+  // Render-Backend; leer = same-origin (Mini). Backend-Pfade (/api, /health,
+  // /internal) werden dorthin umgeschrieben; statische Assets (Cloudflare)
+  // bleiben same-origin. Der Shim hängt zusätzlich das Supabase-JWT an
+  // (supabase-Mode); im tailscale-Mode existiert kein Token ⇒ No-op.
+  var API_BASE = String(window.__API_BASE__ || '').replace(/\/+$/, '');
+  function isBackendPath(u) {
+    return u.indexOf('/api') === 0 || u.indexOf('/health') === 0 || u.indexOf('/internal') === 0;
+  }
   (function authFetchShim() {
     var origFetch = window.fetch.bind(window);
     window.fetch = function (input, init) {
       try {
         var u = typeof input === 'string' ? input : ((input && input.url) || '');
-        var sameOrigin = u.indexOf('/') === 0 && u.indexOf('//') !== 0;
-        var token = localStorage.getItem('sb_access_token');
-        if (sameOrigin && token) {
-          init = init || {};
-          var h = new Headers(init.headers || {});
-          if (!h.has('Authorization')) h.set('Authorization', 'Bearer ' + token);
-          init.headers = h;
+        var rootRelative = u.indexOf('/') === 0 && u.indexOf('//') !== 0;
+        if (rootRelative && isBackendPath(u)) {
+          if (API_BASE) input = (typeof input === 'string') ? API_BASE + u : new Request(API_BASE + u, input);
+          var token = localStorage.getItem('sb_access_token');
+          if (token) {
+            init = init || {};
+            var h = new Headers(init.headers || {});
+            if (!h.has('Authorization')) h.set('Authorization', 'Bearer ' + token);
+            init.headers = h;
+          }
         }
       } catch (e) { /* Shim darf nie einen Request verhindern */ }
       return origFetch(input, init);
