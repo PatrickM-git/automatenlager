@@ -3,6 +3,25 @@
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 > Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-219-cutover.md`.
 
+## Session 2026-06-12 (Nachmittag) — PRE-GO-LIVE-SICHERHEITSAUDIT + Härtung KOMPLETT
+
+> Vor dem Cutover: 18-Punkte-Betreiber-Checkliste + „50 vibe-vulns" gegen ECHTEN
+> Code geprüft (adversarial). Bericht: `docs/security/pre-go-live-audit-2026-06-12.md`.
+> **Fundament solide** (SQL parametrisiert, alle Schreibpfade autorisiert, IDOR/RLS
+> dicht, Secrets nie in Git, npm 0 vulns). Behobene Funde (Commit 35e05dd, Mini deployt + live verifiziert):
+> - **C1 (kritisch):** Auth fail-closed — `process.env.SUPABASE_URL` erzwingt supabase-
+>   Modus, fälschbarer Tailscale-Header in der Cloud wirkungslos (Mini-Login bleibt,
+>   live verifiziert: Tailscale-Header ⇒ admin).
+> - **H1:** kein Stack-Trace-Leak mehr (generische 500 + requestId).
+> - **H3:** `.dockerignore` — `.env.local` nie im Image (Image-Build verifiziert).
+> - **M2:** Security-Header (nosniff/DENY/Referrer/HSTS) live. **M3:** /api/v2/status
+>   anonym nur Ampel. **L1:** Upload-Magic-Byte-Check. **DoS:** readJsonBody 1-MB-Limit.
+> - Tests: `security-hardening.test.js` (6) + C1-Invarianten; **Suite 1439/1439**.
+> **Offen = Plattform/Betreiber (kein Code):** H2/M1 API hinter Cloudflare (Etappe 3),
+> L2 QA-Passwort ersetzen + 2. Admin-Login + Supabase-Auth-Policy/2FA (Etappe 4).
+> **Zweiter Admin** `lantspeku@gmail.com`: in der Cloud-DB schon Eigentümer+Plattform-
+> Admin, jetzt auch in `DASHBOARD_ADMIN_LOGIN` (beide E-Mails) — fehlt nur Login (Etappe 4).
+
 ## Session 2026-06-12 — #219 (Slice 5: Cutover-Abschluss) CODE KOMPLETT + LIVE AUF DEM MINI
 
 > Runbook: `docs/cloud-migration/rollback-runbooks.md`. Damit ist der **Code aller
