@@ -3,6 +3,33 @@
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
 > Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-render-live.md`.
 
+## Session 2026-06-12 (Abend, 2) — ETAPPE 3 Backend-Sicherheit (H2/M1) autonom KOMPLETT
+
+> Runbook: `docs/cloud-migration/etappe3-cloudflare-sicher.md`. Der Audit-Punkt
+> **H2** (Cloudflare-Bypass) + **M1** (Rate-Limiting) sind im Backend gelöst +
+> getestet + auf Mini & Render deployt (dort INERT/harmlos). Der Cloudflare-
+> Anschluss selbst bleibt gemeinsamer Browser-Schritt (GitHub-OAuth/DNS = Betreiber).
+
+### Fertig (autonom, Commit 237385c, Mini + Render deployt)
+- **Rate-Limit** `lib/rate-limit.js` (600/60s pro IP, env `RATE_LIMIT_MAX`/`_WINDOW_MS`,
+  0=aus; /health ausgenommen; CF-Connecting-IP nur wenn hinter Cloudflare verifiziert).
+- **Origin-Guard** `lib/origin-guard.js`: Backend akzeptiert API nur mit geheimem
+  `X-CF-Origin-Secret`; /health + /internal/ ausgenommen; **INERT ohne CF_ORIGIN_SECRET**
+  (kein Aussperren), timing-safe. In server.js früh nach /health verdrahtet.
+- **Cloudflare-Proxy** (sicherste H2-Variante): `deploy/cloudflare/functions/api/[[path]].js`
+  proxied /api/* → Render + setzt den Origin-Header; `build.sh` Proxy-Modus
+  (config.js leer/same-origin, kein CORS, Secret nie im Browser).
+- 15 Tests (rate-limit/origin-guard/etappe3-server). **Suite 1454/1454, CI grün.**
+  Live verifiziert: Mini /health+Login ok (inert), Render /health+API ok (inert,
+  Rate-Limit lässt normal durch).
+
+### Offen = gemeinsame Browser-Schritte (Runbook §"Cloud-Teil")
+1. Secret erzeugen (`openssl rand -hex 24`) → Render-Env `CF_ORIGIN_SECRET`.
+2. Cloudflare Pages-Projekt (GitHub-OAuth = Betreiber), Build `build.sh`, Output
+   `dashboard/cf-dist`, Pages-Env `RENDER_API_BASE` + `CF_ORIGIN_SECRET`.
+3. Custom-Domain `app.faltrix-solutions.de`; Origin-Guard scharf schalten +
+   prüfen (direkter onrender.com-Zugriff ⇒ 403). Supabase Auth URL-Config.
+
 ## Session 2026-06-12 (Abend) — RENDER-BACKEND LIVE + CI (GitHub Actions) + Sentry
 
 > Betreiber-Deploy von #217 (Backend → Render) per Browser-Begleitung durchgeführt.
