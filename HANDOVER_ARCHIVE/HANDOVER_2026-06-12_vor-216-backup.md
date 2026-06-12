@@ -1,18 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-216-backup.md`.
-
-## Session 2026-06-12 — #216 (Off-Site-Backup Supabase) KOMPLETT + LIVE AUF DEM MINI
-
-> Runbook: `docs/cloud-migration/slice-betriebsreife-216-offsite-backup.md`.
-> Job `backup-supabase` (pg_dump custom, Validierung, Retention, Alarmkette
-> BACKUP_FAIL/BACKUP_STALE über den Anomalie-Monitor) läuft täglich 03:15 im
-> Mini-Worker → `/mnt/d/backups/supabase` (externe Platte). **Restore-Probe REAL**
-> (Scratch-DB auf dem Mini, Zeilenzahlen identisch). Live-Lauf im Container ✓,
-> Telemetrie success ✓. Dockerfile jetzt mit `postgresql17-client` (Supabase=PG17;
-> Image auf dem Mini neu gebaut). Manueller Trigger: `tools/run-backup-once.js`.
-> Suite 1405/1405.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-slice2-auth.md`.
 
 ## Session 2026-06-12 — #215 (Slice 2: Auth-Naht) KOMPLETT
 
@@ -75,13 +64,11 @@
    Passwortmanager). Referenz dokumentiert in `dashboard/.env.example`.
 
 ## Offene Issues (Stand Sessionende)
-- **#217–#219** Cloud-Slices (Render → Cloudflare → Cutover). **#227**
+- **#216–#219** Cloud-Slices (Off-Site-Backup → Render → Cloudflare → Cutover). **#227**
   Worker-env-Bug (klein). **#198/#206** WF3/WF1-Cutover-Reste. **#164** n8n-Abschluss-
   Cleanup. **#210/#211** GuV-EK/MwSt-Datenbugs. **#108/#111**.
 
 ## Nächster Schritt
-1. **#217 (Slice 3 — Backend + Jobs → Render):** server.js als Render-Web-Service,
-   Trigger-Endpunkte `/internal/jobs/<key>` mit `WORKER_TRIGGER_SECRET` (timing-safe),
-   pg_cron+pg_net-Schedules in Supabase, flüchtiges FS auflösen, Sentry.
-2. Danach #218 (Cloudflare), #219 (Cutover).
-3. **Beobachten:** erster geplanter `backup-supabase`-Lauf (03:15) + `wf3-nayax-reconcile`.
+1. **#216 (Off-Site-Backup):** geplanter pg_dump der Supabase-DB + Alarm bei Fehler.
+2. Danach #217 (Render), #218 (Cloudflare), #219 (Cutover).
+3. **Beobachten:** `wf3-nayax-reconcile`-Läufe in `audit.workflow_runs`.
