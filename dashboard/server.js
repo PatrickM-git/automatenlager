@@ -38,6 +38,8 @@ const { queryEconomicsLivePg } = require('./lib/economics-live.js');
 const { resolveViewer, objectAccessAllowed, breakGlassDecision, crossTenantAccess } = require('./lib/auth.js');
 const { resolveAuthMode, extractBearerToken, identityLogin, verifySupabaseJwt } = require('./lib/supabase-auth.js'); // #215: Auth-Naht (Doppelpfad)
 const { parseAllowedOrigins, corsHeadersFor, isPreflight } = require('./lib/cors.js'); // #218: CORS (Cloudflare→Render)
+const { createRateLimiter, clientKey } = require('./lib/rate-limit.js'); // Etappe 3 (M1): Flooding-Bremse
+const { originGuardDecision } = require('./lib/origin-guard.js'); // Etappe 3 (H2): Cloudflare-Bypass-Schutz
 const { createAuditLogWriter, dbAuditEnabled } = require('./lib/audit-log.js'); // #213: Audit-Trail → DB (audit.access_log)
 const { createTenantDirectory } = require('./lib/tenant-directory.js');
 const { createTenantDb } = require('./lib/tenant-db.js');
@@ -2328,6 +2330,29 @@ function corsAllowedOrigins() {
   return parseAllowedOrigins(fromEnv);
 }
 
+// Etappe 3 (H2): geheimes Origin-Secret, das Cloudflare per Transform-Rule auf
+// jedem Request setzt. Prozess-Env hat Vorrang vor .env.local; leer ⇒ Schutz
+// INERT (Mini/vor-Cloudflare). Wenn gesetzt ⇒ wir stehen verifiziert hinter
+// Cloudflare, dann ist auch CF-Connecting-IP (fürs Rate-Limit) vertrauenswürdig.
+function cfOriginSecret() {
+  const pe = process.env;
+  return (Object.prototype.hasOwnProperty.call(pe, 'CF_ORIGIN_SECRET')
+    ? String(pe.CF_ORIGIN_SECRET || '')
+    : String((loadLocalEnv() || {}).CF_ORIGIN_SECRET || '')).trim();
+}
+
+// Etappe 3 (M1): Rate-Limiter-Singleton (env-konfigurierbar). Default 600/60s pro
+// IP — eine harte Flooding-Bremse, die normale Nutzung (inkl. Auto-Refresh +
+// Assets) locker durchlässt. RATE_LIMIT_MAX=0 schaltet ab (Notausschalter).
+const rateLimiter = (() => {
+  const e = process.env;
+  const maxRaw = e.RATE_LIMIT_MAX;
+  const winRaw = e.RATE_LIMIT_WINDOW_MS;
+  const max = (maxRaw != null && maxRaw !== '' && Number.isFinite(Number(maxRaw))) ? Number(maxRaw) : 600;
+  const windowMs = (winRaw != null && winRaw !== '' && Number.isFinite(Number(winRaw))) ? Number(winRaw) : 60_000;
+  return createRateLimiter({ max, windowMs });
+})();
+
 // Sicherheit (Audit M2, 2026-06-12): Basis-Security-Header auf JEDER Antwort.
 // CSP wird bewusst NICHT hart gesetzt (das v3-Frontend nutzt Inline-Skripte +
 // externe Fonts; eine strikte CSP bräuchte erst ein Frontend-Refactor — als
@@ -2385,6 +2410,28 @@ const server = http.createServer(async (req, res) => {
         tenantDbReady: !!tenantDb, // #122: Stufe-3-Mandanten-Tür konstruiert (noch nicht konsumiert)
         pgConfigured: !!dashboardV2PgUrl(),
       });
+      return;
+    }
+
+    // Etappe 3 (M1, Audit): Rate-Limit gegen Flooding. /health ist oben schon
+    // beantwortet ⇒ Render-Healthcheck nie gebremst. Client-Key = echte
+    // Besucher-IP hinter Cloudflare (CF-Connecting-IP, nur wenn Origin-Secret
+    // aktiv = verifiziert hinter Cloudflare), sonst nicht-fälschbare Socket-IP.
+    const cfSecret = cfOriginSecret();
+    const rl = rateLimiter.check(clientKey(req, { trustCf: !!cfSecret }));
+    if (!rl.allowed) {
+      res.setHeader('Retry-After', String(Math.max(1, Math.ceil(rl.retryAfterMs / 1000))));
+      sendJson(res, 429, { ok: false, error: { code: 'RATE_LIMITED', message: 'Zu viele Anfragen — bitte kurz warten.' } });
+      return;
+    }
+
+    // Etappe 3 (H2, Audit): Origin-Schutz gegen Cloudflare-Bypass. INERT ohne
+    // CF_ORIGIN_SECRET; /health + /internal/ ausgenommen (im Guard). Direkter
+    // Zugriff auf die *.onrender.com-URL ohne den von Cloudflare gesetzten
+    // geheimen Header ⇒ 403.
+    const originDecision = originGuardDecision({ secret: cfSecret, headerValue: req.headers['x-cf-origin-secret'], pathname: parsed.pathname });
+    if (!originDecision.allowed) {
+      sendJson(res, 403, { ok: false, error: { code: 'ORIGIN_FORBIDDEN', message: 'Direktzugriff nicht erlaubt.' } });
       return;
     }
 
