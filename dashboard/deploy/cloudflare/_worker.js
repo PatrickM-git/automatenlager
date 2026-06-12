@@ -23,11 +23,15 @@ function isBackend(pathname) {
   return BACKEND_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/') || pathname.startsWith(p + '?'));
 }
 
-// SPA-Einstiegsdateien (spiegelt den server.js-Fallback + das alte _redirects).
+// SPA-Routing → Pages „pretty URL" OHNE .html. Wichtig: Cloudflare Pages
+// serviert `/v3.html` als `/v3` (308-Redirect beim Aufruf mit .html). Würde der
+// Worker auf `/v3.html` umschreiben, entstünde eine Redirect-Schleife
+// (.html → /v3 → .html …). Daher hier die endungslose pretty URL. Nur `/`
+// (sonst Pages-Default index.html = alte v1-Seite) und v3-Deep-Links müssen auf
+// `/v3` umgeschrieben werden; /v3, /login, /status treffen als Original-Pfad
+// bereits ihre pretty URL.
 function assetPathFor(pathname) {
-  if (pathname === '/' || pathname === '/v3' || pathname.startsWith('/v3/')) return '/v3.html';
-  if (pathname === '/login') return '/login.html';
-  if (pathname === '/status') return '/status.html';
+  if (pathname === '/' || pathname.startsWith('/v3/')) return '/v3';
   return pathname;
 }
 

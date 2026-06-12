@@ -22,8 +22,13 @@ Browser ──► Cloudflare (app.faltrix-solutions.de)
 - **Origin-Guard** (`lib/origin-guard.js`, server.js): mit `CF_ORIGIN_SECRET`
   akzeptiert das Backend nur Requests mit korrektem `X-CF-Origin-Secret`-Header;
   `/health` + `/internal/` ausgenommen. **INERT ohne Secret** (kein Aussperren).
-- **Pages-Function** `deploy/cloudflare/functions/api/[[path]].js` + Build
+- **Advanced-Mode-Worker** `deploy/cloudflare/_worker.js` + Build
   `deploy/cloudflare/build.sh` (Proxy-Modus, config.js leer/same-origin).
+  > Hinweis 2026-06-12: Ein `functions/`-Verzeichnis wird von Cloudflare im
+  > PROJEKT-Root gesucht, nicht im Build-Output — aus dem Monorepo-Unterordner
+  > nicht erkannt (API-Calls landeten auf HTML). Daher `_worker.js` im
+  > Output-Root (eindeutig). Der Worker proxied /api,/health,/internal ans
+  > Backend und routet sonst die Assets inkl. SPA-Fallback (/ → v3.html).
 - Tests: `rate-limit` (6) + `origin-guard` (6) + `etappe3-server` (3, spawned).
   Suite 1454/1454. Auf Render/Mini ohne `CF_ORIGIN_SECRET` ⇒ Origin-Guard inert,
   Rate-Limit aktiv (harmlos).
