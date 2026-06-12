@@ -2352,6 +2352,33 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // #219 (Cutover-Abschluss): Statusseite-Datenquelle. Aggregiert /health +
+    // die letzten Job-Läufe (audit.workflow_runs, Infra-Verbindung) zu einem
+    // Gesamtbild. Öffentlich lesbar (kein Mandanten-Datenpfad, nur Health/Frische).
+    if (parsed.pathname === '/api/v2/status') {
+      const health = {
+        ok: tenantDirectoryHealthy(),
+        tenantDirectoryReady: !!(tenantDirectory && tenantDirectory.isReady()),
+        pgConfigured: !!dashboardV2PgUrl(),
+      };
+      let jobRuns = [];
+      if (infraPgQuery) {
+        try {
+          // Letzter Lauf je workflow_key (DISTINCT ON, jüngster zuerst).
+          const r = await infraPgQuery(
+            `SELECT DISTINCT ON (workflow_key) workflow_key, status, finished_at
+               FROM audit.workflow_runs
+              WHERE finished_at > NOW() - INTERVAL '3 days'
+              ORDER BY workflow_key, finished_at DESC NULLS LAST`, []);
+          jobRuns = r.rows;
+        } catch { /* DB optional ⇒ Jobs erscheinen als unknown */ }
+      }
+      const { buildStatus } = require('./lib/status-page.js');
+      const status = buildStatus({ health, jobRuns });
+      sendJson(res, status.overall === 'down' ? 503 : 200, { ok: true, ...status });
+      return;
+    }
+
     // #215 (Auth-Naht): öffentliche Login-Konfiguration fürs Frontend. Der anonKey
     // ist Supabases öffentlicher Browser-Key (by design kein Secret); mode steuert,
     // ob das Frontend die Login-Wand zeigt (supabase) oder wie bisher läuft (tailscale).
@@ -4695,9 +4722,11 @@ const server = http.createServer(async (req, res) => {
       ? '/index.html'
       : parsed.pathname === '/login' // #215: Login-Wand (Auth-Naht, supabase-Mode)
         ? '/login.html'
-        : isV3DeepLink
-          ? '/v3.html'
-          : parsed.pathname;
+        : parsed.pathname === '/status' // #219: schlanke Statusseite (Cutover-Abschluss)
+          ? '/status.html'
+          : isV3DeepLink
+            ? '/v3.html'
+            : parsed.pathname;
     const filePath = path.normalize(path.join(PUBLIC_DIR, requestPath));
     sendFile(res, filePath);
   } catch (error) {

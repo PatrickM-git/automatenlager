@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#F6F3EC" />
+  <title>Systemstatus · Faltrix</title>
+  <meta name="robots" content="noindex" />
+  <link rel="stylesheet" href="/v3.css" />
+  <style>
+    /* #219: schlanke, öffentliche Statusseite (kein Login nötig — nur Health). */
+    .st-wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px; }
+    .st-head { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+    .st-head img { width: 40px; height: 40px; border-radius: 10px; }
+    .st-overall { display: inline-flex; align-items: center; gap: 10px; padding: 12px 18px;
+      border-radius: 14px; font-weight: 700; font-size: 1.1rem; margin: 8px 0 24px; }
+    .st-overall.ok { background: #e6f6ec; color: #0a7c3e; }
+    .st-overall.degraded { background: #fdf3e0; color: #9a6a00; }
+    .st-overall.down { background: #fae6e6; color: #b91c1c; }
+    .st-dot { width: 12px; height: 12px; border-radius: 50%; background: currentColor; }
+    .st-section { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em;
+      opacity: .6; margin: 22px 0 8px; }
+    .st-row { display: flex; align-items: center; justify-content: space-between;
+      padding: 11px 14px; border: 1px solid rgba(0,0,0,.08); border-radius: 11px; margin-bottom: 8px; }
+    .st-row .name { font-weight: 600; }
+    .st-row .meta { font-size: .82rem; opacity: .6; }
+    .st-badge { font-size: .78rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+    .st-badge.ok { background: #e6f6ec; color: #0a7c3e; }
+    .st-badge.stale { background: #fdf3e0; color: #9a6a00; }
+    .st-badge.error, .st-badge.down { background: #fae6e6; color: #b91c1c; }
+    .st-badge.unknown { background: #eee; color: #555; }
+    .st-foot { margin-top: 24px; font-size: .8rem; opacity: .55; }
+    .st-note { margin-top: 6px; font-size: .78rem; opacity: .5; }
+  </style>
+</head>
+<body class="v3">
+  <div class="st-wrap">
+    <div class="st-head">
+      <img src="/faltrix-logo.jpg" alt="" aria-hidden="true">
+      <h1 style="margin:0;font-size:1.3rem">Systemstatus</h1>
+    </div>
+
+    <div id="overall" class="st-overall" aria-live="polite"><span class="st-dot"></span><span id="overall-text">Lade…</span></div>
+
+    <div class="st-section">Plattform</div>
+    <div id="platform"></div>
+
+    <div class="st-section">Geplante Jobs</div>
+    <div id="jobs"></div>
+
+    <p class="st-foot" id="foot"></p>
+    <p class="st-note">Diese Seite ist ein schlanker Betriebsstatus. Die Login-Wand ist
+      bewusst minimal — ein ordentliches Design folgt in Phase C (Marketing).</p>
+  </div>
+
+  <script src="/config.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var API_BASE = String(window.__API_BASE__ || '').replace(/\/+$/, '');
+    var LABELS = { ok: 'OK', degraded: 'Beeinträchtigt', down: 'Ausfall',
+      stale: 'Überfällig', error: 'Fehler', unknown: 'Unbekannt' };
+
+    function badge(status) {
+      return '<span class="st-badge ' + status + '">' + (LABELS[status] || status) + '</span>';
+    }
+    function row(name, status, meta) {
+      return '<div class="st-row"><div><div class="name">' + name + '</div>'
+        + (meta ? '<div class="meta">' + meta + '</div>' : '') + '</div>' + badge(status) + '</div>';
+    }
+    function ageText(j) {
+      if (j.lastRun == null) return 'noch kein Lauf';
+      if (j.ageMin == null) return '';
+      if (j.ageMin < 60) return 'vor ' + j.ageMin + ' Min';
+      if (j.ageMin < 60 * 48) return 'vor ' + Math.round(j.ageMin / 60) + ' Std';
+      return 'vor ' + Math.round(j.ageMin / 1440) + ' Tagen';
+    }
+
+    function render(s) {
+      var ov = document.getElementById('overall');
+      ov.className = 'st-overall ' + s.overall;
+      document.getElementById('overall-text').textContent = LABELS[s.overall] || s.overall;
+      document.getElementById('platform').innerHTML =
+        row('Backend (API)', s.components.backend.status,
+            s.components.backend.tenantDirectoryReady ? 'Mandanten-Registry bereit' : 'Registry nicht bereit')
+        + row('Datenbank', s.components.database.status,
+            s.components.database.pgConfigured ? 'verbunden' : 'nicht konfiguriert');
+      document.getElementById('jobs').innerHTML =
+        s.components.jobs.map(function (j) { return row(j.label, j.status, ageText(j)); }).join('');
+      document.getElementById('foot').textContent = 'Stand: ' + new Date(s.generatedAt).toLocaleString('de-DE');
+    }
+
+    function load() {
+      fetch(API_BASE + '/api/v2/status').then(function (r) { return r.json(); }).then(render).catch(function () {
+        var ov = document.getElementById('overall');
+        ov.className = 'st-overall down';
+        document.getElementById('overall-text').textContent = 'Status nicht erreichbar';
+      });
+    }
+    load();
+    setInterval(load, 30000); // alle 30 s aktualisieren
+  })();
+  </script>
+</body>
+</html>
