@@ -1,7 +1,32 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-218-cloudflare.md`.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-219-cutover.md`.
+
+## Session 2026-06-12 — #219 (Slice 5: Cutover-Abschluss) CODE KOMPLETT + LIVE AUF DEM MINI
+
+> Runbook: `docs/cloud-migration/rollback-runbooks.md`. Damit ist der **Code aller
+> Cloud-Slices (#214–#219) fertig**; offen sind nur noch die Betreiber-Deploys
+> (Render-Blueprint, Cloudflare-Pages, finaler DNS-Cutover).
+
+### Was steht (verifiziert: Unit + lokaler Browser-QA + Mini-Live)
+- **Statusseite** `/status` + `GET /api/v2/status` (lib/status-page.js): aggregiert
+  /health + letzte Job-Läufe (audit.workflow_runs) → je Job ok/stale/error/unknown,
+  Gesamtstatus ok/degraded/down (503 bei down). Nur überwachte Jobs statusrelevant.
+  **Live auf dem Mini: overall ok, 9/9 Jobs ok.** Browser-QA: Seite rendert sauber
+  (grün, 2 Plattform-Zeilen, 9 Jobs OK, Auto-Refresh), keine Konsolenfehler.
+- **Rollback-Runbooks** `docs/cloud-migration/rollback-runbooks.md`: Rückweg je
+  Slice (DNS/Env zurück, kein Code-Revert), Gesamt-Notbremse, Aufräum-Abgrenzung
+  (DASHBOARD_INTERNAL_PEER_CIDR & Co. im Cloud-Pfad gegenstandslos), Phase-C-
+  Login-Platzhalter-Vermerk (US17).
+- Suite **1432/1432**.
+
+### Offen (Betreiber — Account-/DNS-Grenze)
+- **#217 Render-Deploy** (Blueprint + pg_cron-Aktivierung), **#218 Cloudflare-Pages**
+  (build.sh + Domain + CORS-Env), Supabase Auth URL-Config, **finaler DNS-Cutover**
+  im Wartungsfenster + N Tage Mini-Parallelbetrieb. Anleitungen in den Slice-Runbooks.
+- Erledigt-Kriterium #219: nach dem Cutover ein voller Tag Nachtjobs grün in der
+  Cloud-`audit.workflow_runs`.
 
 ## Session 2026-06-12 — #218 (Slice 4: Frontend → Cloudflare) CODE KOMPLETT
 
@@ -133,15 +158,20 @@
    Passwortmanager). Referenz dokumentiert in `dashboard/.env.example`.
 
 ## Offene Issues (Stand Sessionende)
-- **#219** Cutover-Abschluss (Statusseite + DNS-Cutover + Rollback-Runbooks). #217/#218
-  Code fertig, Live-Deploy = Betreiber-Schritte. **#227**
+- **Cloud-Migration Phase B Code KOMPLETT (#214–#219).** Offen nur die Betreiber-Deploys
+  (#217 Render, #218 Cloudflare, #219 finaler DNS-Cutover) — Account-/DNS-Grenze. **#227**
   Worker-env-Bug (klein). **#198/#206** WF3/WF1-Cutover-Reste. **#164** n8n-Abschluss-
   Cleanup. **#210/#211** GuV-EK/MwSt-Datenbugs. **#108/#111**.
 
 ## Nächster Schritt
-1. **#219 (Slice 5 — Cutover-Abschluss):** Statusseite/Health-Übersicht,
-   finaler DNS-Cutover, Rollback-Runbooks je Slice, Aufräumen der Mini-/
-   Tailscale-Reste. (Code-Teil; der finale DNS-Schwenk ist Betreiber-Schritt.)
-2. **Betreiber-Deploys (#217/#218):** Render-Blueprint + pg_cron, Cloudflare-Pages
-   + Domain + CORS, Supabase Auth URL-Config — Anleitungen in den Slice-Runbooks.
+1. **Betreiber-Deploys (die einzigen offenen Schritte der Cloud-Migration):**
+   - **Render** (#217): Blueprint `dashboard/deploy/render/render.yaml`, Secrets
+     setzen, dann Supabase `pg_cron`/`pg_net` + `dashboard/deploy/render/pgcron-setup.sql`.
+   - **Cloudflare** (#218): Pages-Projekt mit `dashboard/deploy/cloudflare/build.sh`
+     (RENDER_BACKEND_URL), Custom-Domain, Render-Env `DASHBOARD_CORS_ORIGINS`,
+     Supabase Auth URL-Config (SITE_URL/Redirect).
+   - **Cutover** (#219): DNS-Schwenk im Wartungsfenster, Mini N Tage parallel.
+   Alle Schritte in den jeweiligen `docs/cloud-migration/slice-*-runbook.md` + `rollback-runbooks.md`.
+2. **Danach Phase C** (grill-me für die nächste Phase): ordentliches Login-/Status-
+   Design, Stripe-Billing, Marketing-Site, 2. Kunde.
 3. **Beobachten:** `backup-supabase` (03:15) + `wf3-nayax-reconcile`.
