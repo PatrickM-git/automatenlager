@@ -1,0 +1,51 @@
+# GitHub Actions — automatische Tests (CI). Eingeführt 2026-06-12.
+# ---------------------------------------------------------------------------
+# Läuft die node:test-Suite bei jedem Push auf main und bei jedem Pull Request.
+# Fängt Regressionen (Auth, CORS, Sicherheitshärtung, Geschäftslogik), BEVOR sie
+# live gehen — Render deployt nur, was hier grün ist.
+#
+# BEWUSST OHNE Datenbank-Zugang: Die ~41 DB-gebundenen Tests erkennen das fehlende
+# DASHBOARD_V2_PG_URL und überspringen sich sauber (connectOrSkip → t.skip). So
+# braucht GitHub KEIN DB-Passwort. Die reinen Unit-/Spawned-Tests (Logik, Auth,
+# CORS, Upload-Validierung, JWT, Sicherheits-Invarianten) laufen vollständig.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Ältere, noch laufende Läufe desselben Branches abbrechen, wenn neu gepusht wird.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: node --test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Abhängigkeiten installieren (reproduzierbar)
+        run: npm ci
+
+      - name: Tests
+        # Flags wie in der lokalen Praxis: paralleler Lauf mit hartem Timeout +
+        # force-exit (sonst kann ein offener Handle den Lauf hängen lassen).
+        # Kein DB-Zugang ⇒ DB-Tests skippen; alles andere muss grün sein.
+        env:
+          DASHBOARD_V2_PG_URL: ''
+          DASHBOARD_V2_APP_PG_URL: ''
+        run: node --test --test-timeout=60000 --test-force-exit
