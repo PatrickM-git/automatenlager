@@ -2234,6 +2234,35 @@ function sendFile(res, filePath) {
   fs.createReadStream(filePath).pipe(res);
 }
 
+// #217: Trigger-Verdrahtung. Die Worker-Verkabelung (Pools, Tür, Jobs, Telemetrie)
+// wird LAZY und genau EINMAL gebaut (buildWorker OHNE start() — kein Scheduler,
+// nur runJobNow). So bleibt der Web-Prozess ohne Trigger-Nutzung unverändert.
+let internalJobTrigger = null;
+function handleInternalJobTrigger(req, res, jobKey) {
+  if (!internalJobTrigger) {
+    const pe = process.env;
+    const local = loadLocalEnv();
+    const secret = Object.prototype.hasOwnProperty.call(pe, 'WORKER_TRIGGER_SECRET')
+      ? String(pe.WORKER_TRIGGER_SECRET || '').trim()
+      : String((local && local.WORKER_TRIGGER_SECRET) || '').trim();
+    const { createJobTriggerHandler } = require('./lib/job-triggers.js');
+    let workerHandle = null;
+    const getWorker = () => {
+      if (!workerHandle) {
+        const { buildWorker } = require('./worker.js');
+        workerHandle = buildWorker(process.env).worker;
+      }
+      return workerHandle;
+    };
+    internalJobTrigger = createJobTriggerHandler({
+      secret,
+      runJobNow: (key) => getWorker().runJobNow(key),
+      listJobs: () => getWorker().listSchedules().map((s) => s.name),
+    });
+  }
+  return internalJobTrigger(req, res, jobKey);
+}
+
 const server = http.createServer(async (req, res) => {
   req._requestId = crypto.randomUUID(); // #117: per-Request-id für Audit-Korrelation (#118)
   // #215 (Auth-Naht): Identitäts-Quelle EINMAL pro Request bestimmen, VOR jedem
@@ -2265,6 +2294,15 @@ const server = http.createServer(async (req, res) => {
         tenantDbReady: !!tenantDb, // #122: Stufe-3-Mandanten-Tür konstruiert (noch nicht konsumiert)
         pgConfigured: !!dashboardV2PgUrl(),
       });
+      return;
+    }
+
+    // #217 (Cloud-Slice 3): geschützte Job-Trigger /internal/jobs/<key> — von der
+    // Cron-Quelle (Supabase pg_cron→pg_net) aufgerufen, NIE vom Frontend (kein
+    // CORS, eigener Präfix). Ohne WORKER_TRIGGER_SECRET ist der Pfad tot (404).
+    if (parsed.pathname.startsWith('/internal/jobs/')) {
+      const jobKey = decodeURIComponent(parsed.pathname.slice('/internal/jobs/'.length));
+      await handleInternalJobTrigger(req, res, jobKey);
       return;
     }
 
@@ -2552,11 +2590,8 @@ const server = http.createServer(async (req, res) => {
         };
       }
       const auditEntry = buildRefillAuditEntry(viewer, { machine_id, mdb_code, product_id, qty }, wfResult);
-      const auditPath = path.join(__dirname, 'logs', 'refill-actions.jsonl');
-      try {
-        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
-      } catch { /* audit write failure must not block response */ }
+      // #217 (flüchtiges Render-FS): Aktions-Audit in die DB-Senke (#213) statt JSONL.
+      auditAction(viewer, 'refill_action', auditEntry, auditEntry.ok === false ? 'denied' : 'ok');
       sendJson(res, wfResult.ok ? 200 : 502, {
         ok: wfResult.ok,
         status_ref: auditEntry.status_ref,
@@ -2606,11 +2641,8 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         ok = false; message = `Freigabe fehlgeschlagen: ${err.message}`;
       }
-      const auditPath = path.join(__dirname, 'logs', 'invoice-proposals.jsonl');
-      try {
-        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-        fs.appendFileSync(auditPath, `${JSON.stringify({ at: new Date().toISOString(), login: viewer.login, tenant: viewer.tenantId, product_key, batch_id, ok, message })}\n`, 'utf8');
-      } catch { /* audit write failure must not block response */ }
+      // #217 (flüchtiges Render-FS): Aktions-Audit in die DB-Senke (#213) statt JSONL.
+      auditAction(viewer, 'invoice_proposal_action', { product_key, batch_id, message }, ok ? 'ok' : 'denied');
       sendJson(res, ok ? 200 : 502, ok ? { ok, message, summary: result } : { ok, error: { code: 'WF2_ERROR', message } });
       return;
     }
@@ -2654,11 +2686,8 @@ const server = http.createServer(async (req, res) => {
         ok = n > 0;
         message = ok ? `${isEk ? 'EK' : 'VK'} korrigiert (${n} Zeile(n), go-forward)` : `Keine aktive ${isEk ? 'Charge' : 'Preiszeile'} für Produkt ${productId} gefunden`;
       } catch (err) { ok = false; message = `Korrektur fehlgeschlagen: ${err.message}`; }
-      const auditPath = path.join(__dirname, 'logs', 'economics-corrections.jsonl');
-      try {
-        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-        fs.appendFileSync(auditPath, `${JSON.stringify({ at: new Date().toISOString(), login: viewer.login, tenant: viewer.tenantId, field: isEk ? 'ek' : 'vk', product_id: productId, value: check.value, ok, message })}\n`, 'utf8');
-      } catch { /* Audit darf die Antwort nie kippen */ }
+      // #217 (flüchtiges Render-FS): Aktions-Audit in die DB-Senke (#213) statt JSONL.
+      auditAction(viewer, 'economics_correction_action', { field: isEk ? 'ek' : 'vk', product_id: productId, value: check.value, message }, ok ? 'ok' : 'denied');
       sendJson(res, ok ? 200 : (result ? 404 : 502), ok ? { ok, message, summary: result } : { ok, error: { code: 'CORRECTION_FAILED', message } });
       return;
     }
@@ -2721,11 +2750,8 @@ const server = http.createServer(async (req, res) => {
       }
       outcome.message = `${outcome.written_off_qty} Stk. ausgebucht (${check.reason}).`;
       const auditEntry = buildWriteOffAuditEntry(viewer, check, outcome);
-      const auditPath = path.join(__dirname, 'logs', 'writeoff-actions.jsonl');
-      try {
-        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
-      } catch { /* audit write failure must not block response */ }
+      // #217 (flüchtiges Render-FS): Aktions-Audit in die DB-Senke (#213) statt JSONL.
+      auditAction(viewer, 'writeoff_action', auditEntry);
       sendJson(res, 200, { ok: true, data: { batch_key: check.batch_key, product_id: outcome.product_id, written_off_qty: outcome.written_off_qty }, message: outcome.message });
       return;
     }
@@ -2783,11 +2809,8 @@ const server = http.createServer(async (req, res) => {
       }
       outcome.message = `Chargenrest auf ${outcome.new_qty} Stk. gesetzt (war ${outcome.previous_qty}).`;
       const auditEntry = buildInventoryCountAuditEntry(viewer, body, outcome);
-      const auditPath = path.join(__dirname, 'logs', 'inventory-count-actions.jsonl');
-      try {
-        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
-      } catch { /* audit write failure must not block response */ }
+      // #217 (flüchtiges Render-FS): Aktions-Audit in die DB-Senke (#213) statt JSONL.
+      auditAction(viewer, 'inventory_count_action', auditEntry);
       sendJson(res, 200, { ok: true, data: { batch_key: check.batch_key, product_id: outcome.product_id, previous_qty: outcome.previous_qty, new_qty: outcome.new_qty }, message: outcome.message });
       return;
     }
@@ -2939,11 +2962,8 @@ const server = http.createServer(async (req, res) => {
           ? `Charge nicht gefunden: ${body.batch_key}`
           : `Korrektur fehlgeschlagen: ${err.message}`;
       }
-      const auditPath = path.join(__dirname, 'logs', 'batch-ek-corrections.jsonl');
-      try {
-        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-        fs.appendFileSync(auditPath, `${JSON.stringify({ at: new Date().toISOString(), login: viewer.login, tenant: viewer.tenantId, batch_key: body.batch_key, new_unit_cost_net: check.value, run_id: runId, ok, message })}\n`, 'utf8');
-      } catch { /* Audit darf die Antwort nie kippen */ }
+      // #217 (flüchtiges Render-FS): Aktions-Audit in die DB-Senke (#213) statt JSONL.
+      auditAction(viewer, 'batch_ek_correction_action', { batch_key: body.batch_key, new_unit_cost_net: check.value, run_id: runId, message }, ok ? 'ok' : 'denied');
       sendJson(res, ok ? 200 : (result ? 404 : 502), ok ? { ok, message, summary: result } : { ok: false, error: { code: 'CORRECTION_FAILED', message } });
       return;
     }
@@ -3098,11 +3118,8 @@ const server = http.createServer(async (req, res) => {
         wfResult = { ok: false, status: status, status_ref: null, message: `Produktwechsel fehlgeschlagen: ${err.message}` };
       }
       const auditEntry = buildSlotChangeAuditEntry(viewer, payload, wfResult);
-      const auditPath = path.join(__dirname, 'logs', 'slot-change-actions.jsonl');
-      try {
-        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
-      } catch { /* audit write failure must not block response */ }
+      // #217 (flüchtiges Render-FS): Aktions-Audit in die DB-Senke (#213) statt JSONL.
+      auditAction(viewer, 'slot_change_action', auditEntry);
       sendJson(res, wfResult.ok ? 200 : (wfResult.status || 502), {
         ok: wfResult.ok,
         status_ref: auditEntry.status_ref,
@@ -4264,11 +4281,8 @@ const server = http.createServer(async (req, res) => {
         }
       }
       const auditEntry = buildCorrectionActionAuditEntry(viewer, payload, wfResult);
-      const auditPath = path.join(__dirname, 'logs', 'correction-actions.jsonl');
-      try {
-        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
-      } catch { /* audit write failure must not block response */ }
+      // #217 (flüchtiges Render-FS): Aktions-Audit in die DB-Senke (#213) statt JSONL.
+      auditAction(viewer, 'correction_action', auditEntry);
       sendJson(res, wfResult.ok ? 200 : 502, {
         ok: wfResult.ok,
         action_key: payload.action_key,
@@ -4400,11 +4414,8 @@ const server = http.createServer(async (req, res) => {
         wfResult = { ok: false, status_ref: null, message: `Abgleich fehlgeschlagen: ${err.message}` };
       }
       const auditEntry = buildAbgleichAuditEntry(viewer, payload, wfResult);
-      const auditPath = path.join(__dirname, 'logs', 'nayax-abgleich-actions.jsonl');
-      try {
-        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
-      } catch { /* audit write failure must not block response */ }
+      // #217 (flüchtiges Render-FS): Aktions-Audit in die DB-Senke (#213) statt JSONL.
+      auditAction(viewer, 'nayax_abgleich_action', auditEntry);
       sendJson(res, wfResult.ok ? 200 : 502, {
         ok: wfResult.ok,
         status_ref: auditEntry.status_ref,
@@ -4479,8 +4490,13 @@ const server = http.createServer(async (req, res) => {
         }
       }
       const auditEntry = buildOnboardingStartAuditEntry(viewer, payload, wfResult);
-      const auditPath = onboardingAuditPath();
+      // #217 (flüchtiges Render-FS): DB-Senke (#213) ist MASSGEBLICH (started-keys
+      // liest sie primär); die JSONL bleibt best-effort als Dev-Fallback ohne PG
+      // (Test-Isolation via DASHBOARD_ONBOARDING_AUDIT_LOG) — auf Render flüchtig
+      // und unkritisch, weil der Lesepfad die DB zuerst fragt.
+      auditAction(viewer, 'onboarding_start_action', auditEntry);
       try {
+        const auditPath = onboardingAuditPath();
         fs.mkdirSync(path.dirname(auditPath), { recursive: true });
         fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
       } catch { /* audit write failure must not block response */ }
@@ -4495,10 +4511,21 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (parsed.pathname === '/api/v2/onboarding/started-keys' && req.method === 'GET') {
-      const auditPath = onboardingAuditPath();
       const started_keys = [];
+      // #217: DB-Senke primär (audit.access_log überlebt das flüchtige Render-FS;
+      // der Schreibpfad läuft seit dieser Slice über auditAction). Historische
+      // JSONL-Einträge (Mini-Ära) werden zusätzlich gemergt — gleicher Vertrag.
       try {
-        const lines = fs.readFileSync(auditPath, 'utf8').split('\n').filter(Boolean);
+        if (infraPgQuery) {
+          const r = await infraPgQuery(
+            `SELECT DISTINCT details->>'product_key' AS pk FROM audit.access_log
+              WHERE event = 'onboarding_start_action'
+                AND details->>'ok' = 'true' AND details->>'product_key' IS NOT NULL`, []);
+          for (const row of r.rows) if (row.pk && !started_keys.includes(row.pk)) started_keys.push(row.pk);
+        }
+      } catch { /* DB optional (Dev ohne PG) */ }
+      try {
+        const lines = fs.readFileSync(onboardingAuditPath(), 'utf8').split('\n').filter(Boolean);
         for (const line of lines) {
           try {
             const entry = JSON.parse(line);
@@ -4602,11 +4629,8 @@ const server = http.createServer(async (req, res) => {
       }
 
       const auditEntry = buildSlotAssignAuditEntry(viewer, payload, wfResult);
-      const auditPath  = path.join(__dirname, 'logs', 'slot-assign-actions.jsonl');
-      try {
-        fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-        fs.appendFileSync(auditPath, `${JSON.stringify(auditEntry)}\n`, 'utf8');
-      } catch { /* non-blocking */ }
+      // #217 (flüchtiges Render-FS): Aktions-Audit in die DB-Senke (#213) statt JSONL.
+      auditAction(viewer, 'slot_assign_action', auditEntry);
 
       sendJson(res, wfResult.ok ? 200 : 502, {
         ok:         wfResult.ok,
@@ -4655,9 +4679,15 @@ const server = http.createServer(async (req, res) => {
     const filePath = path.normalize(path.join(PUBLIC_DIR, requestPath));
     sendFile(res, filePath);
   } catch (error) {
+    // #217: unbehandelte Endpunkt-Fehler zentral erfassen (No-op ohne SENTRY_DSN).
+    try { require('./lib/sentry-lite.js').getSentry().captureException(error, { endpoint: parsed && parsed.pathname, method: req.method }); } catch { /* nie werfen */ }
     sendJson(res, 500, { error: error.message, stack: error.stack });
   }
 });
+
+// #217: Prozessweite Fehler (uncaughtException/unhandledRejection) an Sentry —
+// No-op ohne SENTRY_DSN; bestehendes Log-/Crash-Verhalten bleibt unangetastet.
+try { require('./lib/sentry-lite.js').getSentry().installProcessHandlers(); } catch { /* nie werfen */ }
 
 server.listen(PORT, async () => {
   // #127: Mandanten-Registry VOR dem Ready-Signal laden. Der Server lauscht bereits;

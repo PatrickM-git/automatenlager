@@ -1,37 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-217-render.md`.
-
-## Session 2026-06-12 — #217 (Slice 3: Backend + Jobs → Render) CODE KOMPLETT
-
-> Runbook: `docs/cloud-migration/slice-3-backend-render-runbook.md`.
-> **Code + lokaler Live-Smoke fertig; der eigentliche Render-Deploy + die
-> pg_cron-Aktivierung sind Betreiber-Schritte (Render-Account-Grenze) — Schritte
-> im Runbook §"Aktivierung in der Cloud".**
-
-### Was steht (verifiziert: Unit + Spawned + lokaler Live-Smoke gegen Supabase)
-- **Geschützte Job-Trigger** `lib/job-triggers.js` + `POST /internal/jobs/<key>`:
-  ohne WORKER_TRIGGER_SECRET tot (404), falsch/fehlend ⇒ 401 (timing-safe), nur
-  POST (405), unbekannt ⇒ 404, richtig ⇒ 202 + Lauf async (Telemetrie in
-  audit.workflow_runs). Worker lazy gebaut (runJobNow, kein Scheduler). Kein CORS.
-- **Sentry-lite** `lib/sentry-lite.js` (kein npm-Dep, fetch, wirft nie) in
-  server.js (500 + Prozess-Handler) und worker.js (Job-Fehler je Tick). No-op
-  ohne SENTRY_DSN.
-- **Flüchtiges FS:** alle 11 Aktions-JSONL-Schreibpfade → DB-Senke audit.access_log
-  (auditAction); /onboarding/started-keys liest primär die DB.
-- **Deploy-Artefakte:** deploy/render/render.yaml (Web-Service Frankfurt, Health,
-  Secrets sync:false/generateValue), deploy/render/pgcron-setup.sql (pg_cron→pg_net,
-  idempotent, Job-Keys gegen worker.js verifiziert: claude-proposals/wf9-pickliste!).
-- **Live-Smoke:** lokaler server.js gegen Supabase, POST /internal/jobs/wf-matview-refresh
-  ⇒ 401/401/202/404 + frische workflow_runs-Zeile success. Suite 1417/1417.
-
-### Offen (Betreiber, Render-Account-Grenze)
-1. Render → Blueprint (render.yaml), Secrets eintragen, WORKER_TRIGGER_SECRET kopieren.
-2. /health Cloud prüfen.
-3. Supabase: pg_cron+pg_net `create extension`, dann pgcron-setup.sql mit RENDER_URL +
-   Secret. cron.job_run_details + workflow_runs als Live-Smoke.
-- Backup-Job auf Render bewusst aus (flüchtiges FS); läuft weiter auf dem Mini.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-216-backup.md`.
 
 ## Session 2026-06-12 — #216 (Off-Site-Backup Supabase) KOMPLETT + LIVE AUF DEM MINI
 
@@ -105,14 +75,13 @@
    Passwortmanager). Referenz dokumentiert in `dashboard/.env.example`.
 
 ## Offene Issues (Stand Sessionende)
-- **#218–#219** Cloud-Slices (Cloudflare → Cutover); #217 Render-Deploy = Betreiber-Schritt. **#227**
+- **#217–#219** Cloud-Slices (Render → Cloudflare → Cutover). **#227**
   Worker-env-Bug (klein). **#198/#206** WF3/WF1-Cutover-Reste. **#164** n8n-Abschluss-
   Cleanup. **#210/#211** GuV-EK/MwSt-Datenbugs. **#108/#111**.
 
 ## Nächster Schritt
-1. **#218 (Slice 4 — Frontend → Cloudflare):** public/v3.* über Cloudflare
-   Pages/Workers ausliefern; API-Calls auf die Render-Backend-Domain; CORS/TLS;
-   Supabase Auth URL-Configuration (SITE_URL/Redirect, hängt an der Domain).
-2. **#217 Render-Deploy (Betreiber):** Blueprint + pg_cron-Aktivierung (Runbook §Aktivierung).
-3. Danach #219 (Cutover).
-4. **Beobachten:** `backup-supabase` (03:15) + `wf3-nayax-reconcile`.
+1. **#217 (Slice 3 — Backend + Jobs → Render):** server.js als Render-Web-Service,
+   Trigger-Endpunkte `/internal/jobs/<key>` mit `WORKER_TRIGGER_SECRET` (timing-safe),
+   pg_cron+pg_net-Schedules in Supabase, flüchtiges FS auflösen, Sentry.
+2. Danach #218 (Cloudflare), #219 (Cutover).
+3. **Beobachten:** erster geplanter `backup-supabase`-Lauf (03:15) + `wf3-nayax-reconcile`.

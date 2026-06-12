@@ -75,7 +75,12 @@ function createWorker({ schedules = [], recorder, cron, logger } = {}) {
     return recorder.recordRun(s.name, s.run);
   }
   function tick(name) {
-    return runOnce(name).catch((err) => log(`Job "${name}" fehlgeschlagen:`, err && err.message));
+    return runOnce(name).catch((err) => {
+      log(`Job "${name}" fehlgeschlagen:`, err && err.message);
+      // #217: Job-Fehler zentral erfassen (No-op ohne SENTRY_DSN); zusätzlich
+      // zur Telemetrie (audit.workflow_runs status=error via recordRun).
+      try { require('./lib/sentry-lite.js').getSentry().captureException(err, { job: name, source: 'worker' }); } catch { /* nie werfen */ }
+    });
   }
 
   function start() {
@@ -410,6 +415,8 @@ function buildWorker(env = process.env) {
 
 async function main() {
   const args = process.argv.slice(2);
+  // #217: Prozessweite Fehler an Sentry (No-op ohne SENTRY_DSN).
+  try { require('./lib/sentry-lite.js').getSentry().installProcessHandlers(); } catch { /* nie werfen */ }
   const { worker, deps } = buildWorker();
   const cleanup = async () => {
     try { if (deps.directory) deps.directory.stop(); } catch { /* */ }
