@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#F6F3EC" />
+  <title>Anmelden · Faltrix</title>
+  <meta name="robots" content="noindex" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="/v3.css" />
+  <style>
+    /* #215: bewusst minimale Login-Wand im v3-Look — ordentliches Login-Design
+       ist als technische Schuld für Phase C (Marketing) vorgemerkt (SPEC). */
+    .login-wrap { min-height: 100svh; display: grid; place-items: center; padding: 24px; }
+    .login-card { width: 100%; max-width: 400px; background: var(--v3-surface, #fff);
+      border: 1px solid rgba(0,0,0,.08); border-radius: 18px; padding: 28px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.06); }
+    .login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .login-brand img { width: 42px; height: 42px; border-radius: 10px; }
+    .login-brand strong { font-family: 'Bricolage Grotesque', sans-serif; font-size: 1.3rem; }
+    .login-card h1 { font-size: 1.05rem; margin: 0 0 14px; }
+    .login-field { display: block; margin-bottom: 12px; }
+    .login-field span { display: block; font-size: .85rem; margin-bottom: 4px; opacity: .75; }
+    .login-field input { width: 100%; box-sizing: border-box; padding: 10px 12px;
+      border: 1px solid rgba(0,0,0,.16); border-radius: 10px; font: inherit; }
+    .login-btn { width: 100%; padding: 11px 14px; border: 0; border-radius: 999px;
+      background: #1f2937; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    .login-btn[disabled] { opacity: .6; cursor: wait; }
+    .login-msg { min-height: 1.2em; font-size: .85rem; margin: 10px 0 0; }
+    .login-msg.err { color: #b91c1c; }
+    .login-msg.ok { color: #047857; }
+    .login-aux { margin-top: 14px; font-size: .85rem; text-align: center; }
+    .login-aux a { color: inherit; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body class="v3">
+  <div class="login-wrap">
+    <main class="login-card" aria-labelledby="login-title">
+      <div class="login-brand">
+        <img src="/faltrix-logo.jpg" alt="" aria-hidden="true">
+        <strong>Faltrix</strong>
+      </div>
+
+      <!-- Anmelden -->
+      <form id="form-login">
+        <h1 id="login-title">Anmelden</h1>
+        <label class="login-field"><span>E-Mail</span>
+          <input type="email" id="login-email" autocomplete="username" required></label>
+        <label class="login-field"><span>Passwort</span>
+          <input type="password" id="login-password" autocomplete="current-password" required></label>
+        <button class="login-btn" id="login-submit" type="submit">Anmelden</button>
+        <p class="login-msg" id="login-msg" role="alert"></p>
+        <p class="login-aux"><a href="#" id="link-reset">Passwort vergessen?</a></p>
+      </form>
+
+      <!-- Passwort-Reset anfordern -->
+      <form id="form-reset" class="hidden">
+        <h1>Passwort zurücksetzen</h1>
+        <label class="login-field"><span>E-Mail</span>
+          <input type="email" id="reset-email" autocomplete="username" required></label>
+        <button class="login-btn" type="submit">Reset-Link senden</button>
+        <p class="login-msg" id="reset-msg" role="alert"></p>
+        <p class="login-aux"><a href="#" id="link-back">Zurück zur Anmeldung</a></p>
+      </form>
+
+      <!-- Neues Passwort setzen (Recovery-Link aus der E-Mail) -->
+      <form id="form-recover" class="hidden">
+        <h1>Neues Passwort setzen</h1>
+        <label class="login-field"><span>Neues Passwort</span>
+          <input type="password" id="recover-password" autocomplete="new-password" minlength="8" required></label>
+        <button class="login-btn" type="submit">Passwort speichern</button>
+        <p class="login-msg" id="recover-msg" role="alert"></p>
+      </form>
+    </main>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+    var cfg = null;
+
+    function $(id) { return document.getElementById(id); }
+    function show(formId) {
+      ['form-login', 'form-reset', 'form-recover'].forEach(function (f) {
+        $(f).classList.toggle('hidden', f !== formId);
+      });
+    }
+    function msg(id, text, kind) {
+      var el = $(id); el.textContent = text || '';
+      el.className = 'login-msg' + (kind ? ' ' + kind : '');
+    }
+    function authFetch(path, body, bearer) {
+      return fetch(cfg.supabaseUrl + '/auth/v1' + path, {
+        method: body === undefined ? 'GET' : (bearer ? 'PUT' : 'POST'),
+        headers: Object.assign(
+          { 'apikey': cfg.anonKey, 'Content-Type': 'application/json' },
+          bearer ? { 'Authorization': 'Bearer ' + bearer } : {}),
+        body: body === undefined ? undefined : JSON.stringify(body),
+      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); });
+    }
+    function storeSession(s) {
+      localStorage.setItem('sb_access_token', s.access_token);
+      localStorage.setItem('sb_refresh_token', s.refresh_token || '');
+    }
+
+    // Recovery-Fragment aus dem Supabase-Mail-Link (#access_token=…&type=recovery).
+    var frag = {};
+    String(location.hash || '').replace(/^#/, '').split('&').forEach(function (kv) {
+      var i = kv.indexOf('='); if (i > 0) frag[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
+    });
+
+    fetch('/api/v2/auth/config').then(function (r) { return r.json(); }).then(function (c) {
+      cfg = c;
+      if (c.mode !== 'supabase' || !c.supabaseUrl) { location.replace('/v3'); return; }
+      if (frag.type === 'recovery' && frag.access_token) show('form-recover');
+    });
+
+    $('link-reset').addEventListener('click', function (e) { e.preventDefault(); show('form-reset'); });
+    $('link-back').addEventListener('click', function (e) { e.preventDefault(); show('form-login'); });
+
+    $('form-login').addEventListener('submit', function (e) {
+      e.preventDefault();
+      $('login-submit').disabled = true;
+      msg('login-msg', '');
+      authFetch('/token?grant_type=password', {
+        email: $('login-email').value.trim(),
+        password: $('login-password').value,
+      }).then(function (r) {
+        if (r.ok && r.body && r.body.access_token) {
+          storeSession(r.body);
+          location.replace('/v3');
+        } else {
+          msg('login-msg', (r.body && (r.body.error_description || r.body.msg)) || 'Anmeldung fehlgeschlagen.', 'err');
+        }
+      }).catch(function () { msg('login-msg', 'Netzwerkfehler — bitte erneut versuchen.', 'err'); })
+        .finally(function () { $('login-submit').disabled = false; });
+    });
+
+    $('form-reset').addEventListener('submit', function (e) {
+      e.preventDefault();
+      msg('reset-msg', '');
+      authFetch('/recover', {
+        email: $('reset-email').value.trim(),
+        // Supabase hängt das Recovery-Token als Fragment an diese Seite an.
+        redirect_to: location.origin + '/login',
+      }).then(function (r) {
+        if (r.ok) msg('reset-msg', 'Wenn die E-Mail existiert, ist ein Reset-Link unterwegs.', 'ok');
+        else msg('reset-msg', (r.body && (r.body.error_description || r.body.msg)) || 'Reset fehlgeschlagen.', 'err');
+      }).catch(function () { msg('reset-msg', 'Netzwerkfehler — bitte erneut versuchen.', 'err'); });
+    });
+
+    $('form-recover').addEventListener('submit', function (e) {
+      e.preventDefault();
+      msg('recover-msg', '');
+      authFetch('/user', { password: $('recover-password').value }, frag.access_token).then(function (r) {
+        if (r.ok) {
+          msg('recover-msg', 'Passwort gesetzt — bitte neu anmelden.', 'ok');
+          location.hash = '';
+          setTimeout(function () { show('form-login'); }, 900);
+        } else {
+          msg('recover-msg', (r.body && (r.body.error_description || r.body.msg)) || 'Setzen fehlgeschlagen.', 'err');
+        }
+      }).catch(function () { msg('recover-msg', 'Netzwerkfehler — bitte erneut versuchen.', 'err'); });
+    });
+  })();
+  </script>
+</body>
+</html>

@@ -10,6 +10,62 @@
 
   var BASE = '/v3';
 
+  /* ---- #215 Auth-Naht (supabase-Mode): Token an alle same-origin-Calls ---- */
+  // Fetch-Shim: hängt das Supabase-Access-Token als Authorization-Header an
+  // jede same-origin-API-Anfrage. Im tailscale-Mode existiert kein Token im
+  // localStorage ⇒ der Shim ist ein No-op (Doppelpfad ohne Code-Stichtag).
+  (function authFetchShim() {
+    var origFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      try {
+        var u = typeof input === 'string' ? input : ((input && input.url) || '');
+        var sameOrigin = u.indexOf('/') === 0 && u.indexOf('//') !== 0;
+        var token = localStorage.getItem('sb_access_token');
+        if (sameOrigin && token) {
+          init = init || {};
+          var h = new Headers(init.headers || {});
+          if (!h.has('Authorization')) h.set('Authorization', 'Bearer ' + token);
+          init.headers = h;
+        }
+      } catch (e) { /* Shim darf nie einen Request verhindern */ }
+      return origFetch(input, init);
+    };
+  })();
+
+  // Login-Wand: Im supabase-Mode ohne (gültiges) Token zur Login-Seite. Ein
+  // abgelaufenes Token wird einmal still über den Refresh-Token erneuert.
+  (function authGuard() {
+    function tokenExpired(token) {
+      try {
+        var p = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        return !p.exp || (p.exp * 1000) < (Date.now() + 30000);
+      } catch (e) { return true; }
+    }
+    fetch('/api/v2/auth/config').then(function (r) { return r.json(); }).then(function (cfg) {
+      if (!cfg || cfg.mode !== 'supabase') return; // tailscale-Mode: nichts tun
+      var token = localStorage.getItem('sb_access_token');
+      if (token && !tokenExpired(token)) return;
+      var refresh = localStorage.getItem('sb_refresh_token');
+      if (token && refresh && cfg.supabaseUrl) {
+        fetch(cfg.supabaseUrl + '/auth/v1/token?grant_type=refresh_token', {
+          method: 'POST',
+          headers: { 'apikey': cfg.anonKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refresh }),
+        }).then(function (r) { return r.json(); }).then(function (s) {
+          if (s && s.access_token) {
+            localStorage.setItem('sb_access_token', s.access_token);
+            localStorage.setItem('sb_refresh_token', s.refresh_token || refresh);
+            location.reload(); // Daten mit frischem Token neu laden
+          } else {
+            location.replace('/login');
+          }
+        }).catch(function () { location.replace('/login'); });
+      } else {
+        location.replace('/login');
+      }
+    }).catch(function () { /* Config nicht erreichbar: kein Redirect-Loop */ });
+  })();
+
   /* ---- Icons (schlanke Inline-SVGs, framework-frei) --------------------- */
   function icon(paths) {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +

@@ -36,6 +36,7 @@ const { buildProductCatalog } = require('./lib/product-catalog.js');
 const { queryEconomicsScopePg } = require('./lib/automaten-view.js');
 const { queryEconomicsLivePg } = require('./lib/economics-live.js');
 const { resolveViewer, objectAccessAllowed, breakGlassDecision, crossTenantAccess } = require('./lib/auth.js');
+const { resolveAuthMode, extractBearerToken, identityLogin, verifySupabaseJwt } = require('./lib/supabase-auth.js'); // #215: Auth-Naht (Doppelpfad)
 const { createAuditLogWriter, dbAuditEnabled } = require('./lib/audit-log.js'); // #213: Audit-Trail → DB (audit.access_log)
 const { createTenantDirectory } = require('./lib/tenant-directory.js');
 const { createTenantDb } = require('./lib/tenant-db.js');
@@ -247,9 +248,17 @@ function dashboardConfig() {
 // lib/auth.js (rein/testbar); hier nur das Extrahieren der Request-Felder.
 // req.socket.remoteAddress ist die nicht-fälschbare Quelladresse (Basis für F1
 // und den Loopback-Dev-Notausgang) — bewusst NICHT der spoofbare Host-Header.
+// #215 (Auth-Naht, Doppelpfad): Im supabase-Mode kommt die Identität AUSSCHLIESSLICH
+// aus dem am Handler-Eingang verifizierten JWT (req._jwtEmail) — der aus dem offenen
+// Internet spoofbare Tailscale-Header wird dort NIE verwendet. Im tailscale-Mode
+// (Default, Mini) bleibt alles unverändert.
 function getViewer(req) {
   return resolveViewer({
-    login: req.headers['tailscale-user-login'],
+    login: identityLogin({
+      authMode: req._authMode || 'tailscale',
+      jwtEmail: req._jwtEmail || null,
+      tailscaleLogin: req.headers['tailscale-user-login'],
+    }),
     remoteAddress: req.socket && req.socket.remoteAddress,
     host: req.headers.host,
     env: process.env,
@@ -452,6 +461,37 @@ function dashboardV2AppPgUrl() {
   const local = loadLocalEnv();
   const fromLocal = String((local && local.DASHBOARD_V2_APP_PG_URL) || '').trim();
   return fromLocal || dashboardV2PgUrl();
+}
+
+// #215 (Auth-Naht): Supabase-Auth-Konfiguration. Prozess-Umgebung hat Vorrang
+// vor .env.local (gleiches Muster wie die PG-URLs). Der Issuer ist deterministisch
+// `${SUPABASE_URL}/auth/v1`; die JWKS-URL ist daraus abgeleitet und nur für
+// Tests/Sonderfälle überschreibbar. anonKey ist der ÖFFENTLICHE Browser-Key
+// (kein Secret) — er geht über /api/v2/auth/config ans Login-Frontend.
+function supabaseAuthSettings() {
+  const pe = process.env;
+  const local = loadLocalEnv();
+  const pick = (key) => (Object.prototype.hasOwnProperty.call(pe, key)
+    ? String(pe[key] || '').trim()
+    : String((local && local[key]) || '').trim());
+  const supabaseUrl = pick('SUPABASE_URL').replace(/\/+$/, '');
+  return {
+    mode: resolveAuthMode({ DASHBOARD_AUTH_MODE: pick('DASHBOARD_AUTH_MODE') }),
+    supabaseUrl,
+    anonKey: pick('SUPABASE_ANON_KEY'),
+    issuer: supabaseUrl ? `${supabaseUrl}/auth/v1` : '',
+    jwksUrl: pick('SUPABASE_JWKS_URL') || (supabaseUrl ? `${supabaseUrl}/auth/v1/.well-known/jwks.json` : ''),
+  };
+}
+
+// #215: Identität aus dem Supabase-JWT auflösen (nur im supabase-Mode relevant).
+// Läuft EINMAL pro Request am Handler-Eingang (async); getViewer bleibt synchron
+// und liest das Ergebnis aus req._jwtEmail. Jeder Fehler ⇒ null (Default-Deny).
+async function resolveJwtIdentity(req, auth) {
+  const token = extractBearerToken(req.headers);
+  if (!token || !auth.issuer) return null;
+  const r = await verifySupabaseJwt(token, { issuer: auth.issuer, jwksUrl: auth.jwksUrl });
+  return r.valid && r.email ? r.email : null;
 }
 
 const infraPgPool = buildPgPool(dashboardV2PgUrl());
@@ -2196,6 +2236,18 @@ function sendFile(res, filePath) {
 
 const server = http.createServer(async (req, res) => {
   req._requestId = crypto.randomUUID(); // #117: per-Request-id für Audit-Korrelation (#118)
+  // #215 (Auth-Naht): Identitäts-Quelle EINMAL pro Request bestimmen, VOR jedem
+  // getViewer-Aufruf (auch dem Break-Glass-Vorschritt). Im supabase-Mode wird das
+  // Bearer-JWT gegen die Projekt-JWKS verifiziert; Fehler ⇒ keine Identität.
+  const authSettings = supabaseAuthSettings();
+  req._authMode = authSettings.mode;
+  if (req._authMode === 'supabase') {
+    try {
+      req._jwtEmail = await resolveJwtIdentity(req, authSettings);
+    } catch {
+      req._jwtEmail = null; // Default-Deny — verifySupabaseJwt wirft eigentlich nie
+    }
+  }
   // A1-Performance: gzip-/Conditional-GET-Kontext pro Request (transparent; ändert
   // kein Verhalten — greift nur, wenn der Client Accept-Encoding/If-None-Match sendet).
   res._acceptsGzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''));
@@ -2237,6 +2289,15 @@ const server = http.createServer(async (req, res) => {
     if (parsed.pathname === '/api/v2/viewer') {
       const viewer = getViewer(req);
       sendJson(res, 200, { ok: true, viewer: viewerPublic(viewer) });
+      return;
+    }
+
+    // #215 (Auth-Naht): öffentliche Login-Konfiguration fürs Frontend. Der anonKey
+    // ist Supabases öffentlicher Browser-Key (by design kein Secret); mode steuert,
+    // ob das Frontend die Login-Wand zeigt (supabase) oder wie bisher läuft (tailscale).
+    if (parsed.pathname === '/api/v2/auth/config') {
+      const auth = supabaseAuthSettings();
+      sendJson(res, 200, { ok: true, mode: auth.mode, supabaseUrl: auth.supabaseUrl, anonKey: auth.anonKey });
       return;
     }
 
@@ -4586,9 +4647,11 @@ const server = http.createServer(async (req, res) => {
 
     const requestPath = parsed.pathname === '/v1'
       ? '/index.html'
-      : isV3DeepLink
-        ? '/v3.html'
-        : parsed.pathname;
+      : parsed.pathname === '/login' // #215: Login-Wand (Auth-Naht, supabase-Mode)
+        ? '/login.html'
+        : isV3DeepLink
+          ? '/v3.html'
+          : parsed.pathname;
     const filePath = path.normalize(path.join(PUBLIC_DIR, requestPath));
     sendFile(res, filePath);
   } catch (error) {

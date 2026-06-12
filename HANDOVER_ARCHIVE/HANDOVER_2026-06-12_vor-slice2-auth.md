@@ -1,28 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-slice2-auth.md`.
-
-## Session 2026-06-12 — #215 (Slice 2: Auth-Naht) KOMPLETT
-
-> Identität kommt jetzt (per Env-Schalter) aus einem serverseitig verifizierten
-> Supabase-JWT statt aus dem Tailscale-Header; Mandanten-Tür/RLS unverändert.
-> **Runbook: `docs/cloud-migration/slice-2-auth-naht-runbook.md`.**
-
-### Was steht (verifiziert: Unit + Spawned + E2E gegen echtes Supabase + Browser-QA)
-- **`lib/supabase-auth.js`:** ES256-JWT-Verifikation gegen Projekt-JWKS (kein Secret,
-  keine neuen Deps); iss/aud/exp + Signatur; alg-Downgrade abgelehnt; wirft nie.
-- **Doppelpfad `DASHBOARD_AUTH_MODE`** (leer/tailscale = Mini wie bisher; supabase =
-  NUR JWT, Spoof-Header wirkungslos). getViewer bleibt synchron (req._jwtEmail am
-  Handler-Eingang). Neu: GET /api/v2/auth/config, /login (minimale v3-Login-Seite
-  mit Reset/Recovery), Fetch-Shim + Login-Wand in v3.js.
-- **E2E:** echter Login (REST) ⇒ viewer eigentuemer/t_faltrix gegen die Supabase-DB;
-  Default-Deny + Break-Glass (404/403/ignore) bewiesen; Browser-QA grün. Suite 1398/1398.
-- **Provisioniert:** Auth-User patrickmatthes2609@gmail.com (QA-Passwort in .env.local —
-  Betreiber soll es per Reset-Flow ersetzen); Keys (publishable/secret) in .env.local.
-- **Offen (Domain-abhängig, → #218/#219):** Supabase Auth URL-Configuration (SITE_URL +
-  Redirect-Allowlist) — Reset-Mail-Link braucht die finale Domain. 2FA-Enroll-UI bewusst
-  nicht gebaut (Phase C). lantspeku@gmail.com hat noch keinen Auth-User.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-slice1-supabase.md`.
 
 ## Session 2026-06-12 — #214 (Slice 1: DB → Supabase) KOMPLETT
 
@@ -64,11 +43,15 @@
    Passwortmanager). Referenz dokumentiert in `dashboard/.env.example`.
 
 ## Offene Issues (Stand Sessionende)
-- **#216–#219** Cloud-Slices (Off-Site-Backup → Render → Cloudflare → Cutover). **#227**
+- **#215–#219** Cloud-Slices 2–5 (#215 Auth-Naht ist durch #214 entblockt). **#227**
   Worker-env-Bug (klein). **#198/#206** WF3/WF1-Cutover-Reste. **#164** n8n-Abschluss-
   Cleanup. **#210/#211** GuV-EK/MwSt-Datenbugs. **#108/#111**.
 
 ## Nächster Schritt
-1. **#216 (Off-Site-Backup):** geplanter pg_dump der Supabase-DB + Alarm bei Fehler.
-2. Danach #217 (Render), #218 (Cloudflare), #219 (Cutover).
+1. **#215 (Slice 2 — Auth-Naht):** Supabase Auth aktivieren; `resolveViewer` um den
+   JWT-Pfad erweitern (Signaturprüfung gegen Supabase JWKS), Mapping über `tenant_users`
+   unverändert; Doppelpfad Tailscale/JWT per Env-Schalter; minimaler v3-Login.
+   Benötigt: `SUPABASE_URL`/`SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY` aus dem
+   Supabase-Dashboard (Settings → API) in `.env.local`.
+2. Danach #216 (Off-Site-Backup), #217 (Render), #218 (Cloudflare), #219 (Cutover).
 3. **Beobachten:** `wf3-nayax-reconcile`-Läufe in `audit.workflow_runs`.
