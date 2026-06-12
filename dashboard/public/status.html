@@ -80,18 +80,30 @@
       var ov = document.getElementById('overall');
       ov.className = 'st-overall ' + s.overall;
       document.getElementById('overall-text').textContent = LABELS[s.overall] || s.overall;
-      document.getElementById('platform').innerHTML =
-        row('Backend (API)', s.components.backend.status,
-            s.components.backend.tenantDirectoryReady ? 'Mandanten-Registry bereit' : 'Registry nicht bereit')
-        + row('Datenbank', s.components.database.status,
-            s.components.database.pgConfigured ? 'verbunden' : 'nicht konfiguriert');
-      document.getElementById('jobs').innerHTML =
-        s.components.jobs.map(function (j) { return row(j.label, j.status, ageText(j)); }).join('');
+      // Audit M3: Details (components) gibt es nur für eingeloggte Betreiber.
+      // Anonym liefert das Backend nur die Ampel ⇒ keine Job-Internas anzeigen.
+      if (s.components) {
+        document.getElementById('platform').innerHTML =
+          row('Backend (API)', s.components.backend.status,
+              s.components.backend.tenantDirectoryReady ? 'Mandanten-Registry bereit' : 'Registry nicht bereit')
+          + row('Datenbank', s.components.database.status,
+              s.components.database.pgConfigured ? 'verbunden' : 'nicht konfiguriert');
+        document.getElementById('jobs').innerHTML =
+          s.components.jobs.map(function (j) { return row(j.label, j.status, ageText(j)); }).join('');
+      } else {
+        document.getElementById('platform').innerHTML = '';
+        document.getElementById('jobs').innerHTML =
+          '<div class="st-row"><div class="meta">Detailansicht nur nach Anmeldung sichtbar.</div></div>';
+      }
       document.getElementById('foot').textContent = 'Stand: ' + new Date(s.generatedAt).toLocaleString('de-DE');
     }
 
     function load() {
-      fetch(API_BASE + '/api/v2/status').then(function (r) { return r.json(); }).then(render).catch(function () {
+      // Token (falls eingeloggt) mitschicken ⇒ Betreiber sieht die Details;
+      // ohne Token bekommt man nur die öffentliche Ampel.
+      var headers = {};
+      try { var t = localStorage.getItem('sb_access_token'); if (t) headers.Authorization = 'Bearer ' + t; } catch (e) { /* egal */ }
+      fetch(API_BASE + '/api/v2/status', { headers: headers }).then(function (r) { return r.json(); }).then(render).catch(function () {
         var ov = document.getElementById('overall');
         ov.className = 'st-overall down';
         document.getElementById('overall-text').textContent = 'Status nicht erreichbar';

@@ -1,0 +1,18 @@
+# Sicherheit (Audit H3, 2026-06-12): NIE Secrets/Host-Artefakte ins Docker-Image.
+# Gilt für den Mini-Build (Build-Context = dashboard/, dashboard/Dockerfile).
+
+# Geheimnisse (.example ist Doku, kein Secret)
+.env
+.env.*
+!.env.example
+!.env.connections.example
+
+# Host-Artefakte (werden im Image via `npm ci` neu erzeugt; zur Laufzeit
+# liefert der Bind-Mount auf dem Mini die echten node_modules)
+node_modules
+
+# Daten/Logs/Backups
+*.dump
+logs/
+*.log
+.dashboard-config.json

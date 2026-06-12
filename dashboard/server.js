@@ -398,11 +398,31 @@ function clean(value) {
 // slot-assign-inline/confirm-Endpunkt bereits verwendet, war aber nie definiert —
 // der Body kam dort immer als {} an [latenter Bug]; #133 zieht ihn nach, weil das
 // Autorisierungs-Tor die machine_id aus dem Body braucht.)
-function readJsonBody(req) {
+// Sicherheit (Audit, 2026-06-12): HARTES Größenlimit gegen Body-Flooding-DoS.
+// JSON-Payloads dieser API sind klein (< einige KB) ⇒ 1 MB ist großzügig. Ohne
+// Limit könnte ein riesiger Body den Speicher fluten und den Prozess killen.
+// Bei Überschreitung: Verbindung kappen + ablehnen (Aufrufer fangen ab ⇒ leerer
+// Body ⇒ Validierung schlägt fehl).
+const JSON_BODY_LIMIT_BYTES = 1 * 1024 * 1024;
+function readJsonBody(req, maxBytes = JSON_BODY_LIMIT_BYTES) {
   return new Promise((resolve, reject) => {
     let data = '';
-    req.on('data', (chunk) => { data += chunk; });
-    req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(e); } });
+    let size = 0;
+    let aborted = false;
+    req.on('data', (chunk) => {
+      if (aborted) return;
+      size += chunk.length;
+      if (size > maxBytes) {
+        aborted = true;
+        const err = new Error(`Body groesser als ${maxBytes} Bytes.`);
+        err.code = 'BODY_TOO_LARGE';
+        reject(err);
+        req.destroy();
+        return;
+      }
+      data += chunk;
+    });
+    req.on('end', () => { if (aborted) return; try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(e); } });
     req.on('error', reject);
   });
 }
@@ -477,7 +497,17 @@ function supabaseAuthSettings() {
     : String((local && local[key]) || '').trim());
   const supabaseUrl = pick('SUPABASE_URL').replace(/\/+$/, '');
   return {
-    mode: resolveAuthMode({ DASHBOARD_AUTH_MODE: pick('DASHBOARD_AUTH_MODE') }),
+    // C1 (Audit 2026-06-12): Cloud-Kontext erzwingt fail-closed den supabase-
+    // Modus (nie Header-Auth im offenen Internet). Das maßgebliche „wir sind in
+    // der Cloud"-Signal ist die PROZESS-Umgebung `process.env.SUPABASE_URL` (von
+    // Render gesetzt) — NICHT der .env.local-Fallback, der nur lokaler Dev-/Mini-
+    // Komfort ist. So greift der Riegel in der echten Cloud (Render-Env), ohne
+    // den Mini/lokale Tailscale-Tests fälschlich umzuschalten. Der explizite
+    // `DASHBOARD_AUTH_MODE=supabase` (env ODER .env.local) wirkt unabhängig davon.
+    mode: resolveAuthMode({
+      DASHBOARD_AUTH_MODE: pick('DASHBOARD_AUTH_MODE'),
+      SUPABASE_URL: String(process.env.SUPABASE_URL || '').trim(),
+    }),
     supabaseUrl,
     anonKey: pick('SUPABASE_ANON_KEY'),
     issuer: supabaseUrl ? `${supabaseUrl}/auth/v1` : '',
@@ -865,6 +895,17 @@ function safeFileName(value) {
   return path.basename(normalized);
 }
 
+// Sicherheit (Audit L1): echten Dateityp aus den Magic Bytes erkennen
+// (inhaltsbasiert, nicht aus dem fälschbaren Header/Namen). Nur die in dieser
+// App erlaubten Typen — alles andere ⇒ null ⇒ Upload abgelehnt. KEIN SVG/HTML/JS.
+function detectFileType(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 4) return null;
+  if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) return 'application/pdf'; // %PDF
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image/png';       // \x89PNG
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';                          // JPEG SOI
+  return null;
+}
+
 function validateV2Upload(targetConfig, parsedForm, routeTarget) {
   const formTarget = clean(parsedForm.fields.target).toLowerCase();
   if (formTarget && formTarget !== routeTarget) {
@@ -917,6 +958,19 @@ function validateV2Upload(targetConfig, parsedForm, routeTarget) {
     const error = new Error(`${targetConfig.label}-Datei ist zu gross (max. ${targetConfig.maxBytes} Bytes).`);
     error.code = 'FILE_TOO_LARGE';
     error.status = 413;
+    throw error;
+  }
+
+  // Sicherheit (Audit L1, 2026-06-12): INHALTSBASIERTER Typ-Check (Magic Bytes) —
+  // ZULETZT (nach den billigen Größen-Checks). Dateiname-Endung UND Content-Type-
+  // Header sind beide client-fälschbar; ein Angreifer könnte eine Schaddatei als
+  // „rechnung.pdf, application/pdf" deklarieren. Der echte Dateianfang muss zu
+  // einem erlaubten Typ passen (PDF/PNG/JPEG) — kein SVG/HTML/JS/Skript.
+  const sniffed = detectFileType(file.data);
+  if (!sniffed || !targetConfig.allowedMimeTypes.includes(sniffed)) {
+    const error = new Error(`${targetConfig.label}-Upload: Dateiinhalt passt zu keinem erlaubten Typ (erwartet ${targetConfig.allowedMimeTypes.join('/')}).`);
+    error.code = 'FILE_CONTENT_MISMATCH';
+    error.status = 422;
     throw error;
   }
 
@@ -2274,8 +2328,23 @@ function corsAllowedOrigins() {
   return parseAllowedOrigins(fromEnv);
 }
 
+// Sicherheit (Audit M2, 2026-06-12): Basis-Security-Header auf JEDER Antwort.
+// CSP wird bewusst NICHT hart gesetzt (das v3-Frontend nutzt Inline-Skripte +
+// externe Fonts; eine strikte CSP bräuchte erst ein Frontend-Refactor — als
+// Folge-Härtung über Cloudflare notiert). Diese vier sind risikolos und greifen
+// sofort: nosniff (kein MIME-Sniffing), DENY (kein Clickjacking via iframe),
+// Referrer-Policy (kein URL-Leak an Dritte), HSTS (erzwingt HTTPS; über HTTP
+// ignorieren Browser es, daher auf dem Mini harmlos).
+function setSecurityHeaders(res) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+}
+
 const server = http.createServer(async (req, res) => {
   req._requestId = crypto.randomUUID(); // #117: per-Request-id für Audit-Korrelation (#118)
+  setSecurityHeaders(res); // Audit M2: vor jeder writeHead (wird gemerged)
   // #215 (Auth-Naht): Identitäts-Quelle EINMAL pro Request bestimmen, VOR jedem
   // getViewer-Aufruf (auch dem Break-Glass-Vorschritt). Im supabase-Mode wird das
   // Bearer-JWT gegen die Projekt-JWKS verifiziert; Fehler ⇒ keine Identität.
@@ -2353,8 +2422,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     // #219 (Cutover-Abschluss): Statusseite-Datenquelle. Aggregiert /health +
-    // die letzten Job-Läufe (audit.workflow_runs, Infra-Verbindung) zu einem
-    // Gesamtbild. Öffentlich lesbar (kein Mandanten-Datenpfad, nur Health/Frische).
+    // die letzten Job-Läufe (audit.workflow_runs, Infra-Verbindung).
+    // Sicherheit (Audit M3, 2026-06-12): Die DETAILS (Job-Namen, Frische, DB-
+    // Status) sind eine Architektur-Landkarte ⇒ nur für eingeloggte Betreiber.
+    // Öffentlich (anonym) gibt es NUR die grobe Ampel (overall), keine Internas.
     if (parsed.pathname === '/api/v2/status') {
       const health = {
         ok: tenantDirectoryHealthy(),
@@ -2375,7 +2446,12 @@ const server = http.createServer(async (req, res) => {
       }
       const { buildStatus } = require('./lib/status-page.js');
       const status = buildStatus({ health, jobRuns });
-      sendJson(res, status.overall === 'down' ? 503 : 200, { ok: true, ...status });
+      const statusCode = status.overall === 'down' ? 503 : 200;
+      const statusViewer = getViewer(req);
+      const body = statusViewer.canTriggerActions
+        ? { ok: true, ...status } // eingeloggter Betreiber: volle Details
+        : { ok: true, overall: status.overall, generatedAt: status.generatedAt }; // öffentlich: nur Ampel
+      sendJson(res, statusCode, body);
       return;
     }
 
@@ -4730,9 +4806,15 @@ const server = http.createServer(async (req, res) => {
     const filePath = path.normalize(path.join(PUBLIC_DIR, requestPath));
     sendFile(res, filePath);
   } catch (error) {
-    // #217: unbehandelte Endpunkt-Fehler zentral erfassen (No-op ohne SENTRY_DSN).
-    try { require('./lib/sentry-lite.js').getSentry().captureException(error, { endpoint: parsed && parsed.pathname, method: req.method }); } catch { /* nie werfen */ }
-    sendJson(res, 500, { error: error.message, stack: error.stack });
+    // Sicherheit (Audit H1, 2026-06-12): NIEMALS Stack-Trace/interne Details an
+    // den Client — das ist eine Architektur-Landkarte für Angreifer. Nach außen
+    // nur eine generische Meldung + requestId (für Support-Korrelation). Die
+    // echten Details gehen ins Server-Log + an Sentry.
+    console.error(`[500] ${req.method} ${parsed && parsed.pathname} (req ${req._requestId}):`, (error && error.stack) || error);
+    try { require('./lib/sentry-lite.js').getSentry().captureException(error, { endpoint: parsed && parsed.pathname, method: req.method, requestId: req._requestId }); } catch { /* nie werfen */ }
+    if (!res.headersSent) {
+      sendJson(res, 500, { ok: false, error: { code: 'INTERNAL_ERROR', message: 'Interner Fehler. Bitte später erneut versuchen.', requestId: req._requestId } });
+    }
   }
 });
 

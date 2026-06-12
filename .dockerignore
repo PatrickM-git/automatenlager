@@ -1,0 +1,27 @@
+# Sicherheit (Audit H3, 2026-06-12): NIE Secrets/Host-Artefakte ins Docker-Image.
+# Gilt für den Render-Build (Build-Context = Repo-Root, dashboard/deploy/render/Dockerfile).
+# Ohne diese Datei zieht `COPY . .` u. a. die .env.local mit den Geheimnissen mit.
+
+# Geheimnisse (ausnahmslos draußen; .example ist Doku, kein Secret)
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.connections.example
+**/.n8n-api-key
+
+# Host-Artefakte / Build-Müll (werden im Image via `npm ci` neu erzeugt)
+**/node_modules
+.git
+.gitignore
+
+# Daten/Logs/Backups
+**/*.dump
+**/logs/
+*.log
+dashboard/.dashboard-config.json
+
+# Lokales / nicht laufzeitrelevant
+.claude
+HANDOVER_ARCHIVE/
+docs/qa-*.png
+**/.DS_Store
