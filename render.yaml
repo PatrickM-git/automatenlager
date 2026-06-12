@@ -1,0 +1,47 @@
+# Render-Blueprint — Cloud-Backend (Faltrix Dashboard). Issue #217.
+# ===========================================================================
+# Render sucht diese Datei im Repo-ROOT (deshalb liegt sie hier, nicht unter
+# dashboard/). Beim Anlegen über „New → Blueprint" liest Render sie automatisch.
+#
+# SCHLANKER ERST-DEPLOY (bewusst): nur die 5 Werte, die das Backend zum Starten
+# und für den Login braucht, werden abgefragt (sync:false). Die Secrets der
+# Nacht-Jobs (Nayax/Claude/Resend/Google-Drive) werden NICHT beim Start gebraucht
+# — die Jobs laufen bis zum Cutover weiter auf dem Mini. Sie werden erst beim
+# Scharfschalten der Cloud-Jobs im Render-Dashboard nachgetragen (Runbook
+# docs/cloud-migration/slice-3-backend-render-runbook.md).
+#
+# WORKER_TRIGGER_SECRET erzeugt Render selbst (generateValue) — derselbe Wert
+# wandert danach in die pg_cron-Einrichtung (deploy/render/pgcron-setup.sql).
+
+services:
+  - type: web
+    name: faltrix-dashboard
+    runtime: docker
+    dockerfilePath: ./dashboard/deploy/render/Dockerfile  # nimmt das ganze Repo mit (wie der Mini)
+    dockerContext: .                                       # Build-Context = Repo-Root
+    plan: free
+    region: frankfurt
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # ── Fest (keine Eingabe nötig) ──
+      - key: TZ
+        value: Europe/Berlin
+      - key: NODE_ENV
+        value: production
+      - key: DASHBOARD_AUTH_MODE
+        value: supabase                 # Login per Supabase-JWT (Cloud-Pfad)
+      - key: WORKER_TRIGGER_SECRET
+        generateValue: true             # Render erzeugt ein starkes Zufalls-Secret
+
+      # ── Beim ersten Deploy abgefragt (Werte aus dashboard/.env.local) ──
+      - key: DASHBOARD_V2_PG_URL        # Datenbank (Infra/Session-Pooler)  → SUPABASE_PG_URL_SESSION
+        sync: false
+      - key: DASHBOARD_V2_APP_PG_URL    # Datenbank (App-Rolle/TX-Pooler)   → SUPABASE_APP_PG_URL_TX
+        sync: false
+      - key: SUPABASE_URL               # https://bimftbjpvljjnvorqbtn.supabase.co
+        sync: false
+      - key: SUPABASE_ANON_KEY          # öffentlicher Login-Schlüssel       → SUPABASE_ANON_KEY
+        sync: false
+      - key: DASHBOARD_ADMIN_LOGIN      # Admin-E-Mails (Komma-getrennt)
+        sync: false

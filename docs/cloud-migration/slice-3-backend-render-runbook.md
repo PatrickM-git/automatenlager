@@ -23,7 +23,9 @@
   correction/nayax-abgleich/onboarding/slot-assign) gehen jetzt über `auditAction`
   → DB-Senke `audit.access_log`. `GET /onboarding/started-keys` liest **primär
   die DB** (JSONL nur noch Dev-Fallback ohne PG).
-- **Deploy-Artefakte:** `deploy/render/render.yaml` (Web-Service, Frankfurt,
+- **Deploy-Artefakte:** `render.yaml` (Repo-Root — Render erwartet den Blueprint
+  dort; Web-Service, Frankfurt, eigenes `dashboard/deploy/render/Dockerfile` mit
+  Build-Context=Repo-Root, damit das Image — wie der Mini — das ganze Repo enthält;
   Health `/health`, Secrets als `sync:false`/`generateValue`),
   `deploy/render/pgcron-setup.sql` (pg_cron→pg_net-Schedules, idempotent,
   Job-Keys gegen `worker.js` verifiziert).
@@ -42,11 +44,15 @@
 Render-Service-Anlage ist ein nach außen wirkender Deploy-Schritt am
 Betreiber-Account (wie die Account-Anlage in Slice 0). Schritte:
 
-1. **Render → New → Blueprint**, Repo `PatrickM-git/automatenlager` verbinden,
-   `dashboard/deploy/render/render.yaml` wählen. Beim ersten Deploy fragt Render
-   alle `sync:false`-Secrets ab (Werte aus `dashboard/.env.local` bzw.
-   Supabase-Dashboard). `WORKER_TRIGGER_SECRET` wird automatisch generiert —
-   **diesen Wert kopieren** (Render → Service → Environment).
+1. **Render → New → Blueprint**, Repo `PatrickM-git/automatenlager` verbinden;
+   Render liest `render.yaml` aus dem Repo-Root automatisch. Beim ersten Deploy
+   fragt Render die 5 `sync:false`-Werte ab (aus `dashboard/.env.local`):
+   `DASHBOARD_V2_PG_URL`=`SUPABASE_PG_URL_SESSION`,
+   `DASHBOARD_V2_APP_PG_URL`=`SUPABASE_APP_PG_URL_TX`, `SUPABASE_URL`,
+   `SUPABASE_ANON_KEY`, `DASHBOARD_ADMIN_LOGIN`. `WORKER_TRIGGER_SECRET` wird
+   automatisch generiert — **diesen Wert kopieren** (Render → Service →
+   Environment). Job-Secrets (Nayax/Claude/Resend/Drive) erst beim Cutover
+   nachtragen.
 2. **`/health` prüfen:** `https://faltrix-dashboard.onrender.com/health` ⇒
    `{"ok":true,...}`.
 3. **Supabase-SQL-Editor (als Eigentümer):**
