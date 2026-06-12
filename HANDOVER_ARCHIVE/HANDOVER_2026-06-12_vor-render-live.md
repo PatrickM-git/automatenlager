@@ -1,37 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-render-live.md`.
-
-## Session 2026-06-12 (Abend) — RENDER-BACKEND LIVE + CI (GitHub Actions) + Sentry
-
-> Betreiber-Deploy von #217 (Backend → Render) per Browser-Begleitung durchgeführt.
-> **Backend läuft live + sicher in der Cloud**, aber DNS zeigt weiter auf den Mini
-> (kein öffentlicher Verkehr — Cloud nur uns bekannt). Nächster echter Schritt:
-> Etappe 3 (Cloudflare, bringt auch H2/M1: API hinter Cloudflare) + pg_cron.
-
-### Render-Backend (#217) — LIVE
-- Blueprint `render.yaml` (Repo-Root) → Service **faltrix-dashboard**, Frankfurt,
-  Docker (`dashboard/deploy/render/Dockerfile`, ganzes Repo). URL:
-  **https://faltrix-dashboard.onrender.com** (Free-Tier: schläft bei Inaktivität,
-  Cold-Start ~50 s). Service-ID `srv-d8m24c8g4nts73803u3g`.
-- 5 Env beim Blueprint abgefragt (User per Notepad-Transfer für die 2 DB-URLs,
-  3 öffentliche von mir), WORKER_TRIGGER_SECRET von Render generiert.
-- **Live verifiziert:** `/health` ok (DB verbunden ⇒ Werte korrekt), `auth/config`
-  mode=supabase, **C1 live: gefälschter Tailscale-Header ⇒ Gast** (kein Spoofing),
-  alle 4 Security-Header live. Notepad-Temp-Datei gelöscht.
-- **Offen bei #217:** pg_cron-Aktivierung (Nachtjobs in der Cloud) — Jobs laufen
-  noch auf dem Mini; Cron-Setup `dashboard/deploy/render/pgcron-setup.sql`.
-
-### CI — GitHub Actions (`.github/workflows/ci.yml`)
-- node:test bei jedem Push/PR, **ohne DB-Secret** (DB-Tests skippen). Suite in CI
-  1216 pass / 0 fail / 223 skip. Fand sofort 4 brüchige Tests (lasen externe
-  homelab-Dateien außerhalb des Repos) → mit t.skip CI-tauglich gemacht.
-
-### Sentry (Fehler-Frühwarnung) — eingerichtet + live
-- Org `faltrix-gbr` (GitHub-SSO), Projekt **node** (EU-Region, .ingest.de). DSN als
-  `SENTRY_DSN` in Render-Env. `lib/sentry-lite.js` aktiviert sich automatisch.
-  **Live-Beweis:** Test-Event an den Ingest-Endpunkt ⇒ HTTP 200.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-219-cutover.md`.
 
 ## Session 2026-06-12 (Nachmittag) — PRE-GO-LIVE-SICHERHEITSAUDIT + Härtung KOMPLETT
 
