@@ -33,7 +33,17 @@ Browser ──► Cloudflare (app.faltrix-solutions.de)
   Suite 1454/1454. Auf Render/Mini ohne `CF_ORIGIN_SECRET` ⇒ Origin-Guard inert,
   Rate-Limit aktiv (harmlos).
 
-## Cloud-Teil — GEMEINSAME BROWSER-SCHRITTE (Betreiber + Begleitung)
+## Cloud-Teil — ✅ ERLEDIGT + LIVE (2026-06-12, Browser-Begleitung)
+
+> **App live unter `https://app.faltrix-solutions.de`** (Frontend+API same-origin
+> über Cloudflare, Backend hinter Origin-Guard). E2E-Login grün; direkter
+> `onrender.com/api` ⇒ 403. WICHTIG gegenüber dem Plan unten: statt der
+> Pages-Function `functions/api/[[path]].js` läuft ein **Advanced-Mode
+> `deploy/cloudflare/_worker.js`** (Cloudflare sucht `functions/` im Projekt-Root,
+> nicht im Build-Output → aus dem Monorepo-Unterordner nicht erkannt). Details:
+> HANDOVER „Session 2026-06-12 (Abend, 3)".
+
+### Plan (umgesetzt) — GEMEINSAME BROWSER-SCHRITTE (Betreiber + Begleitung)
 
 > Voraussetzung: Render-Backend läuft (`faltrix-dashboard.onrender.com`),
 > Cloudflare-Zone `faltrix-solutions.de` existiert (Slice 0).

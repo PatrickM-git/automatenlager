@@ -1,50 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-cloudflare-live.md`.
-
-## Session 2026-06-12 (Abend, 3) — ETAPPE 3 CLOUDFLARE LIVE — App unter eigener Domain, E2E grün
-
-> Runbook: `docs/cloud-migration/etappe3-cloudflare-sicher.md`. Cloudflare-Anschluss
-> per Browser-Begleitung durchgeführt. **Die App läuft jetzt unter
-> `https://app.faltrix-solutions.de` — Frontend + API same-origin über Cloudflare,
-> Backend hinter dem Origin-Guard.** DNS/Produktion: der Mini bleibt führend (die
-> app-Subdomain ist neu, nichts am Mini geändert). H2 (Cloudflare-Bypass) DICHT.
-
-### Live + verifiziert (2026-06-12)
-- **Cloudflare Pages** `automatenlager` (Repo-Git, Auto-Deploy). Build
-  `bash dashboard/deploy/cloudflare/build.sh` → Output `cf-dist`. **Advanced-Mode
-  `_worker.js`** (nicht `functions/` — das wird im Projekt-Root gesucht, aus dem
-  Monorepo-Unterordner NICHT erkannt → API landete auf HTML; gefixt). Worker
-  proxied /api,/health,/internal → Render + SPA-Routing (/ → /v3, pretty URL ohne
-  .html, sonst Redirect-Schleife).
-- **Custom Domain** `app.faltrix-solutions.de` (CNAME auf automatenlager.pages.dev,
-  TLS automatisch via Wildcard). Pages-Env: `RENDER_API_BASE` (Klartext) +
-  `CF_ORIGIN_SECRET` (Geheimnis, verschlüsselt).
-- **Origin-Guard scharf:** `CF_ORIGIN_SECRET` auch in Render-Env (gemeinsames
-  48-hex-Token, per Zwischenablage gesetzt, Fingerabdruck-verifiziert ohne Klartext).
-  Live: **direkter `onrender.com/api` ⇒ 403**, über `app.faltrix.../api` ⇒ 200,
-  `onrender.com/health` ⇒ 200 (Render-Healthcheck offen).
-- **Supabase Auth URL-Config:** Site-URL = `https://app.faltrix-solutions.de`,
-  Redirect-Allowlist `…/​**` (Passwort-Reset-Link scharf).
-- **E2E-Login-Test grün:** Login → Token → `app.faltrix.../api/v2/viewer` = admin/
-  t_faltrix → `/api/dashboard` echte Daten. Ganzer Stack (CF→Worker→Render→Supabase).
-
-### Stolpersteine (für künftige Cloud-Browser-Arbeit, in Memory)
-- Cloudflare-Pages: `functions/` wird NICHT im Build-Output erkannt → `_worker.js`.
-- Pages pretty URLs: `/v3.html`→308→`/v3`; Worker darf nicht auf `.html` zurück-
-  schreiben (Schleife). config.js bleibt leer (same-origin).
-- Render-Env-Bearbeitung: NIE per ref ein bestehendes Feld treffen (überschrieb
-  versehentlich SUPABASE_URL → vor dem Speichern korrigiert) — IMMER „+ Add variable".
-- Secret-Validierung ohne Klartext: SHA-256-Fingerabdruck lokal vs. Browser vergleichen.
-
-### Offen
-- **Letzter echter Cutover (#219):** DNS der Haupt-Domain / finaler Schwenk + Mini
-  N Tage als Rollback. (Heute nur die app-Subdomain live; Mini unverändert führend.)
-- **pg_cron** (#217): Nachtjobs laufen noch auf dem Mini; Cloud-Cron-Setup
-  `dashboard/deploy/render/pgcron-setup.sql` + `WORKER_TRIGGER_SECRET` aus Render-Env.
-- **#215-Reste:** 2. Eigentümer `lantspeku@gmail.com` braucht noch einen Supabase-
-  Auth-User (Einladung), um sich einzuloggen (Rechte/Allowlist sind schon da).
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-render-live.md`.
 
 ## Session 2026-06-12 (Abend, 2) — ETAPPE 3 Backend-Sicherheit (H2/M1) autonom KOMPLETT
 
