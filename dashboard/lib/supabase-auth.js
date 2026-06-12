@@ -34,11 +34,21 @@ function clean(value) {
   return String(value == null ? '' : value).trim();
 }
 
-// Env-Schalter des Doppelpfads. Nur das explizite 'supabase' aktiviert den
-// JWT-Pfad — jeder andere/fehlende Wert bleibt beim bewährten Tailscale-Pfad
-// (kein harter Stichtag im Code; Rollback = Env-Variable zurückstellen).
+// Env-Schalter des Doppelpfads — FAIL-CLOSED (Sicherheitsaudit 2026-06-12, C1).
+//  - Explizit 'supabase' ⇒ supabase (JWT-Pfad).
+//  - SICHERHEITSRIEGEL: Sobald `SUPABASE_URL` gesetzt ist, laufen wir im
+//    Cloud-Kontext (offenes Internet). Dort darf der TRIVIAL FÄLSCHBARE
+//    Tailscale-Header NIEMALS Identität sein. Deshalb erzwingen wir dann
+//    'supabase' — selbst wenn DASHBOARD_AUTH_MODE fehlt ODER (versehentlich/
+//    böswillig) auf 'tailscale' steht. Ein vergessenes/falsches Env-Flag kann
+//    so keine Auth-Umgehung mehr auslösen (vorher: Default 'tailscale' ⇒
+//    Header-Spoofing ⇒ Admin-Übernahme).
+//  - Nur OHNE `SUPABASE_URL` (= Mini/Heimnetz hinter Tailscale) bleibt es beim
+//    bewährten Tailscale-Pfad. Der Mini hat kein SUPABASE_URL ⇒ unverändert.
 function resolveAuthMode(env = {}) {
-  return clean(env.DASHBOARD_AUTH_MODE).toLowerCase() === 'supabase' ? 'supabase' : 'tailscale';
+  if (clean(env.DASHBOARD_AUTH_MODE).toLowerCase() === 'supabase') return 'supabase';
+  if (clean(env.SUPABASE_URL)) return 'supabase'; // Cloud erkannt ⇒ nie Header-Auth
+  return 'tailscale';
 }
 
 // Bearer-Token aus dem Authorization-Header (case-insensitives Schema).

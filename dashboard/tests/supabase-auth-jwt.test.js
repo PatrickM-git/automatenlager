@@ -151,6 +151,18 @@ test('#215 resolveAuthMode: Default tailscale; supabase nur explizit', () => {
   assert.equal(resolveAuthMode({ DASHBOARD_AUTH_MODE: 'unsinn' }), 'tailscale');
 });
 
+test('#C1 (Audit) resolveAuthMode FAIL-CLOSED: SUPABASE_URL erzwingt supabase — Header-Auth-Riegel', () => {
+  // Cloud-Kontext (SUPABASE_URL gesetzt) ⇒ IMMER supabase, egal was AUTH_MODE sagt.
+  assert.equal(resolveAuthMode({ SUPABASE_URL: 'https://x.supabase.co' }), 'supabase',
+    'vergessenes AUTH_MODE in der Cloud ⇒ trotzdem supabase (kein Header-Spoofing)');
+  assert.equal(resolveAuthMode({ SUPABASE_URL: 'https://x.supabase.co', DASHBOARD_AUTH_MODE: 'tailscale' }), 'supabase',
+    'selbst explizit tailscale wird in der Cloud zu supabase überstimmt');
+  assert.equal(resolveAuthMode({ SUPABASE_URL: 'https://x.supabase.co', DASHBOARD_AUTH_MODE: 'unsinn' }), 'supabase');
+  // Mini/Heimnetz (kein SUPABASE_URL) bleibt unverändert tailscale.
+  assert.equal(resolveAuthMode({ SUPABASE_URL: '' }), 'tailscale', 'leeres SUPABASE_URL ⇒ Mini-Pfad');
+  assert.equal(resolveAuthMode({ DASHBOARD_AUTH_MODE: 'tailscale' }), 'tailscale', 'Mini ohne SUPABASE_URL unverändert');
+});
+
 // ── extractBearerToken ────────────────────────────────────────────────────────
 
 test('#215 extractBearerToken: Bearer-Schema, sonst leer', () => {
