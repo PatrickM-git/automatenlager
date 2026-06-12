@@ -1,61 +1,57 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-11_vor-deploy-und-slice0-accounts.md`.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-slice1-supabase.md`.
 
-## Session 2026-06-11 (abends) — #221 LIVE auf dem Mini + Cloud-Slice-0 (#212) KOMPLETT
+## Session 2026-06-12 — #214 (Slice 1: DB → Supabase) KOMPLETT
 
-> Gemischte Session: Prod-Deploy (#221) + Browser-begleitete Account-/Domain-Anlage
-> (Slice 0). Ein Hotfix-PR (#226) gemergt, ein Beifang-Bug als #227 gemeldet.
+> Cloud-Migration Phase B, Slice 1. Die komplette PostgreSQL-Schicht ist auf
+> Supabase portiert und mit der echten Isolationssuite bewiesen. Produktivbetrieb
+> unverändert (Mini zeigt weiter auf die Mini-DB) — Supabase ist bis zum Cutover
+> (#219) eine verifizierte, wegwerfbare Kopie.
+> **Runbook + Ergebnis-Protokoll: `docs/cloud-migration/slice-1-db-supabase-runbook.md`.**
 
-### #221 — Nachbuch-Reconciliation — DEPLOYT, AKTIVIERT, LIVE
-- Mini auf `d622636`; **Migration 0036** auf der Prod-DB (idempotent doppelt verifiziert,
-  als Rolle `homelab`); Dashboard + Worker neu gestartet, `/health` ok.
-- **Backlog-Sichtprüfung (read-only, Prod):** exakt der Issue-Befund — 41×
-  `INSUFFICIENT_BATCH_STOCK`, 23× `SKIPPED_BEFORE_CUTOVER`, 13× `OK`-mit-0, **alle April**
-  (07.–29.04.). Erwartung: `lastSales`-Fenster enthält sie nicht mehr → erster Lauf lässt
-  sie ehrlich als `NO_NAYAX_MATCH` pending; der Job korrigiert ab jetzt frische Lieferlücken.
-- **`WORKER_RECONCILE_MS=3600000`** in der Mini-`.env.local` (stündlich); Log bestätigt
-  `geplant: wf3-nayax-reconcile (alle 3600s, Intervall)`.
-- **Hotfix nötig (PR #226, gemergt):** das Gate las `env` statt `runtimeEnv` —
-  `.env.local`-Werte waren fürs Scheduling unsichtbar (Container-Env ≠ runtimeEnv).
-- **Beifang → Issue #227:** derselbe latente Bug betrifft ALLE `WORKER_*`-Overrides
-  (WF3/GuV/…); Defaults kaschieren ihn. Fix: Schedule-Registrierungen auf `runtimeEnv`.
-- Verifikation des ersten Laufs: `audit.workflow_runs` (`wf3-nayax-reconcile`) bzw.
-  `GET /api/v2/reconcile/backlog` — Lauf erfolgt ~1 h nach Worker-Restart.
+### Was steht (alles automatisiert verifiziert)
+- **Rollen-Split ohne Custom-BYPASSRLS:** Infra = `postgres` (Supabase, rolbypassrls=true),
+  App = `automatenlager_app` (LOGIN, kein Bypass) über den **Transaction-Pooler 6543**
+  (`automatenlager_app.<ref>`); `app_reader`/`app_writer` out-of-band via
+  `dashboard/deploy/supabase/bootstrap-roles.sql`; `n8n_app`/`migrator`/`validator`
+  bewusst NICHT angelegt (0033 skippt rollen-bedingt — #225-Vorarbeit zahlte sich aus).
+- **Schema + Daten:** `pg_dump --schema-only --no-owner` (gefiltert: n8n_app/migrator/
+  validator-Grants, homelab-Default-ACLs → Ersatz `post-restore-default-privileges.sql`)
+  → Daten-Restore mit `session_replication_role=replica` (keine Trigger-Doppelbuchung)
+  → **Migrationskette 0001–0036 komplett grün** (erst Daten, dann Migrationen — 0006/0010/0018
+  seeden mit Tenant-FK!) → 3 MatViews refreshed. **Zeilenzahlen Mini↔Supabase identisch**
+  (nur `audit.workflow_runs` +6 = Worker-Telemetrie nach Dump; Delta-Sync beim Cutover).
+- **Isolationsbeweis:** `DASHBOARD_V2_PG_URL=$SUPABASE_PG_URL_SESSION node --test
+  tests/dashboard-mt-*.test.js …` → **163/163 grün gegen Supabase**; neue Suite
+  `tests/supabase-slice1-verify.test.js` (Rollen, Migrations-Marker, fail-closed, Daten).
+- **/health vom Mini gegen Supabase:** temporäre Zweitinstanz (PORT=8899, Env-Override)
+  → `{"ok":true,"tenantDirectoryReady":true,…}`. Volle Suite vs. Mini: 1380/1381
+  (1 bekannter Parallel-Flake `dashboard-v2-uploads`, isoliert 8/8).
 
-### #212 — Cloud-Slice 0 (Fundament & Domain) — KOMPLETT (Browser-Begleitung)
-- **Alle Accounts angelegt** (User klickte Identität/Zahlung, Claude navigierte/konfigurierte):
-  - **Supabase**: GitHub-SSO `PatrickM-git`, Org `Faltrix-Lösungen`, Projekt **`Faltrix`**,
-    **Frankfurt `eu-central-1`**, Ref `bimftbjpvljjnvorqbtn`. (Erstanlage Irland → gelöscht,
-    neu in Frankfurt; Region steckt im Dropdown unter „Spezifische Regionen"!)
-  - **Render**: GitHub-SSO, Workspace ohne Services (kommt in #217).
-  - **Cloudflare**: Google-SSO `faltrixsolutions@gmail.com`; Zone `faltrix-solutions.de`
-    (Free) mit NS `martha`/`moura.ns.cloudflare.com`.
-  - **Gmail `faltrixsolutions@gmail.com`** neu (Recovery: `patrickzinke@gmx.net`).
-- **Domain-Abweichung:** Cloudflare Registrar kann **kein `.de`** → registriert bei **INWX**
-  (Kunden-Nr. 251284, 3,57 € 1. Jahr / ~4,65 €/Jahr, Transfer-Lock, Registrant „Faltrix
-  Solutions UG"). **NS-Delegation auf Cloudflare ist live** (8.8.8.8 liefert martha/moura).
-  INWX-UI-Falle: Domain-Info-NS-Dialog defekt; funktionierender Weg = Massenaktion→Update→
-  Warenkorb→Bearbeiten→Nameserver→„Manuelle Nameservereingabe" (0 €).
-- **Ergebnis-Protokoll:** `docs/cloud-fundament-slice-0.md` (Identitäten, Risikostreuung
-  Domain≠GitHub, Verifikation, Stolpersteine). AC3/AC4-Doku unverändert unter
-  `docs/cloud-migration/`. Supabase-**DB-Passwort im Passwortmanager des Users**.
-- GitHub-Browser-Login des Users war anfangs blockiert (Konto-Mail unklar) — gelöst.
+### Entscheidungen/Befunde (wichtig für die nächsten Slices)
+1. **KEINE GUC-Vorregistrierung** (bewusste AC-Abweichung): `ALTER DATABASE … SET …=''`
+   würde fail-closed (42704, Migration 0034) aufweichen; `set_config` geht auf Supabase
+   auch ohne. Hinter dem Supavisor-Pooler kann ein recyceltes Backend `''` statt 42704
+   liefern — beide Formen dicht, Tests prüfen zustandsbewusst (0034 + verify-Suite).
+2. **Migration 0031 ist auf Supabase voll wirksam** (globale Business-Key-Uniques weg =
+   Endzustand); auf dem Mini bleibt Teil 1+2 deploy-gated (#164/#198). Tests #99/#102
+   asserten jetzt beide Zustände exakt.
+3. **Supabase-Verbindungen** in `dashboard/.env.local`: `SUPABASE_PG_URL_SESSION` (Infra,
+   5432), `SUPABASE_PG_URL_TX`, `SUPABASE_APP_PG_URL_TX` (App-Rolle, 6543; Passwort im
+   Passwortmanager). Referenz dokumentiert in `dashboard/.env.example`.
 
 ## Offene Issues (Stand Sessionende)
-- **#214–#219** Cloud-Slices 1–5 — **jetzt entblockt** (Accounts da). **#213** Audit-Log→DB
-  (parallel möglich, ohne Blocker). **#227** Worker-env-Bug (klein, klar geschnitten).
-  **#198/#206** WF3/WF1-Cutover-Reste. **#164** n8n-Abschluss-Cleanup. **#210/#211**
-  GuV-EK/MwSt-Datenbugs. **#108/#111**.
+- **#215–#219** Cloud-Slices 2–5 (#215 Auth-Naht ist durch #214 entblockt). **#227**
+  Worker-env-Bug (klein). **#198/#206** WF3/WF1-Cutover-Reste. **#164** n8n-Abschluss-
+  Cleanup. **#210/#211** GuV-EK/MwSt-Datenbugs. **#108/#111**.
 
 ## Nächster Schritt
-1. **Neuer Chat → `start-issue` → #214 (DB→Supabase):** Schema + Migrationen 0001–0036 auf
-   Supabase, Rollen-Split ohne BYPASSRLS, GUC-Vorregistrierung (`ALTER DATABASE … SET
-   automatenlager.current_tenant=''`), Faltrix-Daten via `pg_dump`/`pg_restore`,
-   acme↔globex-Isolationsbeweis gegen Supabase. Benötigt: Supabase-DB-Passwort vom User
-   (Passwortmanager) für die Connection-Strings; Keys (anon/service_role) aus dem
-   Supabase-Dashboard (Settings → API).
-2. **Parallel möglich:** #213 (Audit-Log→DB) und #227 (runtimeEnv-Fix, klein).
-3. **Beobachten:** erster `wf3-nayax-reconcile`-Lauf in `audit.workflow_runs`; Cloudflare-
-   Zonen-Aktivierungsmail an die Faltrix-Gmail.
+1. **#215 (Slice 2 — Auth-Naht):** Supabase Auth aktivieren; `resolveViewer` um den
+   JWT-Pfad erweitern (Signaturprüfung gegen Supabase JWKS), Mapping über `tenant_users`
+   unverändert; Doppelpfad Tailscale/JWT per Env-Schalter; minimaler v3-Login.
+   Benötigt: `SUPABASE_URL`/`SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY` aus dem
+   Supabase-Dashboard (Settings → API) in `.env.local`.
+2. Danach #216 (Off-Site-Backup), #217 (Render), #218 (Cloudflare), #219 (Cutover).
+3. **Beobachten:** `wf3-nayax-reconcile`-Läufe in `audit.workflow_runs`.

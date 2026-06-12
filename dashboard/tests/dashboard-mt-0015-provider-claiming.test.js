@@ -61,9 +61,16 @@ test('#102 LIVE-Sandbox: Verkaufs-Idempotenz ist provider-aware', async (t) => {
       `SELECT pg_get_constraintdef(oid) d FROM pg_constraint WHERE conname='sales_transactions_tenant_provider_uk'`);
     assert.equal(def.rowCount, 1, 'provider-aware Unique existiert (additiv)');
     assert.match(def.rows[0].d, /UNIQUE \(tenant_id, provider, nayax_transaction_id\)/);
-    // Der alte globale Unique bleibt erhalten (ON CONFLICT (nayax_transaction_id), Story 23).
-    const old = await client.query(`SELECT 1 FROM pg_constraint WHERE conname='sales_transactions_nayax_transaction_id_key'`);
-    assert.equal(old.rowCount, 1, 'alter globaler nayax_transaction_id-Unique bleibt (Schreibpfad-Kompat)');
+    // Übergang (Mini, vor deploy-gated 0031): der alte globale Unique bleibt
+    // erhalten (ON CONFLICT (nayax_transaction_id), Story 23) UND muss dieselbe
+    // Definition tragen wie immer. Endzustand (#214, 0031 committed): er ist
+    // gedroppt — der provider-aware Unique oben ist der EINZIGE Idempotenz-Anker.
+    const old = await client.query(
+      `SELECT pg_get_constraintdef(oid) d FROM pg_constraint WHERE conname='sales_transactions_nayax_transaction_id_key'`);
+    if (old.rowCount === 1) {
+      assert.match(old.rows[0].d, /UNIQUE \(nayax_transaction_id\)/,
+        'Übergang: alter globaler nayax_transaction_id-Unique bleibt (Schreibpfad-Kompat)');
+    }
   });
 });
 

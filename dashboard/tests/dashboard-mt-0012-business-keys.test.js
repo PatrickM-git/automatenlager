@@ -54,18 +54,32 @@ test('#99 LIVE-Sandbox: (tenant_id, key)-Uniques existieren ADDITIV', async (t) 
 test('#99 LIVE-Sandbox: alte globale (key)-Uniques BLEIBEN erhalten (Story 23)', async (t) => {
   await inSandbox(t, async (client) => {
     await setup(client);
-    // Diese muessen weiter existieren, damit ON CONFLICT (key) im n8n-Schreibpfad greift.
+    // ZWEI legitime DB-Zustaende (Migration 0031 ist deploy-gated, #164/#198):
+    //  - Mini (Übergang): globale (key)-Uniques BLEIBEN, damit ON CONFLICT (key)
+    //    im n8n-Schreibpfad greift (Story 23).
+    //  - Supabase/Endzustand (#214): 0031 committed — globale Uniques GEDROPPT,
+    //    nur noch (tenant_id, key) ("gleicher Business-Key bei zwei Mandanten =
+    //    zwei Zeilen" scharf). setup() (0007–0012) legt sie NICHT neu an.
+    // Gate-Marker: 0031-Drop von sales_transactions_nayax_transaction_id_key.
+    const gate = await client.query(
+      `SELECT 1 FROM pg_constraint WHERE conname='sales_transactions_nayax_transaction_id_key'`);
+    const post0031 = gate.rowCount === 0;
     for (const name of ['products_product_key_key', 'stock_batches_batch_key_key',
       'suppliers_supplier_key_key', 'warnings_warning_key_key', 'invoices_invoice_key_key',
       'guv_daily_guv_key_key', 'stock_movements_movement_key_key',
       'product_change_proposals_proposal_key_key', 'product_aliases_alias_source_key',
       'invoice_items_invoice_id_line_number_key']) {
       const r = await client.query(`SELECT 1 FROM pg_constraint WHERE conname=$1`, [name]);
-      assert.equal(r.rowCount, 1, `alter Unique ${name} bleibt erhalten`);
+      assert.equal(r.rowCount, post0031 ? 0 : 1,
+        post0031 ? `Endzustand (0031): globaler Unique ${name} ist gedroppt`
+                 : `Übergang: alter Unique ${name} bleibt erhalten`);
     }
-    // slot_assignments + workflow_state behalten ihre alten Constraints.
+    // Aktiv-Slot-Unique: Übergang behaelt idx_slot_active; Endzustand hat NUR
+    // noch idx_slot_active_tenant (0031 Teil 2; Existenz prueft der Test oben).
     const slot = await client.query(`SELECT 1 FROM pg_indexes WHERE indexname='idx_slot_active'`);
-    assert.equal(slot.rowCount, 1, 'idx_slot_active bleibt');
+    assert.equal(slot.rowCount, post0031 ? 0 : 1,
+      post0031 ? 'Endzustand: idx_slot_active ist gedroppt (idx_slot_active_tenant deckt ab)'
+               : 'idx_slot_active bleibt');
     // workflow_state-PK ist nach Migration 0031 (auf der Mini-DB deployt) bereits
     // auf (tenant_id, workflow_key) umgestellt — tenant-fuehrend ist korrekt.
     const wfpk = await constraintExists(client, 'workflow_state_pkey');

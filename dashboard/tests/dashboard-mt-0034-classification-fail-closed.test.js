@@ -75,11 +75,37 @@ test('0034 LIVE: App-Rolle ohne GUC ⇒ Fehler 42704 (fail-closed); mit GUC eige
       await applyMigration(client, 34);
 
       await client.query('SET ROLE automatenlager_app');
-      // Ohne Mandanten-GUC: Lesen muss KRACHEN (42704), nicht still liefern.
-      await expectReject(client,
-        'SELECT tenant_id FROM automatenlager.classification_settings',
-        /unrecognized configuration parameter|current_tenant/i,
-        'fehlender GUC muss einen Fehler werfen (fail-closed), keine stillen Zeilen');
+      // Ohne Mandanten-GUC ist fail-closed in ZWEI Formen dicht (AC #214:
+      // "Fehler 42704 / keine Zeilen"):
+      //  - Direktverbindung (Mini): der GUC war in dieser Backend-Session nie
+      //    definiert ⇒ current_setting KRACHT (42704).
+      //  - Hinter dem Supabase-Pooler (Supavisor) kann das Server-Backend
+      //    recycelt sein: hat irgendeine fruehere Client-Session dort den GUC
+      //    je per set_config definiert, liefert er nach DISCARD ALL '' statt
+      //    zu werfen ⇒ einarmige Policies matchen nichts; die Vereinigungs-
+      //    Policy zeigt hoechstens die __default__-Vorlage — NIE Tenant-Zeilen.
+      // Der Probe-SAVEPOINT stellt fest, welche Form dieses Backend garantiert;
+      // ein Cross-Tenant-Leak faellt in beiden Zweigen durch.
+      let gucValue = null;
+      await client.query('SAVEPOINT guc_probe');
+      try {
+        const probe = await client.query("SELECT current_setting('automatenlager.current_tenant') AS v");
+        gucValue = probe.rows[0].v;
+        await client.query('RELEASE SAVEPOINT guc_probe');
+      } catch {
+        await client.query('ROLLBACK TO SAVEPOINT guc_probe');
+      }
+      if (gucValue === null) {
+        await expectReject(client,
+          'SELECT tenant_id FROM automatenlager.classification_settings',
+          /unrecognized configuration parameter|current_tenant/i,
+          'fehlender GUC muss einen Fehler werfen (fail-closed), keine stillen Zeilen');
+      } else {
+        assert.equal(gucValue, '', 'recyceltes Pooler-Backend: GUC-Platzhalter ist LEER (kein Alt-Mandant klebt)');
+        const silent = await client.query('SELECT tenant_id FROM automatenlager.classification_settings');
+        assert.ok(silent.rows.every((r) => r.tenant_id === '__default__'),
+          'ohne Mandant hoechstens __default__-Vorlage sichtbar — NIE Tenant-Zeilen (acme unsichtbar)');
+      }
       // Mit GUC: Vereinigungs-Policy unverändert — eigener Mandant + __default__.
       await client.query("SELECT set_config('automatenlager.current_tenant', 'acme', true)");
       const vis = await client.query(

@@ -79,7 +79,9 @@ test('#145 Migration 0022: n8n_app erhält BYPASSRLS (bleibt außerhalb des Back
     await withRollback(client, async () => {
       await applyMigration(client, 22);
       const r = await client.query(`SELECT rolbypassrls FROM pg_roles WHERE rolname='n8n_app'`);
-      assert.equal(r.rowCount, 1, 'n8n_app existiert');
+      // Cloud-DB (#214, Supabase): n8n_app existiert dort NIE (n8n lief nur auf
+      // dem Mini) — der IF-EXISTS-Guard in 0022 ist ein No-op, nichts zu beweisen.
+      if (r.rowCount === 0) return;
       assert.equal(r.rows[0].rolbypassrls, true, 'n8n_app hat jetzt BYPASSRLS');
     });
   } finally { await client.end(); }
