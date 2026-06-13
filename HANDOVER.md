@@ -59,7 +59,22 @@ Läuft weiter, redundant + harmlos (gleiche DB). Trägt das **Off-Site-Backup #2
 bewusst nicht in der Cloud). Vollständige Mini-Stilllegung = optionaler Folge-Schritt: ZUERST das
 Off-Site-Backup umziehen, DANN `docker stop homelab-worker` (reversibel).
 
+### Sicherheits-Spot-Check live (2026-06-13)
+Produktions-Endpunkte geprüft: **Origin-Guard** (direkter `onrender.com/api/*` = 403, nur über
+Cloudflare erreichbar), **TLS erzwungen** (HTTP→301→HTTPS), **HSTS** (1 J, includeSubDomains) +
+`nosniff` + `X-Frame-Options: DENY` + Referrer-Policy gesetzt, **kein Stack/Version-Leak**
+(`Server: cloudflare`, kein `X-Powered-By`), `/health` schlank. **Geschäftsdaten dicht:** Gast
+(`tenantId:null`) bekommt überall **leere** Listen (batches/locations/machines/nayax-devices/
+correction-cases/onboarding/inventory-mhd alle `[]`/0); **Finanzen `/api/v2/economics` = 403
+`finanzen.lesen`** (doppelt geschützt: Capability + Mandanten-Tür); Admin-Writes = 403.
+**EIN Fund (niedrig, kein Datenleck):** `/api/dashboard` gibt **anonym** Workflow-Architektur-
+Metadaten preis (Dateinamen, Node-Zahlen, Check-Ergebnisse — KEINE Geschäftsdaten/Secrets/PII),
+weil es System-Dateien liest (nicht mandantengescoped; Gast hat `betrieb.lesen`).
+
 ### Offen
+- **Security-Fix (klein, niedrig):** `/api/dashboard` ist anonym lesbar (nur Workflow-Metadaten)
+  → in Cloud/`supabase`-Mode hinter Auth legen oder Gast-`betrieb.lesen` einschränken. Nächste
+  Session als Erstes. (Auf dem Mini war Gast = Tailnet-intern; in der Cloud = öffentlich.)
 - Partner-Login-Klick (`lantspeku@gmail.com`) — externe Aktion.
 - Optionale Mini-Komplett-Stilllegung (Backup-Umzug zuerst).
 - #230 Umsetzung (Mehrmandanten-Rechnungs-Objektspeicher) — Arch/Backlog. #198/#206 Cutover-Reste
