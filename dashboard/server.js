@@ -2423,11 +2423,14 @@ const server = http.createServer(async (req, res) => {
       try { mailerKind = require('./lib/jobs/mailer.js').buildMailerFromEnv(process.env).kind; } catch (e) { mailerKind = 'err:' + (e && e.message); }
       sendJson(res, healthy ? 200 : 503, {
         ok: healthy,
-        build: '2026-06-13-r7', // Deploy-Marker: verifiziert, dass frischer Code im laufenden Container ankommt
+        build: '2026-06-13-r8', // Deploy-Marker: verifiziert, dass frischer Code im laufenden Container ankommt
         invoiceDrive: buildInvoiceDriveFromEnv(process.env).kind,
         picklistDrive: buildDriveFromEnv(process.env).kind,
         anthropic: anthropicKind, // wf1/wf9-Gate: 'disabled' ⇒ ANTHROPIC_API_KEY fehlt im Render-Env
         mailer: mailerKind,
+        // Umzug-Diagnose: schreibt die Cloud aktiv (Cutover) oder nur im Schatten? Leer = Schatten.
+        wf1Cutover: String(process.env.WF1_CUTOVER || '').trim() || '(leer/Schatten)',
+        wf3Cutover: String(process.env.WF3_CUTOVER || '').trim() || '(leer/Schatten)',
         tenantDirectoryReady: !!(tenantDirectory && tenantDirectory.isReady()),
         tenantDbReady: !!tenantDb, // #122: Stufe-3-Mandanten-Tür konstruiert (noch nicht konsumiert)
         pgConfigured: !!dashboardV2PgUrl(),
