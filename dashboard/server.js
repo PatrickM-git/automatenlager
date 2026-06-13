@@ -2304,16 +2304,26 @@ function handleInternalJobTrigger(req, res, jobKey) {
       : String((local && local.WORKER_TRIGGER_SECRET) || '').trim();
     const { createJobTriggerHandler } = require('./lib/job-triggers.js');
     let workerHandle = null;
+    let directoryReady = null; // einmaliges Laden der Mandanten-Registry
     const getWorker = () => {
       if (!workerHandle) {
         const { buildWorker } = require('./worker.js');
-        workerHandle = buildWorker(process.env).worker;
+        const built = buildWorker(process.env);
+        workerHandle = built.worker;
+        // FIX: Der Trigger-Pfad baut OHNE start(); aber start() laedt die Registry
+        // (directory.init()). Ohne sie ist listTenantIds()=[] ⇒ tenant-runner-Jobs
+        // (guv-aggregate, wf5-monitor, claude-proposals) laufen fuer 0 Mandanten = no-op.
+        directoryReady = (built.deps && built.deps.directory)
+          ? Promise.resolve(built.deps.directory.init()).catch((e) => console.error('[trigger] Verzeichnis-Init:', e && e.message))
+          : Promise.resolve();
       }
       return workerHandle;
     };
     internalJobTrigger = createJobTriggerHandler({
       secret,
-      runJobNow: (key) => getWorker().runJobNow(key),
+      // runJobNow wartet auf das einmalige Registry-Laden; listJobs bleibt synchron
+      // (Schedules haengen an der Env, nicht an der Mandantenliste).
+      runJobNow: async (key) => { const w = getWorker(); await directoryReady; return w.runJobNow(key); },
       listJobs: () => getWorker().listSchedules().map((s) => s.name),
     });
   }
@@ -2406,7 +2416,7 @@ const server = http.createServer(async (req, res) => {
       const healthy = tenantDirectoryHealthy();
       sendJson(res, healthy ? 200 : 503, {
         ok: healthy,
-        build: '2026-06-13-r3', // Deploy-Marker: verifiziert, dass frischer Code im laufenden Container ankommt
+        build: '2026-06-13-r4', // Deploy-Marker: verifiziert, dass frischer Code im laufenden Container ankommt
         tenantDirectoryReady: !!(tenantDirectory && tenantDirectory.isReady()),
         tenantDbReady: !!tenantDb, // #122: Stufe-3-Mandanten-Tür konstruiert (noch nicht konsumiert)
         pgConfigured: !!dashboardV2PgUrl(),
