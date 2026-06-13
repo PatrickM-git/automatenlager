@@ -119,7 +119,7 @@
     fetch(API_BASE + '/api/v2/auth/config').then(function (r) { return r.json(); }).then(function (c) {
       cfg = c;
       if (c.mode !== 'supabase' || !c.supabaseUrl) { location.replace('/v3'); return; }
-      if (frag.type === 'recovery' && frag.access_token) show('form-recover');
+      if ((frag.type === 'recovery' || frag.type === 'invite') && frag.access_token) show('form-recover');
     });
 
     $('link-reset').addEventListener('click', function (e) { e.preventDefault(); show('form-reset'); });

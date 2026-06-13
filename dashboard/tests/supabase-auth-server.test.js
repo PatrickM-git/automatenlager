@@ -138,6 +138,7 @@ test('#215 Spawned-Server: Doppelpfad supabase — JWT zählt, Tailscale-Header 
     assert.match(login.body, /form-login/, 'Login-Formular vorhanden');
     assert.match(login.body, /form-reset/, 'Passwort-Reset-Formular vorhanden');
     assert.match(login.body, /form-recover/, 'Recovery-Formular (neues Passwort) vorhanden');
+    assert.match(login.body, /type === 'invite'/, 'Login-Seite behandelt Invite-Links (type=invite -> Passwort setzen)');
   } finally {
     child.kill();
     jwks.close();
