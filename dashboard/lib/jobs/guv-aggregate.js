@@ -306,10 +306,11 @@ async function readGuvInputs(db, tenant) {
 
 // ── Write durch die Tür (db.tx, per Mandant) ─────────────────────────────────
 // Resolve machine_key→machine_id / product_key→product_id (faithful zu pgw_write,
-// aber tenant-scoped) + Insert mit EXPLIZITEM tenant_id, ON CONFLICT (guv_key)
-// DO NOTHING. Resolve + Insert in EINER Transaktion (atomar pro Mandant).
+// aber tenant-scoped) + Upsert mit EXPLIZITEM tenant_id, ON CONFLICT (guv_key)
+// DO UPDATE der neu berechneten Tagessummen, nur eigene source=wf8_guv_aggregator
+// (Backfill/Restatement geschuetzt; #228). Resolve + Upsert in EINER Transaktion.
 async function writeGuvRows(db, tenant, rows) {
-  const result = { inserted: 0, conflictSkipped: 0, unresolved: 0, attempted: rows.length };
+  const result = { inserted: 0, updated: 0, conflictSkipped: 0, unresolved: 0, attempted: rows.length };
   if (!rows.length) return result;
 
   return db.tx(tenant, async (door) => {
@@ -337,12 +338,23 @@ async function writeGuvRows(db, tenant, rows) {
               quantity_sold, revenue_gross, revenue_net, cost_of_goods, gross_profit, cost_basis, source)
            VALUES ($1, $2, $3::date, $4::bigint, $5::integer, $6::bigint,
                    $7::integer, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12, $13)
-           ON CONFLICT (tenant_id, guv_key) DO NOTHING`,
+           ON CONFLICT (tenant_id, guv_key) DO UPDATE SET
+             quantity_sold = EXCLUDED.quantity_sold,
+             revenue_gross = EXCLUDED.revenue_gross,
+             revenue_net   = EXCLUDED.revenue_net,
+             cost_of_goods = EXCLUDED.cost_of_goods,
+             gross_profit  = EXCLUDED.gross_profit,
+             cost_basis    = EXCLUDED.cost_basis,
+             mdb_code      = EXCLUDED.mdb_code
+           WHERE automatenlager.guv_daily.source = 'wf8_guv_aggregator'
+           RETURNING (xmax = 0) AS was_insert`,
         params: [row.guv_key, row.posting_date, machineId, row.mdb_code, productId,
           row.quantity_sold, row.revenue_gross, row.revenue_net, row.cost_of_goods, row.gross_profit, row.cost_basis, row.source],
       });
       const n = ins && typeof ins.rowCount === 'number' ? ins.rowCount : 0;
-      if (n > 0) result.inserted += n; else result.conflictSkipped++;
+      if (n === 0) result.conflictSkipped++;                              // bestehende Zeile ist KEINE Aggregator-Zeile ⇒ geschützt (Backfill/Restatement)
+      else if (ins.rows && ins.rows[0] && ins.rows[0].was_insert) result.inserted++;
+      else result.updated++;
     }
     return result;
   });
@@ -351,7 +363,10 @@ async function writeGuvRows(db, tenant, rows) {
 // ── Per-Mandant-Job (für den tenant-runner) ──────────────────────────────────
 async function runGuvAggregateForTenant(db, tenant, _opts = {}) {
   const inputs = await readGuvInputs(db, tenant);
-  const { rows, stats } = computeGuvRows({ ...inputs, skipExisting: true });
+  // #228: volle Tages-Re-Aggregation (skipExisting:false) statt vorhandene Keys zu
+  // überspringen — writeGuvRows ist ein idempotenter Upsert, der die neu berechnete
+  // Tagessumme schreibt. So werden spätere Verkäufe desselben Produkts/Tags aufaddiert.
+  const { rows, stats } = computeGuvRows({ ...inputs, skipExisting: false });
   const writeRes = await writeGuvRows(db, tenant, rows);
   return { tenant, computed: rows.length, stats, ...writeRes };
 }

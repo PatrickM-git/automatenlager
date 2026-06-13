@@ -246,9 +246,11 @@ test('#161 GuV LIVE: pro Mandant durch die Tür isoliert + idempotent (RLS aktiv
       // #176: regelbesteuert ⇒ netto-Basis gestempelt.
       assert.equal(acmeKeys.find((r) => r.guv_key === '2026-06-05|vm_acme|p_acme').cost_basis, 'netto', 'regelbesteuert ⇒ cost_basis netto');
 
-      // Idempotenz: erneuter acme-Lauf bucht 0 (existingKeys-Skip + ON CONFLICT).
+      // Idempotenz (#228): erneuter acme-Lauf fügt NICHTS Neues ein, sondern
+      // aktualisiert die bestehende Tageszeile auf denselben Wert (Upsert).
       const acmeRerun = await guv.runGuvAggregateForTenant(db, 'acme');
-      assert.equal(acmeRerun.inserted, 0, 'zweiter Lauf schreibt nichts (idempotent)');
+      assert.equal(acmeRerun.inserted, 0, 'zweiter Lauf fügt nichts Neues ein');
+      assert.equal(acmeRerun.updated, 1, 'zweiter Lauf aktualisiert die bestehende Zeile idempotent');
       assert.equal((await keysFor('acme')).length, acmeKeys.length, 'guv_daily-Zeilenzahl unverändert');
     } finally {
       await client.query('RESET ROLE');
@@ -332,6 +334,61 @@ test('B1-fix LIVE: leere Charge (remaining_qty=0) wird ignoriert — neuere Char
       // Neue nicht-leere Charge (unit_cost=5): qty2 × 5 = 10.
       // Ohne Fix würde die alte leere Charge (unit_cost=9) ausgewählt → cost=18.
       assert.equal(Number(rows[0].cost_of_goods), 10, 'Wareneinsatz aus der nicht-leeren Charge (5€), NICHT der leeren (9€)');
+    } finally {
+      await client.query('RESET ROLE');
+    }
+  });
+});
+
+// ── (4) Regression #228: spätere Mehrfachverkäufe NICHT mehr einfrieren ───────
+
+test('GuV LIVE #228: 2. Verkauf desselben Produkts/Tags in spaeterem Lauf wird aufaddiert (kein Einfrieren)', async (t) => {
+  await inSandbox(t, async (client) => {
+    const { acme } = await seedAcmeGlobex(client);
+    const sale = (txid, when) => client.query(
+      `INSERT INTO automatenlager.sales_transactions
+         (nayax_transaction_id, machine_id, product_id, product_name_raw, quantity,
+          gross_amount, net_amount, vat_amount, settlement_at, processing_status, tenant_id)
+       VALUES ($1,$2,$3,$4,1,2.00,2.00,0,$5,'OK','acme')`,
+      [txid, acme.machineId, acme.productId, acme.productName, when]);
+    await sale('frz_1', '2026-06-10T08:00:00Z');            // erster Verkauf des Tages
+    await client.query(
+      `INSERT INTO automatenlager.classification_settings (tenant_id, config, updated_at)
+         VALUES ('__default__', $1::jsonb, now())
+       ON CONFLICT (tenant_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()`,
+      [JSON.stringify({ kleinunternehmerAktiv: false })]);
+    for (const n of [22, 23, 24, 25, 26, 28, 32]) await applyMigration(client, n);
+
+    const tagesposten = async (db) => (await db.read({
+      tenant: 'acme', tables: ['guv_daily'],
+      text: `SELECT quantity_sold, revenue_gross FROM automatenlager.guv_daily
+             WHERE tenant_id = $1 AND guv_key = '2026-06-10|vm_acme|p_acme'`,
+    })).rows[0];
+
+    await client.query('SET ROLE automatenlager_app');
+    try {
+      const db = createTenantDb({ pool: sandboxTxPool(client) });
+
+      // Lauf 1: nur der erste Verkauf liegt vor → 1 Stück gebucht.
+      const run1 = await guv.runGuvAggregateForTenant(db, 'acme');
+      assert.equal(run1.inserted, 1, 'Lauf 1 bucht den Tagesposten');
+      assert.equal(Number((await tagesposten(db)).quantity_sold), 1, 'nach Lauf 1: 1 Stueck');
+
+      // Ein ZWEITER Verkauf desselben Produkts am selben Tag trifft SPAETER ein.
+      await client.query('RESET ROLE');
+      await sale('frz_2', '2026-06-10T15:00:00Z');
+      await client.query('SET ROLE automatenlager_app');
+
+      // Lauf 2: muss jetzt BEIDE Verkäufe zeigen (Bug heute: friert bei 1 ein).
+      await guv.runGuvAggregateForTenant(db, 'acme');
+      const row = await tagesposten(db);
+      assert.equal(Number(row.quantity_sold), 2, 'nach Lauf 2: beide Verkaeufe gebucht (kein Einfrieren)');
+      assert.equal(Number(row.revenue_gross), 4, 'Umsatz brutto = 2 x 2,00 EUR');
+      assert.equal((await db.read({
+        tenant: 'acme', tables: ['guv_daily'],
+        text: `SELECT count(*)::int AS n FROM automatenlager.guv_daily
+               WHERE tenant_id = $1 AND guv_key = '2026-06-10|vm_acme|p_acme'`,
+      })).rows[0].n, 1, 'weiterhin genau EINE Tageszeile (kein Duplikat)');
     } finally {
       await client.query('RESET ROLE');
     }
