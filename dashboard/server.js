@@ -2414,23 +2414,9 @@ const server = http.createServer(async (req, res) => {
     // gilt die Registry als „nicht anwendbar" ⇒ gesund.
     if (parsed.pathname === '/health') {
       const healthy = tenantDirectoryHealthy();
-      // Diagnose: sieht der laufende Container-Prozess die Job-Voraussetzungen?
-      // wf1/wf9 brauchen Drive UND Anthropic (sonst disabled ⇒ Trigger-404).
-      const { buildInvoiceDriveFromEnv, buildDriveFromEnv } = require('./lib/google-drive-client.js');
-      let anthropicKind = 'unknown';
-      let mailerKind = 'unknown';
-      try { anthropicKind = require('./lib/anthropic-client.js').buildAnthropicFromEnv(process.env).kind; } catch (e) { anthropicKind = 'err:' + (e && e.message); }
-      try { mailerKind = require('./lib/jobs/mailer.js').buildMailerFromEnv(process.env).kind; } catch (e) { mailerKind = 'err:' + (e && e.message); }
       sendJson(res, healthy ? 200 : 503, {
         ok: healthy,
-        build: '2026-06-13-r8', // Deploy-Marker: verifiziert, dass frischer Code im laufenden Container ankommt
-        invoiceDrive: buildInvoiceDriveFromEnv(process.env).kind,
-        picklistDrive: buildDriveFromEnv(process.env).kind,
-        anthropic: anthropicKind, // wf1/wf9-Gate: 'disabled' ⇒ ANTHROPIC_API_KEY fehlt im Render-Env
-        mailer: mailerKind,
-        // Umzug-Diagnose: schreibt die Cloud aktiv (Cutover) oder nur im Schatten? Leer = Schatten.
-        wf1Cutover: String(process.env.WF1_CUTOVER || '').trim() || '(leer/Schatten)',
-        wf3Cutover: String(process.env.WF3_CUTOVER || '').trim() || '(leer/Schatten)',
+        build: '2026-06-13-r9', // Deploy-Marker: verifiziert, dass frischer Code im laufenden Container ankommt
         tenantDirectoryReady: !!(tenantDirectory && tenantDirectory.isReady()),
         tenantDbReady: !!tenantDb, // #122: Stufe-3-Mandanten-Tür konstruiert (noch nicht konsumiert)
         pgConfigured: !!dashboardV2PgUrl(),
