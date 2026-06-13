@@ -2414,9 +2414,13 @@ const server = http.createServer(async (req, res) => {
     // gilt die Registry als „nicht anwendbar" ⇒ gesund.
     if (parsed.pathname === '/health') {
       const healthy = tenantDirectoryHealthy();
+      // Diagnose: sieht der laufende Container-Prozess die Drive-Env? (kind: live/disabled)
+      const { buildInvoiceDriveFromEnv, buildDriveFromEnv } = require('./lib/google-drive-client.js');
       sendJson(res, healthy ? 200 : 503, {
         ok: healthy,
-        build: '2026-06-13-r5', // Deploy-Marker: verifiziert, dass frischer Code im laufenden Container ankommt
+        build: '2026-06-13-r6', // Deploy-Marker: verifiziert, dass frischer Code im laufenden Container ankommt
+        invoiceDrive: buildInvoiceDriveFromEnv(process.env).kind,
+        picklistDrive: buildDriveFromEnv(process.env).kind,
         tenantDirectoryReady: !!(tenantDirectory && tenantDirectory.isReady()),
         tenantDbReady: !!tenantDb, // #122: Stufe-3-Mandanten-Tür konstruiert (noch nicht konsumiert)
         pgConfigured: !!dashboardV2PgUrl(),
