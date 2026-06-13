@@ -51,6 +51,7 @@ DECLARE
     jsonb_build_array('claude-proposals',      '30 2 * * *',   'Claude-Proposals (04:30 CEST)'),
     jsonb_build_array('wf5-monitor',           '0 5 * * *',    'WF5 MHD/Low-Stock (07:00 CEST)'),
     jsonb_build_array('wf-matview-refresh',    '45 2 * * *',   'MatView-Refresh (04:45 CEST)'),
+    jsonb_build_array('sales-reconcile-totals','0 4 * * *',    'Umsatz-Reconciliation Moma vs DB (06:00 CEST, #229)'),
     jsonb_build_array('backup-supabase',       '15 1 * * *',   'Off-Site-Backup (03:15 CEST) — nur falls Render-Ziel gesetzt')
   );
   j        jsonb;

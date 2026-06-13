@@ -268,6 +268,10 @@ function buildWorker(env = process.env) {
   // Nachbuch-Reconciliation (#221): holt unvollständig gelieferte Verkäufe (gross=0)
   // erneut von Nayax und bucht FIFO nach, sobald Preis UND Bestand verfügbar sind.
   const nayaxReconcileJob = (tenantDb && directory) ? createNayaxReconcileJob({ db: tenantDb, directory, env: runtimeEnv }) : null;
+  // #229: Täglicher Umsatz-Reconciliation-Alarm (Moma↔Verkäufe↔GuV) — erkennt Import-
+  // UND Buchungslücken frühzeitig; Alarm-Mail an ALERT_EMAIL_DEFAULT über den Mailer.
+  const { createSalesReconcileTotalsJob } = require('./lib/jobs/sales-reconcile-totals.js');
+  const salesReconcileTotalsJob = (tenantDb && directory) ? createSalesReconcileTotalsJob({ db: tenantDb, directory, env: runtimeEnv, mailer }) : null;
   // WF-Claude-Proposals (#162, Slice 2): alte pending Proposals von Claude vorentscheiden.
   const claudeProposalsJob = tenantRunner ? createClaudeProposalsJob({ tenantRunner, anthropic, mailer, env: runtimeEnv }) : null;
   // WF5 (#162, Slice 2): MHD/Low-Stock-Warnungen synchronisieren + Digest-Mail (Resend).
@@ -364,6 +368,11 @@ function buildWorker(env = process.env) {
   if (nayaxReconcileJob && Number(runtimeEnv.WORKER_RECONCILE_MS) > 0) {
     schedules.push({ name: nayaxReconcileJob.key, intervalMs: Number(runtimeEnv.WORKER_RECONCILE_MS), kind: 'tenant',
       run: () => nayaxReconcileJob.run() });
+  }
+  // #229: Täglicher Umsatz-Reconciliation-Alarm → per Mandant, dailyAt (nach der Nacht-Aggregation).
+  if (salesReconcileTotalsJob) {
+    schedules.push({ name: salesReconcileTotalsJob.key, dailyAt: env.WORKER_RECONCILE_TOTALS_AT || '06:00', kind: 'tenant',
+      run: () => salesReconcileTotalsJob.run() });
   }
   // WF-Claude-Proposals (n8n: cron 0 30 4 ⇒ täglich 04:30) → per Mandant, dailyAt.
   if (claudeProposalsJob) {
