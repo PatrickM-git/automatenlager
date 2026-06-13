@@ -2416,7 +2416,7 @@ const server = http.createServer(async (req, res) => {
       const healthy = tenantDirectoryHealthy();
       sendJson(res, healthy ? 200 : 503, {
         ok: healthy,
-        build: '2026-06-13-r4', // Deploy-Marker: verifiziert, dass frischer Code im laufenden Container ankommt
+        build: '2026-06-13-r5', // Deploy-Marker: verifiziert, dass frischer Code im laufenden Container ankommt
         tenantDirectoryReady: !!(tenantDirectory && tenantDirectory.isReady()),
         tenantDbReady: !!tenantDb, // #122: Stufe-3-Mandanten-Tür konstruiert (noch nicht konsumiert)
         pgConfigured: !!dashboardV2PgUrl(),
