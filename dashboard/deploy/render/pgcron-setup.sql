@@ -31,10 +31,15 @@ $$;
 -- Helfer: (re)planen. \set-Variablen aus psql werden als :'name' eingesetzt.
 -- Schedule-Matrix (= worker.js, Cron-Doc Slice 0). Live-Motoren (alle 5 Min)
 -- sind idempotent und kurze HTTP-Calls — auf Gratis vertretbar.
+-- psql interpoliert :'VAR' NUR ausserhalb dollar-quotierter Strings; im DO-Block
+-- daher ueber Session-GUCs hereinreichen (vorher per set_config gesetzt).
+SELECT set_config('faltrix.render_url',     :'RENDER_URL',            false);
+SELECT 'trigger-secret gesetzt (verdeckt)' AS info FROM set_config('faltrix.trigger_secret', :'WORKER_TRIGGER_SECRET', false);
+
 DO $cron$
 DECLARE
-  base   text := :'RENDER_URL';
-  secret text := :'WORKER_TRIGGER_SECRET';
+  base   text := current_setting('faltrix.render_url');
+  secret text := current_setting('faltrix.trigger_secret');
   jobs   jsonb := jsonb_build_array(
     -- [key, cron(UTC), Kommentar]
     jsonb_build_array('wf3-nayax-fifo',        '*/5 * * * *',  'WF3 Nayax-Verkäufe (alle 5 Min)'),
@@ -52,6 +57,8 @@ DECLARE
   job_name text;
 BEGIN
   FOR j IN SELECT * FROM jsonb_array_elements(jobs) LOOP
+    -- backup-supabase laeuft weiter auf dem Mini (persistente Platte D:) — nicht in die Cloud planen.
+    CONTINUE WHEN (j->>0) = 'backup-supabase';
     job_name := 'faltrix_' || (j->>0);
     PERFORM cron.unschedule(job_name) WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = job_name);
     PERFORM cron.schedule(
