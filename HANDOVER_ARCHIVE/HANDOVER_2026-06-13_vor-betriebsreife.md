@@ -1,69 +1,7 @@
 # HANDOVER.md
 
 > Update this file at the end of every session. Archive the previous version to `HANDOVER_ARCHIVE/HANDOVER_<date>.md` before overwriting.
-> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-13_vor-betriebsreife.md`.
-
-## Session 2026-06-13 — BETRIEBSREIFE + CLOUD-UMZUG VOLLZOGEN — Cloud ist führend, Mini = warmer Rückfall
-
-> Fokussierter „Betriebsreife"-Block, autonom durchgezogen. **Die App läuft live unter
-> `https://app.faltrix-solutions.de` (Cloudflare → Render `faltrix-dashboard.onrender.com`
-> → Supabase); die Cloud ist jetzt der voll eigenständige, FÜHRENDE Schreiber.** Der Mini
-> läuft bewusst weiter als warmer Rückfall (+ Off-Site-Backup). Memory: `cloud-migration-stand`.
-
-### Erledigt + live verifiziert (2026-06-13)
-- **Resend-Mail:** Domain `faltrix-solutions.de` verifiziert (Cloudflare-DNS: send-MX/SPF +
-  `resend._domainkey` DKIM + `_dmarc`); Custom-SMTP in Supabase Auth (`smtp.resend.com:465`,
-  Absender `noreply@faltrix-solutions.de`); alle 6 Auth-Vorlagen + Security-Notifications auf
-  Deutsch. Zustelltest grün. (Browser-Auto-Übersetzung verfälscht die DNS-Anzeige — per `dig`/
-  Node-DNS gegenprüfen, echtes DNS war korrekt.)
-- **2. Login `lantspeku@gmail.com`:** per Admin-API eingeladen, Invite-Mail (deutsch) delivered;
-  Login-Seite-Fix `5331f90` (`type=invite` wie `recovery`). Partner-Klick steht noch aus.
-- **pg_cron scharf:** `pg_cron`+`pg_net` installiert; `deploy/render/pgcron-setup.sql` gefixt
-  (`:'VAR'` interpoliert NICHT in `DO`-Blöcken → `set_config`/`current_setting`; Secret nicht
-  geechot; `backup-supabase` bleibt auf dem Mini). 10 `faltrix_`-Cron-Jobs aktiv.
-- **Daten-Sync Mini→Supabase:** atomarer Voll-Reload (`pg_dump --data-only` +
-  `session_replication_role=replica` + TRUNCATE + Reload in EINER TX). **WICHTIGE Erkenntnis:**
-  der Mini-Worker schreibt OHNEHIN nach **Supabase** (`@aws-1-…pooler.supabase.com` in der Mini-
-  `.env.local`) — Mini + Cloud teilen DIESELBE DB ⇒ keine Divergenz, Parallelbetrieb nur redundant
-  (Dedup/Watermark/Drive-`move()` schützen).
-- **Juni-GuV = 200,40 € / 152 Stk (Moma-Wahrheit):** zwei Lücken geschlossen — **#228** GuV-
-  Aggregator-Einfrier-Bug (`skipExisting`+`ON CONFLICT DO NOTHING` → spätere Mehrfachverkäufe
-  verworfen) gefixt (Upsert `ON CONFLICT … DO UPDATE … WHERE source='wf8_guv_aggregator'`,
-  Commit `8d34567`, in der Cloud live verifiziert); + 2 fehlende 08.06.-Verkäufe (ohne Nayax-ID,
-  Import übersprang sie) per `sales_transactions`-Insert + `stock_movements`-Abgang nachgetragen.
-- **#229** täglicher Moma↔Verkäufe↔GuV-Reconciliation-Alarm (`lib/jobs/sales-reconcile-totals.js`,
-  Check A Import + Check B Buchung, Mailer-Alarm, Worker + pgcron verdrahtet, 6/6 Unit; `d78489a`).
-  Cloud-Mailer = `resend` ⇒ Alarm kann wirklich mailen. **#230** Arch-Issue (Mehrmandanten-
-  Rechnungseingang → Objektspeicher statt Betreiber-Drive).
-- **wf1/wf9-404 GELÖST:** Wurzelursache = **`ANTHROPIC_API_KEY` fehlte in der Render-Env** (NICHT
-  Drive — Erstdiagnose korrigiert). `createInvoiceIntakeJob`/`createPicklistPollJob` liefern
-  `disabled`, wenn Drive ODER Anthropic fehlt (invoice-intake.js:310, picklist.js:216) → Worker
-  pusht den Schedule nicht (worker.js:389/395) → Trigger 404 `JOB_UNKNOWN`. Diagnose: `/health`
-  temporär um `invoiceDrive/picklistDrive/anthropic/mailer/wf*Cutover` erweitert (r6–r8), danach
-  wieder schlank (r9, `066df33` — kein Konfig-Leak öffentlich). User trug Key in Render ein →
-  `anthropic:live` → Trigger `wf1`/`wf9` = 202, Läufe `success`. Betraf auch claude-proposals.
-- **UMZUG vollzogen:** Cloud-`wf3` lief in Render noch im **Schatten** (`WF3_CUTOVER` fehlte;
-  `WF1_CUTOVER=1` war schon da). User setzte `WF3_CUTOVER=1` → `/health wf3Cutover=1`, manueller
-  Cloud-`wf3`-Lauf 16:14 `success` im Cutover. **Cloud schreibt jetzt Verkäufe + Rechnungen +
-  alles selbst.**
-
-### WF-Env in Render — Mapping (Betreiber-Frage geklärt)
-Nur **WF1/WF3** haben Cutover-Schreibschalter; **WF1/WF9** brauchen zusätzlich einen expliziten
-Mandanten (`WF1_TENANT_ID`/`WF9_TENANT_ID` || `NAYAX_TENANT_ID`, KEIN Single-Registry-Fallback).
-Alle anderen Workflows brauchen KEINE `WF#`-Env: WF0 obsolet · WF2/WF4/WF7 = Dashboard-Endpunkte
-(UI-Knopf) · WF5 (`wf5-monitor`) + WF8 (`wf-guv-aggregate`) = Cron-Jobs via tenantRunner für ALLE
-Mandanten · WF3/filllevel/reconcile lösen den Mandanten über `NAYAX_TENANT_ID`/Single-Tenant.
-
-### Mini = Rückfall (NICHT stilllegen)
-Läuft weiter, redundant + harmlos (gleiche DB). Trägt das **Off-Site-Backup #216** (Platte D:,
-bewusst nicht in der Cloud). Vollständige Mini-Stilllegung = optionaler Folge-Schritt: ZUERST das
-Off-Site-Backup umziehen, DANN `docker stop homelab-worker` (reversibel).
-
-### Offen
-- Partner-Login-Klick (`lantspeku@gmail.com`) — externe Aktion.
-- Optionale Mini-Komplett-Stilllegung (Backup-Umzug zuerst).
-- #230 Umsetzung (Mehrmandanten-Rechnungs-Objektspeicher) — Arch/Backlog. #198/#206 Cutover-Reste
-  sind durch den Cloud-Cutover faktisch eingeholt.
+> Vorige Version archiviert: `HANDOVER_ARCHIVE/HANDOVER_2026-06-12_vor-cloudflare-live.md`.
 
 ## Session 2026-06-12 (Abend, 3) — ETAPPE 3 CLOUDFLARE LIVE — App unter eigener Domain, E2E grün
 
